@@ -11,7 +11,6 @@ from loguru import logger
 
 from pitwallai.agents.radio_intercept.enums import StreamEventType, UrgencyLevel
 from pitwallai.agents.radio_intercept.models import (
-    ConfirmationState,
     DecodedTransmission,
     RehearsalScenario,
     WebSocketEvent,
@@ -100,7 +99,7 @@ class RehearsalEngine:
             "Rehearsal started"
         )
 
-        collector: asyncio.Queue = asyncio.Queue(maxsize=200)
+        collector: asyncio.Queue[WebSocketEvent] = asyncio.Queue(maxsize=200)
         self._decoder.subscribe(collector)
 
         async def _collect_decoded() -> None:

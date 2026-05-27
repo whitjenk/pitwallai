@@ -8,8 +8,8 @@ from typing import Any
 import chromadb
 from chromadb.api.models.Collection import Collection
 from loguru import logger
-from sentence_transformers import SentenceTransformer
 
+from pitwallai.agents.radio_intercept.embedding import EmbeddingCache, get_embedding_model
 from pitwallai.agents.radio_intercept.enums import RadioIntent, StrategicSignal
 from pitwallai.agents.radio_intercept.models import HistoricalRadio
 from pitwallai.agents.radio_intercept import seed_data
@@ -41,6 +41,7 @@ class MockVectorStore:
         self,
         collection_name: str = "f1_radio_history",
         embedding_model: str = "all-MiniLM-L6-v2",
+        embedding_cache_size: int = 512,
     ) -> None:
         """
         Initialize the mock vector store and seed historical transcripts.
@@ -48,11 +49,13 @@ class MockVectorStore:
         Args:
             collection_name: ChromaDB collection name.
             embedding_model: Sentence-transformers model identifier.
+            embedding_cache_size: LRU cache size for query embeddings.
         """
         self._collection_name = collection_name
         self._embedding_model_name = embedding_model
+        self._embedding_cache = EmbeddingCache(max_size=embedding_cache_size)
         self._client = chromadb.Client()
-        self._embedding_model = SentenceTransformer(embedding_model)
+        self._embedding_model = get_embedding_model(embedding_model)
         self._collection: Collection = self._client.get_or_create_collection(
             name=collection_name,
             metadata={"hnsw:space": "cosine"},
@@ -63,12 +66,23 @@ class MockVectorStore:
         """
         Generate embeddings for a batch of texts synchronously.
 
+        Uses an LRU cache for single-text queries (hot path in decode).
+
         Args:
             texts: Transcript strings to embed.
 
         Returns:
             List of embedding vectors.
         """
+        if len(texts) == 1:
+            key = texts[0]
+            cached = self._embedding_cache.get(key)
+            if cached is not None:
+                return [cached]
+            vector = self._embedding_model.encode([key], convert_to_numpy=True)[0].tolist()
+            self._embedding_cache.put(key, vector)
+            return [vector]
+
         embeddings = self._embedding_model.encode(texts, convert_to_numpy=True)
         return embeddings.tolist()
 

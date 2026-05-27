@@ -9,12 +9,15 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from loguru import logger
 from pydantic import BaseModel
 
 from api.rehearsal import SCENARIOS, RehearsalEngine
 from pitwallai.agents.radio_intercept.agent import RadioInterceptAgent
+from pitwallai.agents.radio_intercept.config import PitWallSettings
+from pitwallai.agents.radio_intercept.decode_utils import is_valid_transmission_id
 from pitwallai.agents.radio_intercept.enums import (
     ConfirmationState,
     StreamEventType,
@@ -90,7 +93,11 @@ def _urgency_meets_minimum(level: UrgencyLevel, minimum: str | None) -> bool:
     return level.priority >= min_level.priority
 
 
-def create_app(mode: str = "rehearsal", rehearsal_speed: float = 3.0) -> FastAPI:
+def create_app(
+    mode: str = "rehearsal",
+    rehearsal_speed: float = 3.0,
+    settings: PitWallSettings | None = None,
+) -> FastAPI:
     """
     Create and configure the PitWallAI FastAPI application.
 
@@ -101,12 +108,24 @@ def create_app(mode: str = "rehearsal", rehearsal_speed: float = 3.0) -> FastAPI
     Returns:
         Configured FastAPI instance.
     """
+    pitwall_settings = settings or PitWallSettings.from_env()
+
     app = FastAPI(title="PitWallAI Radio Intercept Decoder", version="1.0")
     app.state.mode = mode
     app.state.rehearsal_speed = rehearsal_speed
+    app.state.settings = pitwall_settings
     app.state.session = SessionState(mode=mode)
     app.state.rehearsal_engine = None
     app.state.pipeline_tasks: list[asyncio.Task[Any]] = []
+    app.state.ws_connections = 0
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=list(pitwall_settings.cors_origins),
+        allow_credentials=True,
+        allow_methods=["GET", "POST"],
+        allow_headers=["*"],
+    )
 
     @app.on_event("startup")
     async def on_startup() -> None:
@@ -119,14 +138,20 @@ def create_app(mode: str = "rehearsal", rehearsal_speed: float = 3.0) -> FastAPI
         log = logger.bind(mode=mode)
         log.info("Initializing PitWallAI components")
 
-        vector_store = MockVectorStore()
-        agent = RadioInterceptAgent()
+        vector_store = MockVectorStore(
+            embedding_cache_size=pitwall_settings.embedding_cache_size,
+        )
+        agent = RadioInterceptAgent(settings=pitwall_settings)
         decoder = RadioInterceptDecoder(agent=agent, vector_store=vector_store)
         decoder._running = True
 
         app.state.vector_store = vector_store
         app.state.agent = agent
         app.state.decoder = decoder
+        log.bind(
+            decode_backend=pitwall_settings.decode_backend.value,
+            llm_enabled=pitwall_settings.llm_enabled,
+        ).info("Decode pipeline configured")
 
         session: SessionState = app.state.session
         if mode == "rehearsal":
@@ -184,10 +209,15 @@ def create_app(mode: str = "rehearsal", rehearsal_speed: float = 3.0) -> FastAPI
             Status payload with mode and session key.
         """
         session: SessionState = app.state.session
+        pitwall_settings: PitWallSettings = app.state.settings
+        agent: RadioInterceptAgent = app.state.agent
         return {
             "status": "ok",
             "mode": app.state.mode,
             "session_key": session.session_key,
+            "decode_backend": pitwall_settings.decode_backend.value,
+            "llm_configured": pitwall_settings.llm_enabled,
+            "llm_model": pitwall_settings.llm_model or None,
         }
 
     @app.get("/dashboard")
@@ -253,6 +283,8 @@ def create_app(mode: str = "rehearsal", rehearsal_speed: float = 3.0) -> FastAPI
         Raises:
             HTTPException: If transmission or intel is not found.
         """
+        if not is_valid_transmission_id(transmission_id):
+            raise HTTPException(status_code=400, detail="Invalid transmission_id format")
         if body.state not in (
             ConfirmationState.ACKNOWLEDGED,
             ConfirmationState.ACTED_ON,
@@ -369,7 +401,13 @@ def create_app(mode: str = "rehearsal", rehearsal_speed: float = 3.0) -> FastAPI
         Args:
             websocket: Connected WebSocket client.
         """
+        pitwall_settings: PitWallSettings = app.state.settings
+        if app.state.ws_connections >= pitwall_settings.ws_max_connections:
+            await websocket.close(code=1008, reason="Too many connections")
+            return
+
         await websocket.accept()
+        app.state.ws_connections += 1
         decoder: RadioInterceptDecoder = app.state.decoder
         queue: asyncio.Queue[WebSocketEvent] = asyncio.Queue(maxsize=100)
         decoder.subscribe(queue)
@@ -380,11 +418,15 @@ def create_app(mode: str = "rehearsal", rehearsal_speed: float = 3.0) -> FastAPI
         try:
             while True:
                 event = await queue.get()
-                await websocket.send_text(event.model_dump_json())
+                payload = event.model_dump_json()
+                if len(payload) > 256_000:
+                    continue
+                await websocket.send_text(payload)
         except WebSocketDisconnect:
             logger.info("WebSocket client disconnected")
         finally:
             decoder.unsubscribe(queue)
+            app.state.ws_connections = max(0, app.state.ws_connections - 1)
 
     return app
 

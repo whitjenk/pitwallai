@@ -13,11 +13,8 @@ import websockets.exceptions
 from loguru import logger
 from pydantic import ValidationError
 
-from pitwallai.agents.radio_intercept.agent import (
-    DecodeRuntimeError,
-    DecodeValidationError,
-    RadioInterceptAgent,
-)
+from pitwallai.agents.radio_intercept.agent import RadioInterceptAgent
+from pitwallai.agents.radio_intercept.errors import DecodeRuntimeError, DecodeValidationError
 from pitwallai.agents.radio_intercept.enums import (
     ConfirmationState,
     RadioIntent,
@@ -322,10 +319,9 @@ class RadioInterceptDecoder:
                 result = await self._agent.decode(msg, self._deps)
                 await self._output_queue.put(result)
             except DecodeValidationError as exc:
-                transcript = msg.raw_transcript if msg else "unknown"
-                self._log.bind(transcript=transcript).error(
-                    "Decode validation error, skipping: {}", exc
-                )
+                self._log.bind(
+                    driver=msg.driver_code if msg else "unknown",
+                ).error("Decode validation error, skipping: {}", exc)
             except DecodeRuntimeError as exc:
                 self._log.error("Decode runtime error, skipping: {}", exc)
             finally:

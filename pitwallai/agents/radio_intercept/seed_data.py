@@ -392,8 +392,8 @@ DRIVER_CONTEXT: dict[str, dict] = {
     },
 }
 
-_MONACO_SESSION_KEY = 9468
-_MONACO_BASE = datetime(2024, 5, 26, 15, 12, 0, tzinfo=UTC)
+_MONACO_SESSION_KEY = 9158
+_MONACO_BASE = datetime(2024, 5, 26, 14, 35, 0, tzinfo=UTC)
 
 
 def _monaco_event(
@@ -426,101 +426,24 @@ MONACO_REHEARSAL_SCENARIO = RehearsalScenario(
         "while Norris fights critical rear tyre degradation before the pit resolution."
     ),
     events=[
+        _monaco_event(0, 34, 1, "VER", "Red Bull Racing", "Max, gap to Lando is 2.8 and stable. Tyre delta is plus 0.4 in your favour."),
+        _monaco_event(52, 35, 16, "LEC", "Ferrari", "Charles, front left is graining heavily. Sector two is getting worse. We need to talk about the window."),
+        _monaco_event(108, 35, 4, "NOR", "McLaren", "What's the gap to Verstappen? And what are Ferrari doing?"),
+        _monaco_event(165, 36, 4, "NOR", "McLaren", "Copy. We're managing. Tyres feel okay. Just need the gap."),
+        _monaco_event(220, 36, 16, "LEC", "Ferrari", "Box this lap? What's the gap to traffic? I'm ready if you say so."),
+        _monaco_event(258, 37, 16, "LEC", "Ferrari", "Box box box."),
+        _monaco_event(310, 37, 1, "VER", "Red Bull Racing", "Understood. Ferrari is in. What do we do? Do we cover or go long?"),
+        _monaco_event(355, 38, 81, "PIA", "McLaren", "Tyres are okay here. Rears are warm. I can push if you need."),
         _monaco_event(
-            0,
-            34,
-            4,
-            "NOR",
-            "McLaren",
-            "Lap 34 — gap to Leclerc ahead is 2.3 seconds. What's the interval behind?",
-        ),
-        _monaco_event(
-            52,
-            35,
-            63,
-            "RUS",
-            "Mercedes",
-            "Lap 35 — gap to car ahead is 4.1. Is Norris pitting this lap?",
-        ),
-        _monaco_event(
-            98,
-            35,
-            16,
-            "LEC",
-            "Ferrari",
-            "Lap 35 — tyres are starting to go off. Rear is sliding in turn six.",
-        ),
-        _monaco_event(
-            175,
-            36,
-            4,
-            "NOR",
-            "McLaren",
-            "Lap 36 — copy. Conserve tyres. Lift and coast into turn one, we are going long.",
-        ),
-        _monaco_event(
-            230,
-            37,
-            55,
-            "SAI",
-            "Ferrari",
-            "Lap 37 — prepare box. Softs are ready. Leclerc will be first stop.",
-        ),
-        _monaco_event(
-            310,
-            37,
-            81,
-            "PIA",
-            "McLaren",
-            "Lap 37 — Ferrari pit crew is active. Leclerc boxing next lap, repeat, Leclerc boxing next lap.",
-        ),
-        _monaco_event(
-            375,
+            398,
             38,
-            1,
-            "VER",
-            "Red Bull Racing",
-            "Lap 38 — copy Ferrari stop. We stay out. Gap to Norris is 1.8 and stable.",
-        ),
-        _monaco_event(
-            430,
-            39,
-            81,
-            "PIA",
-            "McLaren",
-            "Lap 39 — stay out. Our window opens lap 42. Norris holds P2.",
-        ),
-        _monaco_event(
-            505,
-            40,
             4,
             "NOR",
             "McLaren",
-            "Lap 40 — tyres are gone, mate! Rear is completely dead. I cannot push.",
+            "These tyres are gone, mate. Fronts are completely dead. I've got nothing through the chicane. You need to box me, I can't hold this.",
         ),
-        _monaco_event(
-            570,
-            41,
-            4,
-            "NOR",
-            "McLaren",
-            "Lap 41 — box, box, box! Pit confirm. Box for hards now.",
-        ),
-        _monaco_event(
-            640,
-            42,
-            81,
-            "PIA",
-            "McLaren",
-            "Lap 42 — box box box. Pit confirm. Hard tyres.",
-        ),
-        _monaco_event(
-            715,
-            43,
-            4,
-            "NOR",
-            "McLaren",
-            "Lap 43 — push, push, push! Gap behind is 3.2. Clean air now, deploy full ERS.",
-        ),
+        _monaco_event(441, 39, 4, "NOR", "McLaren", "Box box box. Understood."),
+        _monaco_event(482, 39, 4, "NOR", "McLaren", "Okay. New tyres feel good. What's the gap to Leclerc? Can we make this work?"),
+        _monaco_event(534, 40, 4, "NOR", "McLaren", "Copy 3.1 seconds. Push push push. Let's go."),
     ],
 )

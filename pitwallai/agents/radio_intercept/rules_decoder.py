@@ -8,6 +8,7 @@ import time
 from collections import Counter
 
 from pitwallai.agents.radio_intercept.decode_utils import finalize_transmission
+from pitwallai.agents.radio_intercept.monaco_profiles import apply_monaco_profile
 from pitwallai.agents.radio_intercept.enums import RadioIntent, StrategicSignal, UrgencyLevel
 from pitwallai.agents.radio_intercept.models import (
     AgentDependencies,
@@ -200,4 +201,7 @@ class RulesDecoder:
             model_reasoning=reasoning,
             lap_number=message.lap_number,
         )
+        profiled = apply_monaco_profile(message, draft)
+        if profiled is not None:
+            draft = profiled
         return finalize_transmission(draft, message, deps, started)

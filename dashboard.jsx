@@ -22,6 +22,11 @@
     @keyframes pulse-red { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
     .pulse-critical { animation: pulse-red 0.8s ease-in-out infinite; }
     .feed-scroll { mask-image: linear-gradient(to bottom, transparent, black 12%, black 88%, transparent); }
+    .driver-dot { transition: all 0.8s ease; }
+    @keyframes pinAppear { from { transform: scale(0); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+    .pin-appear { animation: pinAppear 0.3s ease-out; }
+    @keyframes pinPulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.4); } }
+    .pin-pulse { animation: pinAppear 0.3s ease-out, pinPulse 1.5s ease-in-out infinite; transform-origin: center; transform-box: fill-box; }
   </style>
 </head>
 <body>
@@ -65,6 +70,121 @@
       return "";
     }
 
+    window.sendPrompt = window.sendPrompt || function (text) {
+      console.info("[PitWallAI] sendPrompt:", text);
+    };
+
+    const MONACO_WAYPOINTS = [
+      [30, 110], [40, 80], [55, 55], [80, 40], [110, 35], [140, 38], [165, 50],
+      [180, 65], [185, 85], [178, 105], [160, 115], [148, 125], [150, 140],
+      [162, 155], [170, 170], [165, 185], [150, 195], [130, 200], [110, 198],
+      [95, 190], [85, 178], [78, 162], [72, 148], [60, 138], [42, 130], [30, 118],
+    ];
+    const DRIVER_OFFSETS = { NOR: 0.0, PIA: 0.15, VER: 0.3, LEC: 0.45, HAM: 0.6, RUS: 0.75 };
+    const PIN_COLORS = { LOW: "#484f58", MEDIUM: "#58a6ff", HIGH: "#d29922", CRITICAL: "#f85149" };
+
+    function getPositionOnPath(lapFraction, driverOffset = 0) {
+      const t = ((lapFraction + driverOffset) % 1 + 1) % 1;
+      const pts = MONACO_WAYPOINTS;
+      const segCount = pts.length - 1;
+      const scaled = t * segCount;
+      const idx = Math.floor(scaled) % segCount;
+      const frac = scaled - Math.floor(scaled);
+      const [x1, y1] = pts[idx];
+      const [x2, y2] = pts[idx + 1];
+      return { x: x1 + (x2 - x1) * frac, y: y1 + (y2 - y1) * frac };
+    }
+
+    function MonacoTrackMap({ transmissions, driverPositions, mode, currentLap, teamColors }) {
+      const [pins, setPins] = useState([]);
+      const [hovered, setHovered] = useState(null);
+      const [tooltip, setTooltip] = useState(null);
+      const pinIdRef = useRef(0);
+      const pathD = `M ${MONACO_WAYPOINTS.map(([x, y]) => `${x},${y}`).join(" L ")} Z`;
+      const lapFraction = Math.min(1, Math.max(0, (currentLap - 34) / 6));
+
+      const computedPositions = useMemo(() => {
+        if (driverPositions && Object.keys(driverPositions).length > 0) return driverPositions;
+        const pos = {};
+        Object.entries(DRIVER_OFFSETS).forEach(([code, offset]) => {
+          pos[code] = getPositionOnPath(lapFraction, offset);
+        });
+        return pos;
+      }, [driverPositions, lapFraction]);
+
+      useEffect(() => {
+        const latest = transmissions[0];
+        if (!latest?.driver_code) return;
+        const pos = computedPositions[latest.driver_code] || getPositionOnPath(lapFraction, DRIVER_OFFSETS[latest.driver_code] || 0);
+        const urgency = latest.urgency_level || "LOW";
+        const id = `pin-${pinIdRef.current++}`;
+        const lifetimeMs = urgency === "CRITICAL" ? null : urgency === "HIGH" ? 20000 : 8000;
+        setPins((prev) => [{ id, x: pos.x, y: pos.y, urgency, transcript: latest.raw_transcript, driver: latest.driver_code, intent: latest.decoded_intent, clicked: false, createdAt: Date.now() }, ...prev].slice(0, 12));
+        if (lifetimeMs) {
+          const timer = setTimeout(() => setPins((prev) => prev.filter((p) => p.id !== id)), lifetimeMs);
+          return () => clearTimeout(timer);
+        }
+      }, [transmissions, computedPositions, lapFraction]);
+
+      useEffect(() => {
+        const interval = setInterval(() => {
+          const now = Date.now();
+          setPins((prev) => {
+            let next = prev.filter((p) => p.urgency === "CRITICAL" || (p.urgency === "HIGH" ? now - p.createdAt < 20000 : now - p.createdAt < 8000));
+            if (next.length > 12) {
+              const crit = next.filter((p) => p.urgency === "CRITICAL");
+              const rest = next.filter((p) => p.urgency !== "CRITICAL");
+              next = [...crit, ...rest.slice(0, 12 - crit.length)];
+            }
+            return next;
+          });
+        }, 1000);
+        return () => clearInterval(interval);
+      }, []);
+
+      return (
+        <div className="rounded-lg border p-2" style={{ background: COLORS.surface, borderColor: COLORS.border, maxHeight: 240 }}>
+          <h2 className="text-xs font-semibold tracking-wider mb-1" style={{ color: COLORS.muted }}>MONACO TRACK MAP · {mode.toUpperCase()} · L{currentLap}</h2>
+          <div style={{ position: "relative", height: 200 }}>
+            <svg viewBox="0 0 300 220" width="100%" height="200">
+              <rect width="300" height="220" fill={COLORS.bg} />
+              <path d={pathD} fill="none" stroke="#2a3a4a" strokeWidth="8" strokeLinejoin="round" />
+              <path d={pathD} fill="none" stroke="#1a2530" strokeWidth="4" strokeLinejoin="round" />
+              <line x1="165" y1="50" x2="180" y2="65" stroke={COLORS.orange} strokeWidth="2" strokeDasharray="4 3" />
+              <text x="172" y="52" fill={COLORS.orange} fontSize="7">PIT</text>
+              <text x="175" y="78" fill={COLORS.muted} fontSize="7">TUNNEL</text>
+              <text x="148" y="132" fill={COLORS.muted} fontSize="7">LOEWS</text>
+              <text x="158" y="172" fill={COLORS.muted} fontSize="7">POOL</text>
+              <text x="90" y="200" fill={COLORS.muted} fontSize="7">RASCASSE</text>
+              {pins.map((pin) => (
+                <g key={pin.id} onClick={() => { if (pin.urgency === "CRITICAL") setPins((p) => p.map((x) => x.id === pin.id ? { ...x, clicked: true } : x)); window.sendPrompt(pin.transcript); }}
+                  style={{ cursor: "pointer", opacity: pin.clicked ? 0.3 : 1 }} className={pin.urgency === "CRITICAL" && !pin.clicked ? "pin-pulse" : "pin-appear"}>
+                  <circle cx={pin.x} cy={pin.y} r="8" fill={PIN_COLORS[pin.urgency]} opacity="0.85" />
+                  <circle cx={pin.x} cy={pin.y} r="4" fill={PIN_COLORS[pin.urgency]} />
+                </g>
+              ))}
+              {Object.entries(computedPositions).map(([code, pos]) => (
+                <g key={code} className="driver-dot" onMouseEnter={() => setHovered(code)} onMouseLeave={() => { setHovered(null); setTooltip(null); }}
+                  onMouseMove={(e) => setTooltip({ code, x: e.nativeEvent.offsetX, y: e.nativeEvent.offsetY })}>
+                  <circle cx={pos.x} cy={pos.y} r="5" fill={teamColors[code] || TEAM_COLORS[code] || COLORS.orange} stroke="#fff" strokeWidth="0.5" />
+                  <text x={pos.x} y={pos.y + 2} textAnchor="middle" fill="#fff" fontSize="5" fontWeight="bold">{code}</text>
+                </g>
+              ))}
+            </svg>
+            {tooltip && hovered && (
+              <div className="text-[10px] font-mono px-2 py-1 rounded" style={{ position: "absolute", left: tooltip.x + 8, top: tooltip.y + 8, background: COLORS.elevated, border: `1px solid ${COLORS.border}`, pointerEvents: "none", zIndex: 10 }}>
+                {hovered} · {transmissions.find((t) => t.driver_code === hovered)?.decoded_intent || "—"}
+              </div>
+            )}
+          </div>
+          <div className="flex gap-4 mt-1 justify-center" style={{ fontSize: 9, color: COLORS.muted }}>
+            <span><span style={{ color: COLORS.orange }}>●</span> McLaren</span>
+            <span><span style={{ color: "#2a3a4a" }}>●</span> Track</span>
+          </div>
+        </div>
+      );
+    }
+
     function App() {
       const [transmissions, setTransmissions] = useState([]);
       const [intelItems, setIntelItems] = useState([]);
@@ -78,6 +198,7 @@
       const [rehearsalSpeed, setRehearsalSpeed] = useState(3);
       const [utcClock, setUtcClock] = useState(new Date());
       const [evidenceLog, setEvidenceLog] = useState([]);
+      const [driverPositions, setDriverPositions] = useState({});
       const wsRef = useRef(null);
 
       useEffect(() => {
@@ -107,7 +228,18 @@
           if (type === "SYSTEM_STATUS") {
             setSession((s) => ({ ...s, ...payload, mode: payload.mode || s.mode }));
             if (payload.rehearsal_progress) setRehearsalProgress(payload.rehearsal_progress);
+            if (payload.driver_positions) {
+              const map = {};
+              payload.driver_positions.forEach((p) => { map[p.driver_code] = { x: p.x, y: p.y }; });
+              setDriverPositions(map);
+            }
             return;
+          }
+
+          if (payload?.driver_positions) {
+            const map = {};
+            payload.driver_positions.forEach((p) => { map[p.driver_code] = { x: p.x, y: p.y }; });
+            setDriverPositions(map);
           }
 
           if (type === "TRANSMISSION_DECODED") {
@@ -319,8 +451,15 @@
               </div>
             </section>
 
-            {/* Right — Metrics */}
+            {/* Right — Track + Metrics */}
             <section className="col-span-4 flex flex-col gap-3">
+              <MonacoTrackMap
+                transmissions={transmissions.slice(0, 20)}
+                driverPositions={driverPositions}
+                mode={session.mode || "rehearsal"}
+                currentLap={rehearsalProgress.current_lap || session.current_lap || 34}
+                teamColors={TEAM_COLORS}
+              />
               <div className={`rounded-lg border p-3 ${latencyFlash ? "ring-2 ring-red-500" : ""}`} style={{ background: COLORS.surface, borderColor: COLORS.border }}>
                 <h2 className="text-xs font-semibold tracking-wider mb-1" style={{ color: COLORS.muted }}>LATENCY GAUGE</h2>
                 <LatencyGauge value={lastLatency} avg={avgLatency} flash={latencyFlash} />

@@ -210,7 +210,6 @@ def create_app(
         """
         session: SessionState = app.state.session
         pitwall_settings: PitWallSettings = app.state.settings
-        agent: RadioInterceptAgent = app.state.agent
         return {
             "status": "ok",
             "mode": app.state.mode,

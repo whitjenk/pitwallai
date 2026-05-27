@@ -68,7 +68,7 @@ class LLMDecoder:
     """
     LLM decoder using Pydantic AI with any supported provider.
 
-  Only invoked when explicitly configured; not used in default rules mode.
+    Only invoked when explicitly configured; not used in default rules mode.
     """
 
     def __init__(self, model_id: str, semaphore: asyncio.Semaphore | None = None) -> None:

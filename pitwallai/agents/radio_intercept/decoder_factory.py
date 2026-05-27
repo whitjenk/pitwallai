@@ -86,19 +86,24 @@ class HybridDecoder:
         Raises:
             ValueError: If LLM backend requested without model configured.
         """
-        self._settings = settings
+        effective = settings
+        if settings.decode_backend in (DecodeBackend.LLM, DecodeBackend.HYBRID) and not settings.llm_enabled:
+            if settings.decode_backend == DecodeBackend.LLM:
+                raise ValueError(
+                    "PITWALL_LLM_MODEL must be set for decode backend 'llm' "
+                    "(e.g. openai:gpt-4o-mini)"
+                )
+            logger.warning("Hybrid mode without LLM model — running rules-only")
+            effective = replace(settings, decode_backend=DecodeBackend.RULES)
+
+        self._settings = effective
         self._rules = RulesDecoder()
-        self._cache = _DecodeCache(settings.decode_dedup_ttl_seconds)
+        self._cache = _DecodeCache(effective.decode_dedup_ttl_seconds)
         self._llm: LLMDecoder | None = None
 
-        if settings.decode_backend in (DecodeBackend.LLM, DecodeBackend.HYBRID):
-            if not settings.llm_enabled:
-                raise ValueError(
-                    "PITWALL_LLM_MODEL must be set for decode backend "
-                    f"'{settings.decode_backend.value}' (e.g. openai:gpt-4o-mini)"
-                )
-            semaphore = asyncio.Semaphore(settings.llm_max_concurrency)
-            self._llm = LLMDecoder(settings.llm_model, semaphore=semaphore)
+        if effective.decode_backend in (DecodeBackend.LLM, DecodeBackend.HYBRID) and effective.llm_enabled:
+            semaphore = asyncio.Semaphore(effective.llm_max_concurrency)
+            self._llm = LLMDecoder(effective.llm_model, semaphore=semaphore)
 
     async def decode(
         self,

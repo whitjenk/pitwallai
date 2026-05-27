@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 
 import uvicorn
 from loguru import logger
@@ -69,44 +70,15 @@ def build_settings(args: argparse.Namespace) -> PitWallSettings:
     """
     settings = PitWallSettings.from_env()
     if args.decode_backend is not None:
-        settings = PitWallSettings(
+        settings = replace(
+            settings,
             decode_backend=DecodeBackend(args.decode_backend),
             llm_model=args.llm_model or settings.llm_model,
-            llm_escalation_threshold=settings.llm_escalation_threshold,
-            llm_max_concurrency=settings.llm_max_concurrency,
-            decode_dedup_ttl_seconds=settings.decode_dedup_ttl_seconds,
-            embedding_cache_size=settings.embedding_cache_size,
-            bind_host=args.bind_host or settings.bind_host,
-            cors_origins=settings.cors_origins,
-            ws_max_connections=settings.ws_max_connections,
-            log_transcripts=settings.log_transcripts,
         )
     elif args.llm_model is not None:
-        settings = PitWallSettings(
-            decode_backend=settings.decode_backend,
-            llm_model=args.llm_model,
-            llm_escalation_threshold=settings.llm_escalation_threshold,
-            llm_max_concurrency=settings.llm_max_concurrency,
-            decode_dedup_ttl_seconds=settings.decode_dedup_ttl_seconds,
-            embedding_cache_size=settings.embedding_cache_size,
-            bind_host=args.bind_host or settings.bind_host,
-            cors_origins=settings.cors_origins,
-            ws_max_connections=settings.ws_max_connections,
-            log_transcripts=settings.log_transcripts,
-        )
-    elif args.bind_host is not None:
-        settings = PitWallSettings(
-            decode_backend=settings.decode_backend,
-            llm_model=settings.llm_model,
-            llm_escalation_threshold=settings.llm_escalation_threshold,
-            llm_max_concurrency=settings.llm_max_concurrency,
-            decode_dedup_ttl_seconds=settings.decode_dedup_ttl_seconds,
-            embedding_cache_size=settings.embedding_cache_size,
-            bind_host=args.bind_host,
-            cors_origins=settings.cors_origins,
-            ws_max_connections=settings.ws_max_connections,
-            log_transcripts=settings.log_transcripts,
-        )
+        settings = replace(settings, llm_model=args.llm_model)
+    if args.bind_host is not None:
+        settings = replace(settings, bind_host=args.bind_host)
     return settings
 
 
@@ -123,6 +95,18 @@ def main() -> None:
             "LLM backend requested but PITWALL_LLM_MODEL is unset — "
             "set e.g. PITWALL_LLM_MODEL=openai:gpt-4o-mini or use --decode-backend rules"
         )
+    if settings.decode_backend != DecodeBackend.RULES:
+        if not settings.llm_budget_acknowledged:
+            print(
+                "WARNING: LLM/hybrid requires PITWALL_LLM_BUDGET_ACK=1 — "
+                "running rules-only until acknowledged (.env.example)"
+            )
+        else:
+            print(
+                f"LLM budget caps: {settings.llm_max_calls_per_session} calls/session, "
+                f"${settings.llm_max_estimated_usd_per_session:.2f}/session, "
+                f"${settings.llm_max_estimated_usd_per_day:.2f}/day"
+            )
 
     app = create_app(mode=args.mode, rehearsal_speed=args.speed, settings=settings)
 

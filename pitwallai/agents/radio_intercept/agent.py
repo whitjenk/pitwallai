@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pitwallai.agents.radio_intercept.config import DecodeBackend, PitWallSettings
 from pitwallai.agents.radio_intercept.decoder_factory import HybridDecoder, create_decoder
+from pitwallai.agents.radio_intercept.llm_budget import LLMBudgetGuard
 from pitwallai.agents.radio_intercept.errors import DecodeRuntimeError, DecodeValidationError
 from pitwallai.agents.radio_intercept.models import AgentDependencies, DecodedTransmission, RadioRawMessage
 from pitwallai.agents.radio_intercept.prompts import build_system_prompt
@@ -51,6 +52,11 @@ class RadioInterceptAgent:
     def settings(self) -> PitWallSettings:
         """Return active settings."""
         return self._settings
+
+    @property
+    def budget_guard(self) -> LLMBudgetGuard:
+        """Return the LLM budget guard (for metrics and health endpoints)."""
+        return self._decoder.budget_guard
 
     async def decode(
         self,

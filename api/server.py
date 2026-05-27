@@ -210,6 +210,8 @@ def create_app(
         """
         session: SessionState = app.state.session
         pitwall_settings: PitWallSettings = app.state.settings
+        agent: RadioInterceptAgent = app.state.agent
+        budget_snap = await agent.budget_guard.snapshot(session.session_key)
         return {
             "status": "ok",
             "mode": app.state.mode,
@@ -217,7 +219,27 @@ def create_app(
             "decode_backend": pitwall_settings.decode_backend.value,
             "llm_configured": pitwall_settings.llm_enabled,
             "llm_model": pitwall_settings.llm_model or None,
+            "llm_budget_acknowledged": pitwall_settings.llm_budget_acknowledged,
+            "llm_budget": agent.budget_guard.to_public_dict(budget_snap),
         }
+
+    @app.get("/api/budget")
+    async def budget_status(
+        session_key: int | None = Query(default=None),
+    ) -> dict[str, Any]:
+        """
+        Return LLM budget utilization and configured caps.
+
+        Args:
+            session_key: Optional session to scope per-session counters.
+
+        Returns:
+            Budget snapshot and limits.
+        """
+        agent: RadioInterceptAgent = app.state.agent
+        key = session_key if session_key is not None else app.state.session.session_key
+        snap = await agent.budget_guard.snapshot(key)
+        return agent.budget_guard.to_public_dict(snap)
 
     @app.get("/dashboard")
     async def dashboard() -> FileResponse:
@@ -411,7 +433,7 @@ def create_app(
         queue: asyncio.Queue[WebSocketEvent] = asyncio.Queue(maxsize=100)
         decoder.subscribe(queue)
 
-        status_event = _build_system_status(app)
+        status_event = await _build_system_status(app)
         await websocket.send_text(status_event.model_dump_json())
 
         try:
@@ -451,7 +473,7 @@ async def _handle_session_event(app: FastAPI, event: WebSocketEvent) -> None:
         session.session_key = transmission.session_key
 
 
-def _build_system_status(app: FastAPI) -> WebSocketEvent:
+async def _build_system_status(app: FastAPI) -> WebSocketEvent:
     """
     Build a SYSTEM_STATUS WebSocket event from current application state.
 
@@ -464,6 +486,8 @@ def _build_system_status(app: FastAPI) -> WebSocketEvent:
     session: SessionState = app.state.session
     decoder: RadioInterceptDecoder = app.state.decoder
     engine: RehearsalEngine | None = app.state.rehearsal_engine
+    agent: RadioInterceptAgent = app.state.agent
+    budget_snap = await agent.budget_guard.snapshot(session.session_key)
     payload: dict[str, Any] = {
         "mode": session.mode,
         "session_key": session.session_key,
@@ -472,6 +496,7 @@ def _build_system_status(app: FastAPI) -> WebSocketEvent:
         "active_drivers": sorted(session.active_drivers),
         "current_lap": session.current_lap,
         "collection_size": decoder._vector_store.collection_size(),
+        "llm_budget": agent.budget_guard.to_public_dict(budget_snap),
     }
     if engine is not None:
         payload["rehearsal_progress"] = engine.get_progress()

@@ -31,6 +31,15 @@ class PitWallSettings:
         cors_origins: Allowed CORS origins (comma-separated in env).
         ws_max_connections: Maximum simultaneous dashboard WebSocket clients.
         log_transcripts: Whether to log full radio transcripts.
+        llm_budget_acknowledged: Explicit opt-in for paid LLM usage.
+        llm_max_calls_per_session: Hard cap on LLM calls per session_key.
+        llm_max_calls_per_minute: Rolling per-minute LLM call cap.
+        llm_max_calls_per_hour: Hourly LLM call cap.
+        llm_max_calls_per_day: Daily LLM call cap.
+        llm_max_estimated_usd_per_session: Estimated USD cap per session.
+        llm_max_estimated_usd_per_day: Estimated USD cap per UTC day.
+        llm_estimated_cost_per_call_usd: Conservative cost estimate per LLM call.
+        llm_budget_cooldown_seconds: Cooldown after any cap breach.
     """
 
     decode_backend: DecodeBackend
@@ -43,6 +52,15 @@ class PitWallSettings:
     cors_origins: tuple[str, ...]
     ws_max_connections: int
     log_transcripts: bool
+    llm_budget_acknowledged: bool
+    llm_max_calls_per_session: int
+    llm_max_calls_per_minute: int
+    llm_max_calls_per_hour: int
+    llm_max_calls_per_day: int
+    llm_max_estimated_usd_per_session: float
+    llm_max_estimated_usd_per_day: float
+    llm_estimated_cost_per_call_usd: float
+    llm_budget_cooldown_seconds: int
 
     @classmethod
     def from_env(cls) -> PitWallSettings:
@@ -61,6 +79,13 @@ class PitWallSettings:
         cors = os.getenv("PITWALL_CORS_ORIGINS", "http://localhost:8000,http://127.0.0.1:8000")
         origins = tuple(origin.strip() for origin in cors.split(",") if origin.strip())
 
+        budget_ack = os.getenv("PITWALL_LLM_BUDGET_ACK", "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+            "i_accept",
+        )
+
         return cls(
             decode_backend=backend,
             llm_model=os.getenv("PITWALL_LLM_MODEL", "").strip(),
@@ -72,6 +97,21 @@ class PitWallSettings:
             cors_origins=origins,
             ws_max_connections=max(1, int(os.getenv("PITWALL_WS_MAX_CONNECTIONS", "32"))),
             log_transcripts=os.getenv("PITWALL_LOG_TRANSCRIPTS", "false").lower() == "true",
+            llm_budget_acknowledged=budget_ack,
+            llm_max_calls_per_session=max(0, int(os.getenv("PITWALL_LLM_MAX_CALLS_PER_SESSION", "12"))),
+            llm_max_calls_per_minute=max(1, int(os.getenv("PITWALL_LLM_MAX_CALLS_PER_MINUTE", "4"))),
+            llm_max_calls_per_hour=max(1, int(os.getenv("PITWALL_LLM_MAX_CALLS_PER_HOUR", "25"))),
+            llm_max_calls_per_day=max(1, int(os.getenv("PITWALL_LLM_MAX_CALLS_PER_DAY", "75"))),
+            llm_max_estimated_usd_per_session=float(
+                os.getenv("PITWALL_LLM_MAX_USD_PER_SESSION", "0.50")
+            ),
+            llm_max_estimated_usd_per_day=float(os.getenv("PITWALL_LLM_MAX_USD_PER_DAY", "2.00")),
+            llm_estimated_cost_per_call_usd=float(
+                os.getenv("PITWALL_LLM_COST_PER_CALL_USD", "0.02")
+            ),
+            llm_budget_cooldown_seconds=max(
+                0, int(os.getenv("PITWALL_LLM_BUDGET_COOLDOWN_SECONDS", "300"))
+            ),
         )
 
     @property

@@ -12,6 +12,7 @@ from pydantic import ValidationError
 from pydantic_ai import Agent, RunContext
 
 from pitwallai.agents.radio_intercept.errors import DecodeRuntimeError, DecodeValidationError
+from pitwallai.agents.radio_intercept.llm_budget import LLMBudgetGuard
 from pitwallai.agents.radio_intercept.prompts import build_system_prompt
 from pitwallai.agents.radio_intercept.decode_utils import finalize_transmission
 from pitwallai.agents.radio_intercept.models import (
@@ -71,17 +72,24 @@ class LLMDecoder:
     Only invoked when explicitly configured; not used in default rules mode.
     """
 
-    def __init__(self, model_id: str, semaphore: asyncio.Semaphore | None = None) -> None:
+    def __init__(
+        self,
+        model_id: str,
+        semaphore: asyncio.Semaphore | None = None,
+        budget_guard: LLMBudgetGuard | None = None,
+    ) -> None:
         """
         Initialize the LLM decoder.
 
         Args:
             model_id: Full Pydantic AI model identifier.
             semaphore: Optional concurrency limiter for API calls.
+            budget_guard: Optional budget guard (checked by HybridDecoder before calls).
         """
         self._model_id = model_id
         self._agent = _create_llm_agent(model_id)
         self._semaphore = semaphore
+        self._budget_guard = budget_guard
 
     async def decode(
         self,

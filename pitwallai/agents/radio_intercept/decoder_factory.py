@@ -11,6 +11,7 @@ from typing import Protocol
 from loguru import logger
 
 from pitwallai.agents.radio_intercept.config import DecodeBackend, PitWallSettings
+from pitwallai.agents.radio_intercept.llm_budget import LLMBudgetGuard
 from pitwallai.agents.radio_intercept.llm_decoder import LLMDecoder
 from pitwallai.agents.radio_intercept.models import AgentDependencies, DecodedTransmission, RadioRawMessage
 from pitwallai.agents.radio_intercept.rules_decoder import RulesDecoder
@@ -96,14 +97,31 @@ class HybridDecoder:
             logger.warning("Hybrid mode without LLM model — running rules-only")
             effective = replace(settings, decode_backend=DecodeBackend.RULES)
 
+        if LLMBudgetGuard.blocks_llm_without_opt_in(effective):
+            logger.error(
+                "LLM/hybrid blocked: set PITWALL_LLM_BUDGET_ACK=1 after reviewing budget caps "
+                "in .env.example (default rules-only is free)"
+            )
+            effective = replace(effective, decode_backend=DecodeBackend.RULES)
+
         self._settings = effective
         self._rules = RulesDecoder()
         self._cache = _DecodeCache(effective.decode_dedup_ttl_seconds)
+        self._budget = LLMBudgetGuard(effective)
         self._llm: LLMDecoder | None = None
 
         if effective.decode_backend in (DecodeBackend.LLM, DecodeBackend.HYBRID) and effective.llm_enabled:
             semaphore = asyncio.Semaphore(effective.llm_max_concurrency)
-            self._llm = LLMDecoder(effective.llm_model, semaphore=semaphore)
+            self._llm = LLMDecoder(
+                effective.llm_model,
+                semaphore=semaphore,
+                budget_guard=self._budget,
+            )
+            logger.bind(
+                max_session_calls=effective.llm_max_calls_per_session,
+                max_usd_session=effective.llm_max_estimated_usd_per_session,
+                max_usd_day=effective.llm_max_estimated_usd_per_day,
+            ).info("LLM enabled with budget guardrails active")
 
     async def decode(
         self,
@@ -127,13 +145,12 @@ class HybridDecoder:
 
         backend = self._settings.decode_backend
 
-        if backend == DecodeBackend.LLM:
-            assert self._llm is not None
-            result = await self._llm.decode(message, deps)
-            self._cache.put(key, result)
-            return result
-
         rules_result = await self._rules.decode(message, deps)
+
+        if backend == DecodeBackend.LLM:
+            llm_result = await self._try_llm(message, deps, fallback=rules_result)
+            self._cache.put(key, llm_result)
+            return llm_result
 
         should_escalate = (
             backend == DecodeBackend.HYBRID
@@ -144,13 +161,52 @@ class HybridDecoder:
             logger.bind(
                 driver=message.driver_code,
                 confidence=rules_result.confidence_score,
-            ).debug("Escalating low-confidence decode to LLM")
-            result = await self._llm.decode(message, deps)
+            ).debug("Considering LLM escalation for low-confidence decode")
+            result = await self._try_llm(message, deps, fallback=rules_result)
             self._cache.put(key, result)
             return result
 
         self._cache.put(key, rules_result)
         return rules_result
+
+    async def _try_llm(
+        self,
+        message: RadioRawMessage,
+        deps: AgentDependencies,
+        *,
+        fallback: DecodedTransmission,
+    ) -> DecodedTransmission:
+        """
+        Attempt LLM decode if budget allows; otherwise return rules fallback.
+
+        Args:
+            message: Raw radio message.
+            deps: Shared dependencies.
+            fallback: Rules decode to use when budget denies LLM.
+
+        Returns:
+            LLM decode or fallback.
+        """
+        if self._llm is None:
+            return fallback
+
+        budget = await self._budget.check(message.session_key)
+        if not budget.allowed:
+            logger.bind(
+                driver=message.driver_code,
+                session=message.session_key,
+                reason=budget.deny_reason,
+            ).info("LLM call blocked by budget guard — using rules decode")
+            return fallback
+
+        result = await self._llm.decode(message, deps)
+        await self._budget.record(message.session_key)
+        return result
+
+    @property
+    def budget_guard(self) -> LLMBudgetGuard:
+        """Return the LLM budget guard for health/metrics endpoints."""
+        return self._budget
 
 
 def create_decoder(

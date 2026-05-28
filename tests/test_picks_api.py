@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -150,3 +151,32 @@ def test_picks_require_server_key_config(picks_app: TestClient) -> None:
 def test_season_recap_invalid_token_returns_404(picks_app: TestClient) -> None:
     response = picks_app.get("/api/season/not-a-valid-token")
     assert response.status_code == 404
+
+
+def test_season_share_page_invalid_token_returns_404(picks_app: TestClient) -> None:
+    response = picks_app.get("/you/not-a-valid-token")
+    assert response.status_code == 404
+
+
+def test_season_share_page_renders_html(picks_app: TestClient) -> None:
+    with patch("api.server.parse_share_token", return_value=("+15551234567", 2026)):
+        with patch(
+            "api.server.build_season_recap",
+            new=AsyncMock(
+                return_value=SimpleNamespace(
+                    season=2026,
+                    personalized_accuracy_pct=61.0,
+                    community_accuracy_pct=58.0,
+                    best_call="ALB at Monaco (+12 pts)",
+                    worst_call="SAI at Silverstone (-9 pts)",
+                    biggest_signal="practice sentiment was 71% predictive",
+                    share_url="https://pitwallai.app/you/mock",
+                )
+            ),
+        ):
+            response = picks_app.get("/you/mock.token")
+    assert response.status_code == 200
+    assert "Season complete" in response.text
+    assert "ALB at Monaco" in response.text
+    assert 'property="og:title"' in response.text
+    assert 'name="twitter:card"' in response.text

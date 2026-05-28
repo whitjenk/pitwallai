@@ -7,7 +7,9 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from loguru import logger
 from db.models import Subscriber
 from db.session import get_session
+from intelligence.repository import get_onboarding_state
 from whatsapp.sender import send_message
+from whatsapp.team_flow import handle_team_command
 
 _SETTINGS_URL = "https://pitwallai.app/settings"
 
@@ -112,7 +114,10 @@ async def _handle_unsubscribe(phone: str) -> str:
 
 def _handle_help() -> str:
     """Return command list."""
-    return _truncate("Commands: SUBSCRIBE, UNSUBSCRIBE, HELP, SETTINGS. PitWallAI race radio alerts.")
+    return _truncate(
+        "Commands: SUBSCRIBE, UNSUBSCRIBE, TEAM, HELP, SETTINGS. "
+        "TEAM = fantasy squad setup."
+    )
 
 
 def _handle_settings() -> str:
@@ -134,8 +139,23 @@ async def handle_inbound_text(phone: str, text: str, raw_text: str) -> None:
     reply: str
 
     try:
-        if phone in _pending_timezone and text not in {"SUBSCRIBE", "UNSUBSCRIBE", "HELP", "SETTINGS"}:
+        onboarding = await get_onboarding_state(phone)
+        in_team_flow = onboarding is not None and (
+            onboarding.awaiting_confirm or onboarding.step > 0
+        )
+
+        if phone in _pending_timezone and text not in {
+            "SUBSCRIBE",
+            "UNSUBSCRIBE",
+            "HELP",
+            "SETTINGS",
+            "TEAM",
+        }:
             reply = await _complete_subscribe(phone, raw_text)
+        elif in_team_flow and text != "TEAM":
+            reply = await handle_team_command(phone, text, raw_text)
+        elif text == "TEAM":
+            reply = await handle_team_command(phone, text, raw_text)
         elif text == "SUBSCRIBE":
             reply = await _handle_subscribe(phone)
         elif text == "UNSUBSCRIBE":

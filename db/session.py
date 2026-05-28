@@ -105,6 +105,8 @@ async def init_db() -> None:
         logger.warning("DATABASE_URL unset — subscriber tables not initialized")
         return
 
+    import openf1.cache  # noqa: F401 — registers OpenF1CacheEntry on Base.metadata
+
     engine = get_engine()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

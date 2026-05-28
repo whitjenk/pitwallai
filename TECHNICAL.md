@@ -13,10 +13,12 @@ Developer-facing documentation for the radio intercept pipeline, WhatsApp integr
 | WhatsApp webhook, commands, `send_message` | Shipped |
 | Postgres subscriber schema + Fernet BYOK | Shipped |
 | Context Builder | Planned |
-| Practice Analyst (full weekend scope) | Partial (decoder live) |
+| Practice Analyst (FP1/FP2 + anomalies) | Shipped |
+| Pick generator (PATH A/B) + audit log | Shipped |
+| `/api/picks` + scheduled picks job | Shipped |
 | Quali Strategist | Planned |
 | Scorer + season leaderboard | Planned |
-| `TEAM` fantasy setup command | Planned |
+| `TEAM` fantasy setup command | Shipped |
 
 ---
 
@@ -179,6 +181,30 @@ Single HTML file (`dashboard.jsx`), no build step. Three columns:
 
 ---
 
+## Fantasy picks API
+
+Endpoints (included on the main FastAPI app):
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/picks` | Return picks for the active weekend (`?refresh=true` to regenerate) |
+| `POST` | `/api/picks/generate` | Force an immediate pipeline run |
+| `GET` | `/api/picks/status` | Scheduler config and last run metadata |
+
+Query parameters: `phone` (personalized PATH A), `circuit_key`, `year`, `refresh`.
+
+The pipeline (`intelligence/picks_pipeline.py`) runs FP1/FP2 practice analysis → qualifying/weather fetch → pick generation → append-only `picks` audit log.
+
+**Scheduler** (background asyncio task on startup when `PITWALL_PICKS_AUTO=true`, default on in `live` mode):
+
+- `PITWALL_PICKS_INTERVAL_SECONDS` — default `1800` (30 min)
+- `PITWALL_CIRCUIT_KEY` — force a circuit (e.g. `monaco` in rehearsal)
+- `PITWALL_RACE_YEAR` — default `2026`
+
+Active weekend detection uses OpenF1 Race sessions nearest to “now”, unless `PITWALL_CIRCUIT_KEY` is set.
+
+---
+
 ## Testing
 
 Three layers — run in order:
@@ -220,7 +246,10 @@ Set `DATABASE_URL`, WhatsApp vars, and `PITWALL_MODE` in the Railway dashboard. 
 
 ```
 pitwallai/agents/radio_intercept/   # decode pipeline, agents, models
-api/                                # FastAPI app factory, rehearsal engine
+intelligence/                       # practice analyst, pick generator, picks pipeline
+openf1/                             # REST client + Postgres cache
+circuits/                           # static circuit profiles (startup-injected)
+api/                                # FastAPI app factory, picks router, rehearsal
 whatsapp/                           # webhook, commands, sender, settings
 db/                                 # Subscriber ORM, async session, Fernet
 main.py                             # ASGI entry (uvicorn main:app)

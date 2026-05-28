@@ -12,6 +12,7 @@ from loguru import logger
 
 from api.server import create_app
 from db.session import init_db
+from intelligence.context import init_orchestrator_context
 from pitwallai.agents.radio_intercept.config import DecodeBackend, PitWallSettings
 from whatsapp.webhook import router as whatsapp_router
 
@@ -25,7 +26,8 @@ app.include_router(whatsapp_router)
 
 @app.on_event("startup")
 async def _whatsapp_startup() -> None:
-    """Ensure subscriber tables exist when DATABASE_URL is configured."""
+    """Ensure DB tables exist and load circuit profiles into orchestrator context."""
+    init_orchestrator_context()
     await init_db()
 
 

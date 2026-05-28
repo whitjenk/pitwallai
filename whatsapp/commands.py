@@ -15,12 +15,15 @@ from intelligence.repository import (
     get_price_prediction_map,
     update_subscriber_preferences,
 )
+from intelligence.season_recap import build_season_recap
 from scheduler.calendar import CALENDAR_2026, get_next_race_weekend
 from whatsapp.league_flow import handle_league_command
+from whatsapp.message_format import format_season_recap_message
 from whatsapp.sender import send_message
 from whatsapp.team_flow import handle_team_command
 
 _SETTINGS_URL = "https://pitwallai.app/settings"
+_SEASON_SHARE_BASE_URL = "https://pitwallai.app"
 
 # Phones awaiting timezone after SUBSCRIBE (in-memory; single-instance OK for MVP).
 _pending_timezone: set[str] = set()
@@ -127,8 +130,8 @@ async def _handle_unsubscribe(phone: str) -> str:
 def _handle_help() -> str:
     """Return command list."""
     return _truncate(
-        "SUBSCRIBE · UNSUBSCRIBE · TEAM · LEAGUE · LEAGUE UPDATE · PRICE · WHY · LIVE ON/OFF · "
-        "CADENCE FULL/RACEDAY · HELP · SETTINGS"
+        "SUBSCRIBE · UNSUBSCRIBE · TEAM · LEAGUE · LEAGUE UPDATE · PRICE · WHY · SEASON · "
+        "SHARE · LIVE ON/OFF · CADENCE FULL/RACEDAY · HELP · SETTINGS"
     )
 
 
@@ -219,6 +222,50 @@ async def _handle_why(raw_text: str) -> str:
     return _truncate(" | ".join(lines), limit=300)
 
 
+def _season_share_secret() -> str:
+    from whatsapp.settings import get_whatsapp_settings
+
+    settings = get_whatsapp_settings()
+    # Prefer app secret; fallback to verify token for local/dev continuity.
+    if settings.whatsapp_app_secret.strip():
+        return settings.whatsapp_app_secret.strip()
+    if settings.webhook_verify_token.strip():
+        return settings.webhook_verify_token.strip()
+    return "pitwallai-season-share-local-secret"
+
+
+async def _handle_season(phone: str, *, compact: bool = False) -> str:
+    recap = await build_season_recap(
+        phone=phone,
+        season=2026,
+        share_base_url=_SEASON_SHARE_BASE_URL,
+        share_secret=_season_share_secret(),
+    )
+    message = format_season_recap_message(
+        season=recap.season,
+        personalized_accuracy_pct=recap.personalized_accuracy_pct,
+        community_accuracy_pct=recap.community_accuracy_pct,
+        best_call=recap.best_call,
+        worst_call=recap.worst_call,
+        biggest_signal=recap.biggest_signal,
+        share_url=recap.share_url,
+    )
+    if not compact:
+        return message
+    # "SHARE" returns a cleaner copy-paste block for cross-platform posting.
+    return "\n".join(
+        [
+            "🏁 PitWallAI season recap",
+            f"My personalized picks: {recap.personalized_accuracy_pct:.0f}% accuracy",
+            f"Community baseline: {recap.community_accuracy_pct:.0f}% accuracy",
+            f"Best call: {recap.best_call}",
+            f"Worst call: {recap.worst_call}",
+            f"Biggest signal: {recap.biggest_signal}",
+            recap.share_url,
+        ]
+    )
+
+
 async def handle_inbound_text(phone: str, text: str, raw_text: str) -> None:
     """
     Route an inbound text message to the appropriate command handler.
@@ -262,6 +309,10 @@ async def handle_inbound_text(phone: str, text: str, raw_text: str) -> None:
             reply = await _handle_price_report(phone, raw_text)
         elif text.startswith("WHY "):
             reply = await _handle_why(raw_text)
+        elif text == "SEASON":
+            reply = await _handle_season(phone, compact=False)
+        elif text == "SHARE":
+            reply = await _handle_season(phone, compact=True)
         elif text == "SUBSCRIBE":
             reply = await _handle_subscribe(phone)
         elif text == "UNSUBSCRIBE":

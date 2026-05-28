@@ -12,6 +12,7 @@ from scheduler.calendar import RaceWeekend
 PERSONALIZED_MAX_CHARS = 500
 GENERIC_MAX_CHARS = 350
 RECAP_MAX_CHARS = 300
+SEASON_RECAP_MAX_CHARS = 700
 PRACTICE_SUMMARY_MAX_CHARS = 300
 LIVE_ALERT_MAX_CHARS = 200
 
@@ -224,5 +225,35 @@ def format_recap_message(
     message = _truncate(message, RECAP_MAX_CHARS)
     assert len(message) <= RECAP_MAX_CHARS, (
         f"Recap message {len(message)} chars exceeds {RECAP_MAX_CHARS}"
+    )
+    return message
+
+
+def format_season_recap_message(
+    *,
+    season: int,
+    personalized_accuracy_pct: float,
+    community_accuracy_pct: float,
+    best_call: str,
+    worst_call: str,
+    biggest_signal: str,
+    share_url: str,
+) -> str:
+    """Format a user-shareable end-of-season recap artifact."""
+    lines = [
+        "🏁 Season complete.",
+        f"Your personalized picks: {personalized_accuracy_pct:.0f}% accuracy",
+        f"PitWallAI community: {community_accuracy_pct:.0f}% accuracy",
+        f"Best call: {best_call}",
+        f"Worst call: {worst_call}",
+        f"Biggest signal this season: {biggest_signal}",
+        f"See your full season: {share_url}",
+        "",
+        "Reply SHARE to get a copy-ready post for any platform.",
+    ]
+    message = "\n".join(lines)
+    message = _truncate(message, SEASON_RECAP_MAX_CHARS)
+    assert len(message) <= SEASON_RECAP_MAX_CHARS, (
+        f"Season recap message {len(message)} chars exceeds {SEASON_RECAP_MAX_CHARS}"
     )
     return message

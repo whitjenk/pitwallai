@@ -15,6 +15,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 from api.picks import router as picks_router
+from intelligence.season_recap import build_season_recap, parse_share_token
 from openf1.client import OpenF1Client
 from api.rehearsal import SCENARIOS, RehearsalEngine
 from pitwallai.agents.radio_intercept.agent import RadioInterceptAgent
@@ -129,6 +130,16 @@ def create_app(
         allow_methods=["GET", "POST"],
         allow_headers=["*"],
     )
+
+    def _season_share_secret() -> str:
+        from whatsapp.settings import get_whatsapp_settings
+
+        wa_settings = get_whatsapp_settings()
+        if wa_settings.whatsapp_app_secret.strip():
+            return wa_settings.whatsapp_app_secret.strip()
+        if wa_settings.webhook_verify_token.strip():
+            return wa_settings.webhook_verify_token.strip()
+        return "pitwallai-season-share-local-secret"
 
     @app.on_event("startup")
     async def on_startup() -> None:
@@ -287,6 +298,29 @@ def create_app(
         key = session_key if session_key is not None else app.state.session.session_key
         snap = await agent.budget_guard.snapshot(key)
         return agent.budget_guard.to_public_dict(snap)
+
+    @app.get("/api/season/{token}")
+    async def season_recap(token: str) -> dict[str, Any]:
+        """Return a public share payload for a season recap token."""
+        parsed = parse_share_token(token, _season_share_secret())
+        if parsed is None:
+            raise HTTPException(status_code=404, detail="Invalid season recap token")
+        phone, season = parsed
+        recap = await build_season_recap(
+            phone=phone,
+            season=season,
+            share_base_url="https://pitwallai.app",
+            share_secret=_season_share_secret(),
+        )
+        return {
+            "season": recap.season,
+            "personalized_accuracy_pct": recap.personalized_accuracy_pct,
+            "community_accuracy_pct": recap.community_accuracy_pct,
+            "best_call": recap.best_call,
+            "worst_call": recap.worst_call,
+            "biggest_signal": recap.biggest_signal,
+            "share_url": recap.share_url,
+        }
 
     @app.get("/dashboard")
     async def dashboard() -> FileResponse:

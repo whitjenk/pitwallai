@@ -10,9 +10,11 @@ from whatsapp.message_format import (
     GENERIC_MAX_CHARS,
     PERSONALIZED_MAX_CHARS,
     RECAP_MAX_CHARS,
+    SEASON_RECAP_MAX_CHARS,
     format_generic_picks,
     format_personalized_picks,
     format_recap_message,
+    format_season_recap_message,
 )
 
 
@@ -109,3 +111,18 @@ def test_long_reasoning_truncated_not_bloated() -> None:
     )
     msg = format_generic_picks(weekend, output, timezone="UTC")
     assert len(msg) <= GENERIC_MAX_CHARS
+
+
+def test_season_recap_shareable_message_limit() -> None:
+    msg = format_season_recap_message(
+        season=2026,
+        personalized_accuracy_pct=61.0,
+        community_accuracy_pct=58.0,
+        best_call="ALB at Monaco (+12 pts)",
+        worst_call="SAI at Silverstone (-9 pts)",
+        biggest_signal="practice radio sentiment was 71% predictive",
+        share_url="https://pitwallai.app/you/abc123token",
+    )
+    assert "Season complete" in msg
+    assert "Reply SHARE" in msg
+    assert len(msg) <= SEASON_RECAP_MAX_CHARS

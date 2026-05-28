@@ -145,3 +145,8 @@ def test_picks_require_server_key_config(picks_app: TestClient) -> None:
     )
     response = picks_app.get("/api/picks", headers={"X-PitWall-API-Key": "anything"})
     assert response.status_code == 503
+
+
+def test_season_recap_invalid_token_returns_404(picks_app: TestClient) -> None:
+    response = picks_app.get("/api/season/not-a-valid-token")
+    assert response.status_code == 404

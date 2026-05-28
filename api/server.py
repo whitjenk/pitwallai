@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from html import escape
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -16,7 +15,12 @@ from loguru import logger
 from pydantic import BaseModel
 
 from api.picks import router as picks_router
-from intelligence.season_recap import build_season_recap, parse_share_token
+from intelligence.season_recap import (
+    build_latest_session_snapshot,
+    build_season_recap,
+    parse_share_token,
+)
+from intelligence.share_page import render_season_share_html
 from openf1.client import OpenF1Client
 from api.rehearsal import SCENARIOS, RehearsalEngine
 from pitwallai.agents.radio_intercept.agent import RadioInterceptAgent
@@ -336,53 +340,18 @@ def create_app(
             share_base_url="https://pitwallai.app",
             share_secret=_season_share_secret(),
         )
+        session = await build_latest_session_snapshot(phone, season)
         title = f"PitWallAI {recap.season} Season Recap"
         description = (
             f"Personalized picks {recap.personalized_accuracy_pct:.0f}% vs community "
             f"{recap.community_accuracy_pct:.0f}% — best call: {recap.best_call}"
         )
-        page_url = recap.share_url
-        html = f"""<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>{escape(title)}</title>
-  <meta name="description" content="{escape(description)}" />
-  <link rel="canonical" href="{escape(page_url)}" />
-  <meta property="og:type" content="website" />
-  <meta property="og:site_name" content="PitWallAI" />
-  <meta property="og:title" content="{escape(title)}" />
-  <meta property="og:description" content="{escape(description)}" />
-  <meta property="og:url" content="{escape(page_url)}" />
-  <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="{escape(title)}" />
-  <meta name="twitter:description" content="{escape(description)}" />
-  <style>
-    body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#0b1020; color:#f5f7ff; margin:0; }}
-    .wrap {{ max-width: 680px; margin: 40px auto; padding: 0 16px; }}
-    .card {{ background: linear-gradient(160deg, #161f3d 0%, #10182f 100%); border: 1px solid #2d3b6b; border-radius: 16px; padding: 24px; }}
-    h1 {{ margin: 0 0 8px; font-size: 28px; }}
-    .muted {{ color:#b8c2e8; margin-bottom: 16px; }}
-    .line {{ margin: 10px 0; font-size: 16px; line-height: 1.4; }}
-    .cta {{ margin-top: 18px; color: #9ec1ff; }}
-  </style>
-</head>
-<body>
-  <main class="wrap">
-    <section class="card">
-      <h1>🏁 Season complete</h1>
-      <div class="muted">PitWallAI {recap.season} recap</div>
-      <div class="line"><strong>Your personalized picks:</strong> {recap.personalized_accuracy_pct:.0f}% accuracy</div>
-      <div class="line"><strong>PitWallAI community:</strong> {recap.community_accuracy_pct:.0f}% accuracy</div>
-      <div class="line"><strong>Best call:</strong> {escape(recap.best_call)}</div>
-      <div class="line"><strong>Worst call:</strong> {escape(recap.worst_call)}</div>
-      <div class="line"><strong>Biggest signal:</strong> {escape(recap.biggest_signal)}</div>
-      <div class="cta">Built for WhatsApp-first fantasy players. Share this card with your league.</div>
-    </section>
-  </main>
-</body>
-</html>"""
+        html = render_season_share_html(
+            recap,
+            session=session,
+            page_title=title,
+            meta_description=description,
+        )
         return HTMLResponse(content=html)
 
     @app.get("/dashboard")

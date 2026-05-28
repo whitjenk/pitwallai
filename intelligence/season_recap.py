@@ -11,6 +11,14 @@ from sqlalchemy import select
 
 from db.models import PickRow, SignalQualityRow
 from db.session import get_session
+from intelligence.recap_metrics import (
+    avg_points_delta,
+    hit_rate_pct,
+    momentum_delta_pp,
+    momentum_trend,
+    prev_race_key,
+)
+from scheduler.calendar import CALENDAR_2026
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,6 +30,17 @@ class SeasonRecap:
     worst_call: str
     biggest_signal: str
     share_url: str
+
+
+@dataclass(frozen=True, slots=True)
+class SessionSnapshot:
+    """Latest scored race weekend for share-page session strip."""
+
+    circuit_label: str
+    hit_pct: float
+    avg_points_delta: float
+    momentum_trend: str
+    momentum_delta_pp: int | None
 
 
 def _accuracy_pct(rows: list[PickRow]) -> float:
@@ -106,6 +125,63 @@ def parse_share_token(token: str, secret: str) -> tuple[str, int] | None:
     except ValueError:
         return None
     return (phone, season)
+
+
+async def _picks_for_race(
+    phone: str,
+    race_key: str,
+    *,
+    personalized: bool,
+) -> list[PickRow]:
+    async with get_session() as session:
+        stmt = select(PickRow).where(
+            PickRow.race_key == race_key,
+            PickRow.was_correct.is_not(None),
+        )
+        if personalized:
+            stmt = stmt.where(PickRow.phone == phone, PickRow.personalized.is_(True))
+        else:
+            stmt = stmt.where(PickRow.phone.is_(None))
+        result = await session.execute(stmt)
+        return list(result.scalars().all())
+
+
+async def build_latest_session_snapshot(phone: str, season: int) -> SessionSnapshot | None:
+    """Most recent scored weekend with optional momentum vs prior race."""
+    prefix = f"{season}_"
+    calendar_keys = [w.race_key for w in CALENDAR_2026 if w.race_key.startswith(prefix)]
+    latest_key: str | None = None
+    latest_picks: list[PickRow] = []
+    for race_key in reversed(calendar_keys):
+        picks = await _picks_for_race(phone, race_key, personalized=True)
+        if not picks:
+            picks = await _picks_for_race(phone, race_key, personalized=False)
+        if picks:
+            latest_key = race_key
+            latest_picks = picks
+            break
+    if latest_key is None or not latest_picks:
+        return None
+
+    weekend = next((w for w in CALENDAR_2026 if w.race_key == latest_key), None)
+    circuit_label = weekend.display_name if weekend else latest_key.replace("_", " ").title()
+    hit = hit_rate_pct(latest_picks)
+    prev_key = prev_race_key(latest_key)
+    prev_hit: float | None = None
+    if prev_key:
+        prev_picks = await _picks_for_race(phone, prev_key, personalized=True)
+        if not prev_picks:
+            prev_picks = await _picks_for_race(phone, prev_key, personalized=False)
+        if prev_picks:
+            prev_hit = hit_rate_pct(prev_picks)
+    delta = momentum_delta_pp(hit, prev_hit)
+    return SessionSnapshot(
+        circuit_label=circuit_label,
+        hit_pct=round(hit, 1),
+        avg_points_delta=round(avg_points_delta(latest_picks), 1),
+        momentum_trend=momentum_trend(delta),
+        momentum_delta_pp=delta,
+    )
 
 
 async def build_season_recap(

@@ -30,6 +30,7 @@ from orchestrator.race_context import (
     evolve_race_context,
     RaceContext,
 )
+from intelligence.recap_metrics import hit_rate_pct, momentum_suffix, prev_race_key, session_quality_note
 from scheduler.calendar import get_next_race_weekend, get_race_weekend, profile_circuit_key
 from circuits.profiles import get_circuit_profile
 from whatsapp.message_format import format_recap_message
@@ -75,18 +76,6 @@ def _score_generic_pick(pick, positions: dict[str, int]) -> tuple[float, bool]:
     pos = positions.get(pick.driver_code)
     pts = _points_for_position(pos)
     return pts, pos is not None and pos <= 10
-
-
-def _session_quality_note(picks: list) -> str | None:
-    """Compact post-race quality snapshot for this weekend."""
-    if not picks:
-        return None
-    total = len(picks)
-    correct = sum(1 for p in picks if p.was_correct)
-    scored = [float(p.actual_points_delta) for p in picks if p.actual_points_delta is not None]
-    avg_delta = (sum(scored) / len(scored)) if scored else 0.0
-    sign = "+" if avg_delta >= 0 else ""
-    return f"PitWallAI session: {int(round(100 * correct / total))}% hit · {sign}{avg_delta:.1f} avg pts"
 
 
 async def _update_signal_quality(
@@ -308,6 +297,15 @@ async def _broadcast_recap(
             picks = await get_picks_for_race(race_key, phone=None)
         correct = sum(1 for p in picks if p.was_correct)
         total = len(picks) if picks else 3
+        hit_pct = hit_rate_pct(picks) if picks else 0.0
+        prev_hit_pct: float | None = None
+        previous_race = prev_race_key(race_key)
+        if previous_race:
+            prev_picks = await get_picks_for_race(previous_race, phone=sub.phone)
+            if not prev_picks:
+                prev_picks = await get_picks_for_race(previous_race, phone=None)
+            if prev_picks:
+                prev_hit_pct = hit_rate_pct(prev_picks)
 
         swap_note: str | None = None
         team = await get_fantasy_team(sub.phone)
@@ -324,7 +322,10 @@ async def _broadcast_recap(
             correct_count=correct,
             total_picks=total,
             season_accuracy_pct=season_accuracy,
-            session_note=_session_quality_note(picks),
+            session_note=(
+                (session_quality_note(picks) or "")
+                + momentum_suffix(hit_pct, prev_hit_pct)
+            ).strip(),
             swap_note=swap_note,
             next_race_name=next_name,
             days_until_next=days,

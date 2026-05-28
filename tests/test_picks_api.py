@@ -174,9 +174,13 @@ def test_season_share_page_renders_html(picks_app: TestClient) -> None:
                 )
             ),
         ):
-            response = picks_app.get("/you/mock.token")
+            with patch("api.server.build_latest_session_snapshot", new=AsyncMock(return_value=None)):
+                response = picks_app.get("/you/mock.token")
     assert response.status_code == 200
     assert "Season complete" in response.text
     assert "ALB at Monaco" in response.text
     assert 'property="og:title"' in response.text
     assert 'name="twitter:card"' in response.text
+    assert 'data-trend="up"' in response.text or 'data-trend="flat"' in response.text
+    assert "trend-pill" in response.text
+    assert "aria-label" in response.text

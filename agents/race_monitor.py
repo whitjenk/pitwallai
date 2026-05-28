@@ -12,9 +12,11 @@ from agents.base import AgentRunDependencies
 from db.models import FantasyTeam
 from intelligence.drivers import driver_code_for
 from intelligence.repository import (
+    can_send_live_alert,
     get_fantasy_team,
     get_monitor_state,
     list_live_alert_subscribers,
+    record_live_alert_delivery,
     save_race_event,
     set_monitor_state,
 )
@@ -26,23 +28,15 @@ from whatsapp.sender import mask_phone, send_message
 _POLL_INTERVAL_S = 15
 _MAX_ALERTS_PER_HOUR = 3
 
-# race_key -> phone -> list of alert timestamps
-_alert_log: dict[str, dict[str, list[datetime]]] = defaultdict(lambda: defaultdict(list))
 _seen_messages: dict[str, set[str]] = defaultdict(set)
 _seen_pit_stops: dict[str, set[str]] = defaultdict(set)
 _monitor_tasks: dict[str, asyncio.Task[None]] = {}
 
 
-def _can_alert(race_key: str, phone: str) -> bool:
-    now = datetime.now(tz=UTC)
-    hour_ago = now - timedelta(hours=1)
-    log = _alert_log[race_key][phone]
-    _alert_log[race_key][phone] = [t for t in log if t > hour_ago]
-    return len(_alert_log[race_key][phone]) < _MAX_ALERTS_PER_HOUR
-
-
-def _record_alert(race_key: str, phone: str) -> None:
-    _alert_log[race_key][phone].append(datetime.now(tz=UTC))
+def _clear_runtime_state(race_key: str) -> None:
+    """Release per-race in-memory caches after completion."""
+    _seen_messages.pop(race_key, None)
+    _seen_pit_stops.pop(race_key, None)
 
 
 def _format_alert(text: str) -> str:
@@ -90,7 +84,11 @@ async def _broadcast_alert(
 ) -> None:
     subs = await list_live_alert_subscribers()
     for sub in subs:
-        if not _can_alert(race_key, sub.phone):
+        if not await can_send_live_alert(
+            race_key,
+            sub.phone,
+            per_hour_limit=_MAX_ALERTS_PER_HOUR,
+        ):
             continue
         if affected_driver:
             drivers = await _subscriber_drivers(sub.phone)
@@ -98,7 +96,7 @@ async def _broadcast_alert(
                 continue
         try:
             await send_message(sub.phone, _format_alert(message))
-            _record_alert(race_key, sub.phone)
+            await record_live_alert_delivery(race_key, sub.phone)
         except Exception as exc:
             logger.error("Live alert failed phone={}: {}", mask_phone(sub.phone), exc)
 
@@ -195,14 +193,18 @@ async def _poll_loop(
                     if team is None:
                         continue
                     drivers = await _subscriber_drivers(sub.phone)
-                    if code in drivers and _can_alert(race_key, sub.phone):
+                    if code in drivers and await can_send_live_alert(
+                        race_key,
+                        sub.phone,
+                        per_hour_limit=_MAX_ALERTS_PER_HOUR,
+                    ):
                         note = _chip_note(team, code)
                         if note:
                             await send_message(
                                 sub.phone,
                                 _format_alert(f"⚡ {code} just pitted.{note}"),
                             )
-                            _record_alert(race_key, sub.phone)
+                            await record_live_alert_delivery(race_key, sub.phone)
 
             if await _race_complete(client, session_key):
                 complete = RaceEvent(
@@ -218,6 +220,7 @@ async def _poll_loop(
                 from orchestrator.lead_strategist import LeadStrategist
 
                 await LeadStrategist(deps).run_scorer_and_learner(race_key)
+                _clear_runtime_state(race_key)
                 return
 
             await set_monitor_state(
@@ -255,6 +258,7 @@ async def run_race_monitor(
     state = await get_monitor_state(race_key)
     if state and not state.running:
         logger.info("Race monitor already completed race_key={}", race_key)
+        _clear_runtime_state(race_key)
         return ctx
 
     task = asyncio.create_task(_poll_loop(ctx, deps, session_key), name=f"monitor:{race_key}")

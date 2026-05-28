@@ -20,18 +20,13 @@ def _api_key_from_request(request: Request, header_key: str | None) -> str:
     return ""
 
 
-def _refresh_requested(request: Request) -> bool:
-    raw = request.query_params.get("refresh", "").strip().lower()
-    return raw in ("1", "true", "yes", "on")
-
-
 def require_picks_api_key(
     request: Request,
     phone: str | None = None,
     x_pitwall_api_key: str | None = Header(default=None, alias=_PICKS_API_KEY_HEADER),
 ) -> None:
     """
-    Enforce API key when personalized picks are requested or when a global key is configured.
+    Enforce API key for all picks API access.
 
     Args:
         request: FastAPI request.
@@ -44,29 +39,12 @@ def require_picks_api_key(
     settings: PicksSettings = request.app.state.picks_settings
     configured = settings.api_key.strip() if settings.api_key else ""
     provided = _api_key_from_request(request, x_pitwall_api_key)
-    privileged = (
-        phone is not None
-        or _refresh_requested(request)
-        or request.method.upper() == "POST"
-    )
-
-    if privileged and not configured:
+    if not configured:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="This endpoint requires PITWALL_PICKS_API_KEY on the server.",
+            detail="PITWALL_PICKS_API_KEY must be configured on the server.",
         )
-
-    if privileged:
-        if not provided or not secrets.compare_digest(provided, configured):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid or missing API key.",
-            )
-        return
-
-    if configured and (
-        not provided or not secrets.compare_digest(provided, configured)
-    ):
+    if not provided or not secrets.compare_digest(provided, configured):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or missing API key.",

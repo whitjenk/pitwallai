@@ -1,17 +1,10 @@
-"""Meta WhatsApp webhook signature verification and inbound deduplication."""
+"""Meta WhatsApp webhook signature verification helpers."""
 
 from __future__ import annotations
 
 import hashlib
 import hmac
 import os
-import time
-from collections import OrderedDict
-
-# message_id → monotonic expiry (dedup window)
-_SEEN_MESSAGE_IDS: OrderedDict[str, float] = OrderedDict()
-_DEDUP_MAX_ENTRIES = 50_000
-_DEDUP_TTL_SECONDS = 86_400  # 24h — Meta may retry webhooks
 
 
 def webhook_skip_signature() -> bool:
@@ -53,39 +46,3 @@ def verify_meta_signature(
         hashlib.sha256,
     ).hexdigest()
     return hmac.compare_digest(computed, expected_hex)
-
-
-def _prune_seen_ids(now: float) -> None:
-    while _SEEN_MESSAGE_IDS:
-        oldest_id, oldest_exp = next(iter(_SEEN_MESSAGE_IDS.items()))
-        if oldest_exp > now and len(_SEEN_MESSAGE_IDS) <= _DEDUP_MAX_ENTRIES:
-            break
-        _SEEN_MESSAGE_IDS.pop(oldest_id, None)
-    while len(_SEEN_MESSAGE_IDS) > _DEDUP_MAX_ENTRIES:
-        _SEEN_MESSAGE_IDS.popitem(last=False)
-
-
-def is_duplicate_message(message_id: str) -> bool:
-    """
-    Return True if this Meta message_id was already processed successfully.
-
-    Args:
-        message_id: Meta message id from the webhook payload.
-
-    Returns:
-        True when the message should be skipped (replay).
-    """
-    if not message_id.strip():
-        return False
-    now = time.monotonic()
-    _prune_seen_ids(now)
-    return message_id in _SEEN_MESSAGE_IDS
-
-
-def mark_message_processed(message_id: str) -> None:
-    """Record a successfully handled inbound message (enables safe Meta retries)."""
-    if not message_id.strip():
-        return
-    now = time.monotonic()
-    _prune_seen_ids(now)
-    _SEEN_MESSAGE_IDS[message_id] = now + _DEDUP_TTL_SECONDS

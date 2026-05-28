@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 import uuid
+from collections import defaultdict
 from datetime import UTC, datetime
+from datetime import timedelta
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 
 from db.models import (
     FantasyTeam,
+    LiveAlertDelivery,
     PickRow,
+    ProcessedInboundMessage,
     PracticeSignalRow,
     RaceEventRow,
     RaceMonitorState,
@@ -22,6 +27,37 @@ from db.models import (
 from orchestrator.race_context import RaceEvent, SignalQuality, SignalQualityEntry
 from db.session import get_session
 from intelligence.schemas import PickOutput, PracticeSignal
+
+_FALLBACK_SEEN_MESSAGES: set[str] = set()
+_FALLBACK_ALERT_LOG: dict[str, dict[str, list[datetime]]] = defaultdict(lambda: defaultdict(list))
+_LAST_SECURITY_PRUNE_AT: datetime | None = None
+_SECURITY_PRUNE_EVERY = timedelta(minutes=15)
+_PROCESSED_MESSAGE_RETENTION = timedelta(days=7)
+_LIVE_ALERT_RETENTION = timedelta(days=14)
+
+
+async def _maybe_prune_security_tables() -> None:
+    """Best-effort retention pruning for security/alert tracking tables."""
+    global _LAST_SECURITY_PRUNE_AT
+    now = datetime.now(tz=UTC)
+    if _LAST_SECURITY_PRUNE_AT and (now - _LAST_SECURITY_PRUNE_AT) < _SECURITY_PRUNE_EVERY:
+        return
+    _LAST_SECURITY_PRUNE_AT = now
+    try:
+        async with get_session() as session:
+            await session.execute(
+                delete(ProcessedInboundMessage).where(
+                    ProcessedInboundMessage.processed_at < (now - _PROCESSED_MESSAGE_RETENTION)
+                )
+            )
+            await session.execute(
+                delete(LiveAlertDelivery).where(
+                    LiveAlertDelivery.sent_at < (now - _LIVE_ALERT_RETENTION)
+                )
+            )
+    except ValueError:
+        # No DATABASE_URL configured; fallback mode keeps data in memory only.
+        return
 
 
 async def save_practice_signals(
@@ -461,3 +497,78 @@ async def build_signal_quality_from_db(circuit_key: str) -> SignalQuality | None
             weight_multiplier=mult,
         )
     return SignalQuality(entries=entries)
+
+
+async def was_inbound_message_processed(message_id: str) -> bool:
+    """True when this inbound WhatsApp message_id was already handled."""
+    if not message_id.strip():
+        return False
+    await _maybe_prune_security_tables()
+    try:
+        async with get_session() as session:
+            row = await session.get(ProcessedInboundMessage, message_id)
+            return row is not None
+    except ValueError:
+        return message_id in _FALLBACK_SEEN_MESSAGES
+
+
+async def mark_inbound_message_processed(message_id: str) -> None:
+    """Record successful handling for webhook deduplication."""
+    if not message_id.strip():
+        return
+    await _maybe_prune_security_tables()
+    try:
+        async with get_session() as session:
+            session.add(ProcessedInboundMessage(message_id=message_id))
+            try:
+                await session.flush()
+            except IntegrityError:
+                # Already recorded by another worker/request.
+                await session.rollback()
+    except ValueError:
+        _FALLBACK_SEEN_MESSAGES.add(message_id)
+
+
+async def can_send_live_alert(
+    race_key: str,
+    phone: str,
+    *,
+    per_hour_limit: int,
+) -> bool:
+    """Cross-instance live-alert rate limiter by subscriber and race key."""
+    cutoff = datetime.now(tz=UTC) - timedelta(hours=1)
+    await _maybe_prune_security_tables()
+    try:
+        async with get_session() as session:
+            count_stmt = (
+                select(func.count())
+                .select_from(LiveAlertDelivery)
+                .where(
+                    LiveAlertDelivery.race_key == race_key,
+                    LiveAlertDelivery.phone == phone,
+                    LiveAlertDelivery.sent_at >= cutoff,
+                )
+            )
+            recent = int((await session.execute(count_stmt)).scalar_one())
+            return recent < per_hour_limit
+    except ValueError:
+        history = _FALLBACK_ALERT_LOG[race_key][phone]
+        _FALLBACK_ALERT_LOG[race_key][phone] = [ts for ts in history if ts >= cutoff]
+        return len(_FALLBACK_ALERT_LOG[race_key][phone]) < per_hour_limit
+
+
+async def record_live_alert_delivery(race_key: str, phone: str) -> None:
+    """Persist a sent live alert delivery for rate limiting and audit."""
+    now = datetime.now(tz=UTC)
+    await _maybe_prune_security_tables()
+    try:
+        async with get_session() as session:
+            session.add(
+                LiveAlertDelivery(
+                    race_key=race_key,
+                    phone=phone,
+                    sent_at=now,
+                )
+            )
+    except ValueError:
+        _FALLBACK_ALERT_LOG[race_key][phone].append(now)

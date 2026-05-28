@@ -151,6 +151,35 @@ class RaceMonitorState(Base):
     )
 
 
+class ProcessedInboundMessage(Base):
+    """Dedup ledger for inbound WhatsApp webhook message IDs."""
+
+    __tablename__ = "processed_inbound_messages"
+
+    message_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    processed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+
+class LiveAlertDelivery(Base):
+    """Per-subscriber live alert deliveries for cross-instance rate limiting."""
+
+    __tablename__ = "live_alert_deliveries"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    race_key: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    phone: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    sent_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        index=True,
+    )
+
+
 class SignalQualityRow(Base):
     """Per-circuit rolling signal hit rates (Agent 5 learner)."""
 

@@ -26,7 +26,7 @@ def picks_app() -> TestClient:
         interval_seconds=1800,
         race_year=2026,
         circuit_key_override="monaco",
-        api_key="",
+        api_key="test-api-key",
     )
     app.state.picks_scheduler = MagicMock()
     app.state.picks_scheduler.run_once = AsyncMock(return_value=None)
@@ -34,7 +34,10 @@ def picks_app() -> TestClient:
 
 
 def test_picks_status_endpoint(picks_app: TestClient) -> None:
-    response = picks_app.get("/api/picks/status")
+    response = picks_app.get(
+        "/api/picks/status",
+        headers={"X-PitWall-API-Key": "test-api-key"},
+    )
     assert response.status_code == 200
     body = response.json()
     assert body["auto_enabled"] is False
@@ -107,7 +110,10 @@ def test_get_picks_returns_cached(picks_app: TestClient) -> None:
     )
     picks_app.app.state.last_picks_result = cached
 
-    response = picks_app.get("/api/picks")
+    response = picks_app.get(
+        "/api/picks",
+        headers={"X-PitWall-API-Key": "test-api-key"},
+    )
     assert response.status_code == 200
     body = response.json()
     assert body["cached"] is True
@@ -116,14 +122,26 @@ def test_get_picks_returns_cached(picks_app: TestClient) -> None:
 
 def test_personalized_picks_requires_api_key(picks_app: TestClient) -> None:
     response = picks_app.get("/api/picks", params={"phone": "+15551234567"})
-    assert response.status_code == 503
+    assert response.status_code == 401
 
 
 def test_refresh_picks_requires_api_key(picks_app: TestClient) -> None:
     response = picks_app.get("/api/picks", params={"refresh": "true"})
-    assert response.status_code == 503
+    assert response.status_code == 401
 
 
 def test_generate_picks_requires_api_key(picks_app: TestClient) -> None:
     response = picks_app.post("/api/picks/generate")
+    assert response.status_code == 401
+
+
+def test_picks_require_server_key_config(picks_app: TestClient) -> None:
+    picks_app.app.state.picks_settings = PicksSettings(
+        auto_enabled=False,
+        interval_seconds=1800,
+        race_year=2026,
+        circuit_key_override="monaco",
+        api_key="",
+    )
+    response = picks_app.get("/api/picks", headers={"X-PitWall-API-Key": "anything"})
     assert response.status_code == 503

@@ -154,7 +154,7 @@ Settings load via `whatsapp/settings.py` (`WhatsAppSettings`, pydantic-settings)
 **Webhook** (registered on `main:app`):
 
 - `GET /webhook` — Meta verify (`hub.mode`, `hub.verify_token`, `hub.challenge`)
-- `POST /webhook` — returns 200 immediately; processes inbound messages in background. Requires `WHATSAPP_APP_SECRET` and valid `X-Hub-Signature-256` (HMAC-SHA256 of raw body). Set `PITWALL_WEBHOOK_SKIP_SIGNATURE=1` for local dev only. Inbound `message_id` values are deduplicated for 24h.
+- `POST /webhook` — returns 200 immediately; processes inbound messages in background. Requires `WHATSAPP_APP_SECRET` and valid `X-Hub-Signature-256` (HMAC-SHA256 of raw body). Set `PITWALL_WEBHOOK_SKIP_SIGNATURE=1` for local dev only (ignored in `live` mode). Inbound `message_id` values are deduplicated in DB for safe retries across instances, with retention pruning.
 
 **Commands** (`whatsapp/commands.py`):
 
@@ -197,7 +197,11 @@ Endpoints (included on the main FastAPI app):
 
 Query parameters: `phone` (personalized PATH A), `circuit_key`, `year`, `refresh`.
 
-**Auth:** Set `PITWALL_PICKS_API_KEY` and pass `X-PitWall-API-Key: <key>` (or `Authorization: Bearer <key>`) on every `/api/picks` request when the key is configured. Personalized picks (`?phone=`) are rejected with 503 unless the server key is set.
+**Auth:** Set `PITWALL_PICKS_API_KEY` and pass `X-PitWall-API-Key: <key>` (or `Authorization: Bearer <key>`) on every `/api/picks` request. Requests fail with 503 until the server key is configured.
+
+**Operational retention:** security tracking tables are pruned periodically in-process:
+- processed inbound webhook IDs: ~7 days
+- live alert delivery logs: ~14 days
 
 The pipeline (`intelligence/picks_pipeline.py`) runs FP1/FP2 practice analysis → qualifying/weather fetch → pick generation → append-only `picks` audit log.
 

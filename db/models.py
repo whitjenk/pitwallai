@@ -34,6 +34,8 @@ class Subscriber(Base):
     preferred_provider: Mapped[str] = mapped_column(String(32), nullable=False, default="gemini")
     encrypted_api_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    live_alerts: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    cadence_preference: Mapped[str] = mapped_column(String(20), nullable=False, default="FULL")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -115,6 +117,55 @@ class PracticeSignalRow(Base):
         DateTime(timezone=True),
         nullable=False,
         server_default=func.now(),
+    )
+
+
+class RaceEventRow(Base):
+    """Persisted live race monitor events."""
+
+    __tablename__ = "race_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    race_key: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    event_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    lap: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    driver_code: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    utc_timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class RaceMonitorState(Base):
+    """Resume state for Agent 4 after process restart."""
+
+    __tablename__ = "race_monitor_state"
+
+    race_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    session_key: Mapped[int] = mapped_column(Integer, nullable=False)
+    last_lap: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    running: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class SignalQualityRow(Base):
+    """Per-circuit rolling signal hit rates (Agent 5 learner)."""
+
+    __tablename__ = "signal_quality"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    circuit_key: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    signal_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    sample_size: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    hit_rate: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
     )
 
 

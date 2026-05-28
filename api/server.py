@@ -15,6 +15,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 from api.picks import router as picks_router
+from openf1.client import OpenF1Client
 from api.rehearsal import SCENARIOS, RehearsalEngine
 from pitwallai.agents.radio_intercept.agent import RadioInterceptAgent
 from pitwallai.agents.radio_intercept.config import PitWallSettings
@@ -213,6 +214,17 @@ def create_app(
             app.state.rehearsal_engine = engine
             engine.start_background(speed_multiplier=rehearsal_speed)
             log.info("Monaco 2024 rehearsal auto-started")
+
+        from agents.race_monitor import resume_monitors_on_startup
+        from agents.base import AgentRunDependencies
+
+        monitor_deps = AgentRunDependencies(
+            openf1_client=OpenF1Client(),
+            radio_agent=agent,
+            vector_store=vector_store,
+            settings=pitwall_settings,
+        )
+        await resume_monitors_on_startup(monitor_deps)
 
         log.info("PitWallAI startup complete")
 

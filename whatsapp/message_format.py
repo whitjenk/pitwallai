@@ -11,6 +11,8 @@ from scheduler.calendar import RaceWeekend
 PERSONALIZED_MAX_CHARS = 400
 GENERIC_MAX_CHARS = 350
 RECAP_MAX_CHARS = 300
+PRACTICE_SUMMARY_MAX_CHARS = 300
+LIVE_ALERT_MAX_CHARS = 200
 
 _ACCURACY_URL = "pitwallai.app/accuracy"
 

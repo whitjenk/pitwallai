@@ -106,6 +106,20 @@ class PitStop(_OpenF1Base):
     date: datetime | None = None
 
 
+class RaceControlMessage(_OpenF1Base):
+    """GET /v1/race_control row."""
+
+    session_key: int
+    date: datetime | None = None
+    category: str | None = None
+    message: str | None = None
+    scope: str | None = None
+    sector: int | None = None
+    driver_number: int | None = None
+    lap_number: int | None = None
+    flag: str | None = None
+
+
 class SessionResultRow(_OpenF1Base):
     """GET /v1/session_result row (qualifying / race results)."""
 

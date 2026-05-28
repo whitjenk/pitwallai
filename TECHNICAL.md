@@ -18,6 +18,7 @@ Developer-facing documentation for the radio intercept pipeline, WhatsApp integr
 | `/api/picks` + scheduled picks job | Shipped |
 | APScheduler race calendar + WhatsApp broadcast | Shipped |
 | Post-race scorer + recap broadcast | Shipped |
+| Lead Strategist + Agents 1–5 (Phase 6) | Shipped |
 | Quali Strategist | Planned |
 | Scorer + season leaderboard | Planned |
 | `TEAM` fantasy setup command | Shipped |
@@ -225,7 +226,19 @@ Jobs persist in Postgres table `apscheduler_jobs` (same `DATABASE_URL`, sync dri
 
 **WhatsApp broadcast** — `whatsapp/broadcast.py` + `whatsapp/message_format.py` (mandatory char assertions: 400 / 350 / 300). Subscriber timezone used only at send time for “hrs to lock”.
 
-**Scoring** — `intelligence/scorer.py` updates `picks.actual_points_delta` / `was_correct`, rolls up `season_accuracy`.
+**Scoring** — `agents/scorer_learner.py` (Agent 5) updates `picks`, rolls up `season_accuracy`, and writes `signal_quality` weights.
+
+**Orchestration (Phase 6)** — `orchestrator/lead_strategist.py` holds immutable `RaceContext` (`evolve_race_context()` / `model_copy`). Scheduler jobs delegate to:
+
+| Agent | Module | Trigger |
+|-------|--------|---------|
+| 1 Context Builder | `agents/context_builder.py` | Thursday |
+| 2 Practice Analyst | `agents/practice_analyst.py` | FP2 + 90min |
+| 3 Quali Strategist | `agents/quali_strategist.py` | Pre-lock |
+| 4 Race Monitor | `agents/race_monitor.py` | Race − 5min (long-lived) |
+| 5 Scorer/Learner | `agents/scorer_learner.py` | Race + 3h |
+
+Subscriber prefs: `live_alerts`, `cadence_preference` (`FULL` / `RACE_DAY_ONLY`). Commands: `LIVE ON/OFF`, `CADENCE FULL/RACEDAY`.
 
 ---
 

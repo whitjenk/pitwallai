@@ -17,6 +17,7 @@ from openf1.models import (
     PitStop,
     PositionSample,
     SessionInfo,
+    RaceControlMessage,
     SessionResultRow,
     TeamRadioEntry,
     WeatherSample,
@@ -238,6 +239,16 @@ class OpenF1Client:
         if driver_number is not None:
             params["driver_number"] = driver_number
         return await self._fetch_typed("pit", params, PitStop, tier=CacheTier.LAP)
+
+    async def get_race_control(self, session_key: int) -> list[RaceControlMessage]:
+        """Fetch race control messages for a session."""
+        params: dict[str, Any] = {"session_key": session_key}
+        return await self._fetch_typed(
+            "race_control",
+            params,
+            RaceControlMessage,
+            tier=CacheTier.LIVE,
+        )
 
     async def get_session_results(self, session_key: int) -> list[SessionResultRow]:
         """Fetch session results (qualifying grid / race classification)."""

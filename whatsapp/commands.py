@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from loguru import logger
 from db.models import Subscriber
 from db.session import get_session
-from intelligence.repository import get_onboarding_state
+from intelligence.repository import get_onboarding_state, update_subscriber_preferences
 from whatsapp.sender import send_message
 from whatsapp.team_flow import handle_team_command
 
@@ -88,7 +88,10 @@ async def _complete_subscribe(phone: str, timezone: str) -> str:
             row.preferred_provider = row.preferred_provider or "gemini"
 
     logger.bind(phone=phone, timezone=tz_clean).info("Subscriber activated")
-    return _truncate(f"Subscribed. Alerts use {tz_clean}. Send HELP for commands.")
+    return _truncate(
+        f"Subscribed ({tz_clean}). Text LIVE ON for race alerts. "
+        "Text CADENCE RACEDAY for picks only. HELP for commands."
+    )
 
 
 async def _handle_unsubscribe(phone: str) -> str:
@@ -115,14 +118,36 @@ async def _handle_unsubscribe(phone: str) -> str:
 def _handle_help() -> str:
     """Return command list."""
     return _truncate(
-        "Commands: SUBSCRIBE, UNSUBSCRIBE, TEAM, HELP, SETTINGS. "
-        "TEAM = fantasy squad setup."
+        "SUBSCRIBE · UNSUBSCRIBE · TEAM · LIVE ON/OFF · "
+        "CADENCE FULL/RACEDAY · HELP · SETTINGS"
     )
 
 
 def _handle_settings() -> str:
     """Return BYOK settings link."""
     return _truncate(f"Manage API keys & provider: {_SETTINGS_URL}")
+
+
+async def _handle_live(phone: str, *, enabled: bool) -> str:
+    """Toggle live race day alerts."""
+    row = await update_subscriber_preferences(phone, live_alerts=enabled)
+    if row is None:
+        return _truncate("Subscribe first: text SUBSCRIBE")
+    if enabled:
+        return _truncate("✅ Race day alerts on. You'll get live updates during Sunday's race.")
+    return _truncate("✅ Race day alerts off. Picks only.")
+
+
+async def _handle_cadence(phone: str, *, mode: str) -> str:
+    """Set notification cadence preference."""
+    row = await update_subscriber_preferences(phone, cadence_preference=mode)
+    if row is None:
+        return _truncate("Subscribe first: text SUBSCRIBE")
+    if mode == "FULL":
+        return _truncate(
+            "✅ Full weekend mode. Practice summary, quali picks, live alerts, post-race recap."
+        )
+    return _truncate("✅ Race day only. Saturday picks and live alerts (if LIVE ON).")
 
 
 async def handle_inbound_text(phone: str, text: str, raw_text: str) -> None:
@@ -164,6 +189,14 @@ async def handle_inbound_text(phone: str, text: str, raw_text: str) -> None:
             reply = _handle_help()
         elif text == "SETTINGS":
             reply = _handle_settings()
+        elif text == "LIVE ON":
+            reply = await _handle_live(phone, enabled=True)
+        elif text == "LIVE OFF":
+            reply = await _handle_live(phone, enabled=False)
+        elif text == "CADENCE FULL":
+            reply = await _handle_cadence(phone, mode="FULL")
+        elif text in {"CADENCE RACEDAY", "CADENCE RACE_DAY_ONLY"}:
+            reply = await _handle_cadence(phone, mode="RACE_DAY_ONLY")
         else:
             reply = _truncate("Unknown command. Send HELP for options.")
     except ValueError as exc:

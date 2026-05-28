@@ -1,8 +1,7 @@
-"""APScheduler job handlers for the 2026 race calendar."""
+"""APScheduler job handlers — delegate to Lead Strategist."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -16,11 +15,11 @@ if TYPE_CHECKING:
     from fastapi import FastAPI
 
 
-@dataclass
 class RaceJobContext:
     """Shared runtime dependencies for scheduled race jobs."""
 
-    app: FastAPI
+    def __init__(self, app: FastAPI) -> None:
+        self.app = app
 
 
 _ctx: RaceJobContext | None = None
@@ -38,77 +37,35 @@ def _require_ctx() -> RaceJobContext:
     return _ctx
 
 
+def _strategist():
+    from orchestrator.lead_strategist import LeadStrategist
+
+    return LeadStrategist.from_fastapi(_require_ctx().app)
+
+
 async def job_thursday_context(race_key: str) -> None:
-    """Agent 1 stub — pre-weekend context builder (Phase 6)."""
-    weekend = get_race_weekend(race_key)
-    logger.bind(race_key=race_key, circuit=weekend.circuit_key if weekend else None).info(
-        "Agent 1 not yet implemented — thursday_context skipped"
-    )
+    """Agent 1 — context builder."""
+    await _strategist().run_context_builder(race_key)
 
 
 async def job_practice_analysis(race_key: str) -> None:
-    """Run FP1/FP2 practice sentiment extraction (Agent 2)."""
-    from circuits.profiles import get_circuit_profile
-    from intelligence.practice_analyst import analyze_practice_weekend
-    from openf1.client import OpenF1Client
-    from scheduler.calendar import profile_circuit_key
-
-    ctx = _require_ctx()
-    app = ctx.app
-    weekend = get_race_weekend(race_key)
-    if weekend is None:
-        logger.error("practice_analysis: unknown race_key={}", race_key)
-        return
-
-    profile_key = profile_circuit_key(weekend.circuit_key)
-    circuit = get_circuit_profile(profile_key)
-    if circuit is None:
-        logger.error("practice_analysis: no profile for {}", profile_key)
-        return
-
-    client = OpenF1Client()
-    try:
-        signals = await analyze_practice_weekend(
-            client=client,
-            agent=app.state.agent,
-            vector_store=app.state.vector_store,
-            circuit=circuit,
-            year=2026,
-            persist=True,
-        )
-        logger.bind(race_key=race_key, signals=len(signals)).info("practice_analysis complete")
-    except Exception as exc:
-        logger.exception("practice_analysis failed race_key={}: {}", race_key, exc)
-    finally:
-        pass
+    """Agent 2 — practice analyst."""
+    await _strategist().run_practice_analyst(race_key)
 
 
 async def job_quali_broadcast(race_key: str) -> None:
-    """Generate picks and broadcast via WhatsApp."""
-    from whatsapp.broadcast import broadcast_race_picks
-
-    try:
-        summary = await broadcast_race_picks(race_key)
-        logger.bind(race_key=race_key, **summary).info("quali_broadcast complete")
-    except Exception as exc:
-        logger.exception("quali_broadcast failed race_key={}: {}", race_key, exc)
+    """Agent 3 — quali strategist + WhatsApp broadcast."""
+    await _strategist().run_quali_strategist(race_key)
 
 
 async def job_race_monitor_start(race_key: str) -> None:
-    """Agent 4 stub — live race monitor (Phase 6)."""
-    logger.bind(race_key=race_key).info("Agent 4 not yet implemented — race_monitor_start skipped")
+    """Agent 4 — live race monitor."""
+    await _strategist().run_race_monitor(race_key)
 
 
 async def job_post_race_scorer(race_key: str) -> None:
-    """Score picks and send post-race recap."""
-    from intelligence.scorer import broadcast_race_recap, score_race
-
-    try:
-        await score_race(race_key)
-        recap = await broadcast_race_recap(race_key)
-        logger.bind(race_key=race_key, **recap).info("post_race_scorer complete")
-    except Exception as exc:
-        logger.exception("post_race_scorer failed race_key={}: {}", race_key, exc)
+    """Agent 5 — scorer and learner."""
+    await _strategist().run_scorer_and_learner(race_key)
 
 
 def _job_times(weekend: RaceWeekend) -> list[tuple[str, datetime, Any]]:
@@ -132,9 +89,6 @@ def register_weekend_jobs(scheduler: AsyncIOScheduler, weekend: RaceWeekend) -> 
 
     Skips jobs whose run time is already in the past. Uses stable job IDs
     so restarts do not duplicate work.
-
-    Returns:
-        Number of jobs scheduled.
     """
     now = datetime.now(tz=UTC)
     scheduled = 0
@@ -156,12 +110,7 @@ def register_weekend_jobs(scheduler: AsyncIOScheduler, weekend: RaceWeekend) -> 
 
 
 def register_all_weekend_jobs(scheduler: AsyncIOScheduler) -> int:
-    """
-    Schedule jobs for every 2026 race weekend.
-
-    Returns:
-        Total jobs scheduled across all weekends.
-    """
+    """Schedule jobs for every 2026 race weekend."""
     total = 0
     for weekend in CALENDAR_2026:
         total += register_weekend_jobs(scheduler, weekend)

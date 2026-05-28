@@ -8,7 +8,18 @@ from typing import Any
 
 from sqlalchemy import select
 
-from db.models import FantasyTeam, PickRow, PracticeSignalRow, SeasonAccuracy, Subscriber, TeamOnboardingState
+from db.models import (
+    FantasyTeam,
+    PickRow,
+    PracticeSignalRow,
+    RaceEventRow,
+    RaceMonitorState,
+    SeasonAccuracy,
+    SignalQualityRow,
+    Subscriber,
+    TeamOnboardingState,
+)
+from orchestrator.race_context import RaceEvent, SignalQuality, SignalQualityEntry
 from db.session import get_session
 from intelligence.schemas import PickOutput, PracticeSignal
 
@@ -286,3 +297,167 @@ async def update_pick_result(
             raise ValueError(f"Pick {pick_id} not found")
         row.actual_points_delta = actual_points_delta
         row.was_correct = was_correct
+
+
+async def get_all_picks_for_race(race_key: str) -> list[PickRow]:
+    """All pick rows for a race (any phone)."""
+    async with get_session() as session:
+        result = await session.execute(
+            select(PickRow).where(PickRow.race_key == race_key).order_by(PickRow.pick_rank)
+        )
+        return list(result.scalars().all())
+
+
+async def load_practice_signals_by_circuit(circuit_key: str) -> list[PracticeSignal]:
+    """Load latest practice signals for a circuit."""
+    async with get_session() as session:
+        result = await session.execute(
+            select(PracticeSignalRow)
+            .where(PracticeSignalRow.circuit_key == circuit_key)
+            .order_by(PracticeSignalRow.created_at.desc())
+        )
+        rows = list(result.scalars().all())
+    return [
+        PracticeSignal(
+            driver_number=r.driver_number,
+            driver_code=r.driver_code,
+            session=r.session_label,
+            setup_sentiment=r.setup_sentiment,
+            tire_confidence=r.tire_confidence,
+            mechanical_flags=list(r.mechanical_flags or []),
+            pace_satisfaction=r.pace_satisfaction,
+            anomaly_flags=list(r.anomaly_flags or []),
+            raw_evidence=list(r.raw_evidence or []),
+        )
+        for r in rows
+    ]
+
+
+async def list_live_alert_subscribers() -> list[Subscriber]:
+    """Active subscribers with live race alerts enabled."""
+    async with get_session() as session:
+        result = await session.execute(
+            select(Subscriber).where(
+                Subscriber.active.is_(True),
+                Subscriber.live_alerts.is_(True),
+            )
+        )
+        return list(result.scalars().all())
+
+
+async def update_subscriber_preferences(
+    phone: str,
+    *,
+    live_alerts: bool | None = None,
+    cadence_preference: str | None = None,
+) -> Subscriber | None:
+    """Update subscriber LIVE/cadence preferences."""
+    async with get_session() as session:
+        row = await session.get(Subscriber, phone)
+        if row is None:
+            return None
+        if live_alerts is not None:
+            row.live_alerts = live_alerts
+        if cadence_preference is not None:
+            row.cadence_preference = cadence_preference
+        await session.flush()
+        return row
+
+
+async def save_race_event(event: RaceEvent) -> None:
+    """Persist a live race monitor event."""
+    async with get_session() as session:
+        session.add(
+            RaceEventRow(
+                race_key=event.race_key,
+                event_type=event.event_type.value,
+                lap=event.lap,
+                description=event.description,
+                driver_code=event.driver_code,
+                utc_timestamp=event.utc_timestamp,
+            )
+        )
+
+
+async def get_monitor_state(race_key: str) -> RaceMonitorState | None:
+    """Load race monitor resume state."""
+    async with get_session() as session:
+        return await session.get(RaceMonitorState, race_key)
+
+
+async def set_monitor_state(
+    race_key: str,
+    *,
+    session_key: int,
+    last_lap: int,
+    running: bool,
+) -> None:
+    """Upsert race monitor state."""
+    async with get_session() as session:
+        row = await session.get(RaceMonitorState, race_key)
+        if row is None:
+            row = RaceMonitorState(
+                race_key=race_key,
+                session_key=session_key,
+                last_lap=last_lap,
+                running=running,
+            )
+            session.add(row)
+        else:
+            row.session_key = session_key
+            row.last_lap = last_lap
+            row.running = running
+            row.updated_at = datetime.now(tz=UTC)
+
+
+async def upsert_signal_quality_row(
+    circuit_key: str,
+    signal_type: str,
+    hit_rate: float,
+) -> None:
+    """Rolling hit rate update with exponential weight toward recent races."""
+    async with get_session() as session:
+        result = await session.execute(
+            select(SignalQualityRow).where(
+                SignalQualityRow.circuit_key == circuit_key,
+                SignalQualityRow.signal_type == signal_type,
+            )
+        )
+        row = result.scalars().first()
+        if row is None:
+            session.add(
+                SignalQualityRow(
+                    circuit_key=circuit_key,
+                    signal_type=signal_type,
+                    sample_size=1,
+                    hit_rate=hit_rate,
+                )
+            )
+        else:
+            n = row.sample_size
+            row.hit_rate = (row.hit_rate * n + hit_rate) / (n + 1)
+            row.sample_size = n + 1
+            row.updated_at = datetime.now(tz=UTC)
+
+
+async def build_signal_quality_from_db(circuit_key: str) -> SignalQuality | None:
+    """Load signal quality entries for orchestrator context."""
+    async with get_session() as session:
+        result = await session.execute(
+            select(SignalQualityRow).where(SignalQualityRow.circuit_key == circuit_key)
+        )
+        rows = list(result.scalars().all())
+    if not rows:
+        return None
+    entries: dict[str, SignalQualityEntry] = {}
+    for row in rows:
+        mult = 1.3 if row.hit_rate > 0.7 else (0.5 if row.hit_rate < 0.4 else 1.0)
+        mult = max(0.1, min(2.0, mult))
+        entries[row.signal_type] = SignalQualityEntry(
+            circuit_key=row.circuit_key,
+            signal_type=row.signal_type,
+            sample_size=row.sample_size,
+            hit_rate=row.hit_rate,
+            weight_multiplier=mult,
+        )
+    return SignalQuality(entries=entries)

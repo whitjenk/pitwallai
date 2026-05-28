@@ -43,6 +43,30 @@ _DRIVER_PRICE_M: dict[str, float] = {
 _ANOMALY_CONFIDENCE_PENALTY = 12.0
 
 
+def signal_weight_multiplier(
+    signal_type: str,
+    *,
+    circuit_key: str | None = None,
+    quality_entries: dict[str, float] | None = None,
+) -> float:
+    """
+    Agent 5 learned weight for a signal type (0.1–2.0).
+
+    Args:
+        signal_type: e.g. practice_sentiment, anomaly_teammate_gap.
+        circuit_key: Reserved for per-circuit lookup via DB at call site.
+        quality_entries: Pre-loaded multipliers from SignalQuality.
+
+    Returns:
+        Weight multiplier capped to [0.1, 2.0].
+    """
+    _ = circuit_key
+    if not quality_entries:
+        return 1.0
+    raw = quality_entries.get(signal_type, 1.0)
+    return max(0.1, min(2.0, raw))
+
+
 @dataclass(frozen=True)
 class _TransferOption:
     out_code: str
@@ -59,16 +83,20 @@ def _driver_score(
     circuit: CircuitProfile,
     signals: dict[str, PracticeSignal],
     grid: dict[str, int],
+    signal_weights: dict[str, float] | None = None,
 ) -> float:
     """Score a driver for generic or transfer-in evaluation."""
+    weights = signal_weights or {}
+    w_practice = signal_weight_multiplier("practice_sentiment", quality_entries=weights)
+    w_anomaly = signal_weight_multiplier("anomaly_teammate_gap", quality_entries=weights)
     sig = signals.get(code)
     base = 50.0
     if sig:
-        base += sig.setup_sentiment * 15.0
-        base += sig.tire_confidence * 10.0
-        base += sig.pace_satisfaction * 10.0
+        base += sig.setup_sentiment * 15.0 * w_practice
+        base += sig.tire_confidence * 10.0 * w_practice
+        base += sig.pace_satisfaction * 10.0 * w_practice
         if len(sig.anomaly_flags) >= 2:
-            base -= _ANOMALY_CONFIDENCE_PENALTY * (len(sig.anomaly_flags) - 1)
+            base -= _ANOMALY_CONFIDENCE_PENALTY * (len(sig.anomaly_flags) - 1) * w_anomaly
     grid_pos = grid.get(code)
     if grid_pos is not None:
         ceiling = circuit.positions_gained_ceiling

@@ -8,7 +8,7 @@ from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from loguru import logger
 
-from scheduler.jobs import RaceJobContext, register_all_weekend_jobs, set_race_job_context
+from scheduler.jobs import RaceJobContext, register_all_weekend_jobs, set_race_job_context  # noqa: F401
 
 if TYPE_CHECKING:
     from fastapi import FastAPI

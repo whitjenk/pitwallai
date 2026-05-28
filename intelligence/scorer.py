@@ -19,7 +19,6 @@ from intelligence.repository import (
 )
 from openf1.client import OpenF1Client
 from scheduler.calendar import get_next_race_weekend, get_race_weekend
-from scheduler.jobs import _require_ctx
 from whatsapp.message_format import format_recap_message
 from whatsapp.sender import mask_phone, send_message
 

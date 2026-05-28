@@ -2,12 +2,21 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from loguru import logger
 from db.models import Subscriber
 from db.session import get_session
-from intelligence.repository import get_onboarding_state
+from intelligence.repository import (
+    add_user_reported_price_change,
+    get_league_onboarding_state,
+    get_onboarding_state,
+    get_price_prediction_map,
+    update_subscriber_preferences,
+)
+from scheduler.calendar import CALENDAR_2026, get_next_race_weekend
+from whatsapp.league_flow import handle_league_command
 from whatsapp.sender import send_message
 from whatsapp.team_flow import handle_team_command
 
@@ -88,7 +97,10 @@ async def _complete_subscribe(phone: str, timezone: str) -> str:
             row.preferred_provider = row.preferred_provider or "gemini"
 
     logger.bind(phone=phone, timezone=tz_clean).info("Subscriber activated")
-    return _truncate(f"Subscribed. Alerts use {tz_clean}. Send HELP for commands.")
+    return _truncate(
+        f"Subscribed ({tz_clean}). Text LIVE ON for race alerts. "
+        "Text CADENCE RACEDAY for picks only. HELP for commands."
+    )
 
 
 async def _handle_unsubscribe(phone: str) -> str:
@@ -115,14 +127,96 @@ async def _handle_unsubscribe(phone: str) -> str:
 def _handle_help() -> str:
     """Return command list."""
     return _truncate(
-        "Commands: SUBSCRIBE, UNSUBSCRIBE, TEAM, HELP, SETTINGS. "
-        "TEAM = fantasy squad setup."
+        "SUBSCRIBE · UNSUBSCRIBE · TEAM · LEAGUE · LEAGUE UPDATE · PRICE · WHY · LIVE ON/OFF · "
+        "CADENCE FULL/RACEDAY · HELP · SETTINGS"
     )
 
 
 def _handle_settings() -> str:
     """Return BYOK settings link."""
     return _truncate(f"Manage API keys & provider: {_SETTINGS_URL}")
+
+
+async def _handle_live(phone: str, *, enabled: bool) -> str:
+    """Toggle live race day alerts."""
+    row = await update_subscriber_preferences(phone, live_alerts=enabled)
+    if row is None:
+        return _truncate("Subscribe first: text SUBSCRIBE")
+    if enabled:
+        return _truncate("✅ Race day alerts on. You'll get live updates during Sunday's race.")
+    return _truncate("✅ Race day alerts off. Picks only.")
+
+
+async def _handle_cadence(phone: str, *, mode: str) -> str:
+    """Set notification cadence preference."""
+    row = await update_subscriber_preferences(phone, cadence_preference=mode)
+    if row is None:
+        return _truncate("Subscribe first: text SUBSCRIBE")
+    if mode == "FULL":
+        return _truncate(
+            "✅ Full weekend mode. Practice summary, quali picks, live alerts, post-race recap."
+        )
+    return _truncate("✅ Race day only. Saturday picks and live alerts (if LIVE ON).")
+
+
+def _last_race_key() -> str | None:
+    now = datetime.now(tz=UTC)
+    completed = [w for w in CALENDAR_2026 if w.race_utc <= now]
+    if not completed:
+        return None
+    return max(completed, key=lambda w: w.race_utc).race_key
+
+
+def _next_race_key() -> str | None:
+    nxt = get_next_race_weekend(after=datetime.now(tz=UTC))
+    return nxt.race_key if nxt else None
+
+
+async def _handle_price_report(phone: str, raw_text: str) -> str:
+    parts = raw_text.strip().split()
+    if len(parts) != 3:
+        return _truncate("Use: PRICE NOR +0.2")
+    _, code, delta_raw = parts
+    code = code.strip().upper()
+    try:
+        delta = float(delta_raw)
+    except ValueError:
+        return _truncate("Use numeric change like +0.2 or -0.1")
+    race_key = _last_race_key()
+    if race_key is None:
+        return _truncate("No completed race found yet for price reports.")
+    await add_user_reported_price_change(
+        driver_code=code,
+        race_key=race_key,
+        reported_change=delta,
+        reporter_phone=phone,
+    )
+    return _truncate("Thanks! Helps improve predictions.")
+
+
+async def _handle_why(raw_text: str) -> str:
+    parts = raw_text.strip().split()
+    if len(parts) != 2:
+        return _truncate("Use: WHY NOR")
+    _, code = parts
+    code = code.strip().upper()
+    race_key = _next_race_key()
+    if race_key is None:
+        return _truncate("No upcoming race found.")
+    preds = await get_price_prediction_map(race_key)
+    pred = preds.get(code)
+    if pred is None:
+        return _truncate(f"No prediction yet for {code}.")
+    bd = pred.signal_breakdown or {}
+    lines = [
+        f"{code}: likely {pred.predicted_direction} (${pred.predicted_magnitude:.1f}M), conf {pred.confidence:.2f}",
+    ]
+    for key in ("momentum", "value_ratio", "circuit_hist", "practice_align", "ownership_pressure"):
+        seg = bd.get(key) or {}
+        if not seg:
+            continue
+        lines.append(f"{key}: {seg.get('score', 0):+.2f} × {seg.get('weight', 0):.2f}")
+    return _truncate(" | ".join(lines), limit=300)
 
 
 async def handle_inbound_text(phone: str, text: str, raw_text: str) -> None:
@@ -140,8 +234,12 @@ async def handle_inbound_text(phone: str, text: str, raw_text: str) -> None:
 
     try:
         onboarding = await get_onboarding_state(phone)
+        league_state = await get_league_onboarding_state(phone)
         in_team_flow = onboarding is not None and (
             onboarding.awaiting_confirm or onboarding.step > 0
+        )
+        in_league_flow = league_state is not None and (
+            league_state.awaiting_confirm or league_state.step > 0 or league_state.update_mode
         )
 
         if phone in _pending_timezone and text not in {
@@ -154,8 +252,16 @@ async def handle_inbound_text(phone: str, text: str, raw_text: str) -> None:
             reply = await _complete_subscribe(phone, raw_text)
         elif in_team_flow and text != "TEAM":
             reply = await handle_team_command(phone, text, raw_text)
+        elif in_league_flow and text not in {"LEAGUE", "LEAGUE UPDATE"}:
+            reply = await handle_league_command(phone, text, raw_text)
         elif text == "TEAM":
             reply = await handle_team_command(phone, text, raw_text)
+        elif text in {"LEAGUE", "LEAGUE UPDATE"}:
+            reply = await handle_league_command(phone, text, raw_text)
+        elif text.startswith("PRICE "):
+            reply = await _handle_price_report(phone, raw_text)
+        elif text.startswith("WHY "):
+            reply = await _handle_why(raw_text)
         elif text == "SUBSCRIBE":
             reply = await _handle_subscribe(phone)
         elif text == "UNSUBSCRIBE":
@@ -164,6 +270,14 @@ async def handle_inbound_text(phone: str, text: str, raw_text: str) -> None:
             reply = _handle_help()
         elif text == "SETTINGS":
             reply = _handle_settings()
+        elif text == "LIVE ON":
+            reply = await _handle_live(phone, enabled=True)
+        elif text == "LIVE OFF":
+            reply = await _handle_live(phone, enabled=False)
+        elif text == "CADENCE FULL":
+            reply = await _handle_cadence(phone, mode="FULL")
+        elif text in {"CADENCE RACEDAY", "CADENCE RACE_DAY_ONLY"}:
+            reply = await _handle_cadence(phone, mode="RACE_DAY_ONLY")
         else:
             reply = _truncate("Unknown command. Send HELP for options.")
     except ValueError as exc:

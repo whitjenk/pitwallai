@@ -1,0 +1,41 @@
+"""Official F1 Fantasy game rules (2026 season)."""
+
+from fantasy.rules import (
+    BUDGET_CAP_M,
+    CHIP_LIMITLESS,
+    CHIP_NAMES_2026,
+    FREE_TRANSFERS_PER_RACE,
+    MAX_TRANSFERS_WITH_BANK,
+    MIN_ASSET_PRICE_M,
+    PENALTY_EXTRA_TRANSFER_PTS,
+    PENALTY_NOT_CLASSIFIED_RACE,
+    PENALTY_NOT_CLASSIFIED_SPRINT,
+    constructor_points_race,
+    driver_points_qualifying,
+    driver_points_race,
+    driver_points_sprint,
+    max_affordable_transfers,
+    team_value_m,
+    transfer_penalty_points,
+    validate_driver_count,
+)
+
+__all__ = [
+    "BUDGET_CAP_M",
+    "CHIP_LIMITLESS",
+    "CHIP_NAMES_2026",
+    "FREE_TRANSFERS_PER_RACE",
+    "MAX_TRANSFERS_WITH_BANK",
+    "MIN_ASSET_PRICE_M",
+    "PENALTY_EXTRA_TRANSFER_PTS",
+    "PENALTY_NOT_CLASSIFIED_RACE",
+    "PENALTY_NOT_CLASSIFIED_SPRINT",
+    "constructor_points_race",
+    "driver_points_qualifying",
+    "driver_points_race",
+    "driver_points_sprint",
+    "max_affordable_transfers",
+    "team_value_m",
+    "transfer_penalty_points",
+    "validate_driver_count",
+]

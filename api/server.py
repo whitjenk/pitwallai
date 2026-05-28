@@ -15,6 +15,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 from api.picks import router as picks_router
+from openf1.client import OpenF1Client
 from api.rehearsal import SCENARIOS, RehearsalEngine
 from pitwallai.agents.radio_intercept.agent import RadioInterceptAgent
 from pitwallai.agents.radio_intercept.config import PitWallSettings
@@ -146,19 +147,26 @@ def create_app(
         app.state.last_picks_result = None
 
         from db.session import init_db
+        from intelligence.price_history import seed_price_history
         from intelligence.picks_config import PicksSettings
         from intelligence.picks_scheduler import PicksScheduler
+        from scheduler.runtime import start_race_scheduler, stop_race_scheduler
+        from whatsapp.settings import get_whatsapp_settings
 
         await init_db()
+        await seed_price_history()
         picks_settings = PicksSettings.from_env(mode=mode)
         app.state.picks_settings = picks_settings
         app.state.picks_scheduler = PicksScheduler(app, picks_settings)
         if picks_settings.auto_enabled:
             app.state.picks_scheduler.start()
             log.info(
-                "Picks auto-generation enabled (every {}s)",
+                "Picks poll enabled (every {}s) — quali broadcast uses race scheduler",
                 picks_settings.interval_seconds,
             )
+
+        wa_settings = get_whatsapp_settings()
+        app.state.race_scheduler = start_race_scheduler(app, wa_settings.database_url)
 
         vector_store = MockVectorStore(
             embedding_cache_size=pitwall_settings.embedding_cache_size,
@@ -209,14 +217,28 @@ def create_app(
             engine.start_background(speed_multiplier=rehearsal_speed)
             log.info("Monaco 2024 rehearsal auto-started")
 
+        from agents.race_monitor import resume_monitors_on_startup
+        from agents.base import AgentRunDependencies
+
+        monitor_deps = AgentRunDependencies(
+            openf1_client=OpenF1Client(),
+            radio_agent=agent,
+            vector_store=vector_store,
+            settings=pitwall_settings,
+        )
+        await resume_monitors_on_startup(monitor_deps)
+
         log.info("PitWallAI startup complete")
 
     @app.on_event("shutdown")
     async def on_shutdown() -> None:
         """Stop decoder pipeline and cancel background tasks."""
-        scheduler = getattr(app.state, "picks_scheduler", None)
-        if scheduler is not None:
-            await scheduler.stop()
+        from scheduler.runtime import stop_race_scheduler
+
+        await stop_race_scheduler()
+        picks_sched = getattr(app.state, "picks_scheduler", None)
+        if picks_sched is not None:
+            await picks_sched.stop()
         decoder: RadioInterceptDecoder = app.state.decoder
         await decoder.stop()
         for task in app.state.pipeline_tasks:

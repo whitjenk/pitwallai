@@ -16,6 +16,9 @@ Developer-facing documentation for the radio intercept pipeline, WhatsApp integr
 | Practice Analyst (FP1/FP2 + anomalies) | Shipped |
 | Pick generator (PATH A/B) + audit log | Shipped |
 | `/api/picks` + scheduled picks job | Shipped |
+| APScheduler race calendar + WhatsApp broadcast | Shipped |
+| Post-race scorer + recap broadcast | Shipped |
+| Lead Strategist + Agents 1–5 (Phase 6) | Shipped |
 | Quali Strategist | Planned |
 | Scorer + season leaderboard | Planned |
 | `TEAM` fantasy setup command | Shipped |
@@ -118,7 +121,8 @@ Copy `.env.example` to `.env`.
 | Decode | `PITWALL_DECODE_BACKEND` | `rules`, `hybrid`, `llm` |
 | LLM | `PITWALL_LLM_PROVIDER`, `PITWALL_LLM_MODEL`, `PITWALL_LLM_USE_VERTEX`, `GOOGLE_CLOUD_PROJECT` | Vertex Gemini default |
 | Budget | `PITWALL_LLM_BUDGET_ACK`, `PITWALL_LLM_MAX_*` | Spend guardrails |
-| WhatsApp | `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WEBHOOK_VERIFY_TOKEN` | Meta Cloud API |
+| WhatsApp | `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WEBHOOK_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET` | Meta Cloud API |
+| Picks API | `PITWALL_PICKS_API_KEY` | Protects `/api/picks` (required for `?phone=` personalized access) |
 | Security | `ENCRYPTION_KEY` | Fernet for BYOK keys at rest |
 | Database | `DATABASE_URL` | Postgres (Railway injects in prod) |
 
@@ -150,7 +154,7 @@ Settings load via `whatsapp/settings.py` (`WhatsAppSettings`, pydantic-settings)
 **Webhook** (registered on `main:app`):
 
 - `GET /webhook` — Meta verify (`hub.mode`, `hub.verify_token`, `hub.challenge`)
-- `POST /webhook` — returns 200 immediately; processes inbound messages in background
+- `POST /webhook` — returns 200 immediately; processes inbound messages in background. Requires `WHATSAPP_APP_SECRET` and valid `X-Hub-Signature-256` (HMAC-SHA256 of raw body). Set `PITWALL_WEBHOOK_SKIP_SIGNATURE=1` for local dev only (ignored in `live` mode). Inbound `message_id` values are deduplicated in DB for safe retries across instances, with retention pruning.
 
 **Commands** (`whatsapp/commands.py`):
 
@@ -193,6 +197,12 @@ Endpoints (included on the main FastAPI app):
 
 Query parameters: `phone` (personalized PATH A), `circuit_key`, `year`, `refresh`.
 
+**Auth:** Set `PITWALL_PICKS_API_KEY` and pass `X-PitWall-API-Key: <key>` (or `Authorization: Bearer <key>`) on every `/api/picks` request. Requests fail with 503 until the server key is configured.
+
+**Operational retention:** security tracking tables are pruned periodically in-process:
+- processed inbound webhook IDs: ~7 days
+- live alert delivery logs: ~14 days
+
 The pipeline (`intelligence/picks_pipeline.py`) runs FP1/FP2 practice analysis → qualifying/weather fetch → pick generation → append-only `picks` audit log.
 
 **Scheduler** (background asyncio task on startup when `PITWALL_PICKS_AUTO=true`, default on in `live` mode):
@@ -202,6 +212,42 @@ The pipeline (`intelligence/picks_pipeline.py`) runs FP1/FP2 practice analysis �
 - `PITWALL_RACE_YEAR` — default `2026`
 
 Active weekend detection uses OpenF1 Race sessions nearest to “now”, unless `PITWALL_CIRCUIT_KEY` is set.
+
+---
+
+## Race weekend delivery (Phase 4)
+
+**Calendar** — `scheduler/calendar.py` hard-codes 22 confirmed 2026 rounds (Bahrain/Jeddah cancelled). All times UTC; `fantasy_lock_utc` = race − 1hr. `race_key` format: `2026_monaco`.
+
+**F1 Fantasy rules** — `fantasy/rules.py` centralizes official game logic ([game rules](https://fantasy.formula1.com/en/game-rules)): $100M cap (5 drivers + 2 constructors), $3M price floor, 2 free transfers/week (bank +1 → max 3), −10 pts per extra transfer, race points 25–1 (P1–P10), DNF/NC −20 (sprint −10), and six 2026 chips. Pick generation, quali strategist, post-race scoring, and `TEAM` onboarding import from here. Asset prices are approximate placeholders until synced from in-game values.
+
+**APScheduler** — `scheduler/jobs.py` + `scheduler/runtime.py`:
+
+| Job | Trigger | Action |
+|-----|---------|--------|
+| `thursday_context` | race − 72h | Agent 1 stub (logs, no-op) |
+| `practice_analysis` | FP2 + 90min | FP1/FP2 practice analyst |
+| `quali_broadcast` | fantasy_lock − 3h | `broadcast_race_picks()` |
+| `race_monitor_start` | race − 5min | Agent 4 stub |
+| `post_race_scorer` | race + 3h | `score_race()` + `broadcast_race_recap()` |
+
+Jobs persist in Postgres table `apscheduler_jobs` (same `DATABASE_URL`, sync driver). Stable IDs `{race_key}:{job}` + `replace_existing=True` prevent duplicates on Railway restart.
+
+**WhatsApp broadcast** — `whatsapp/broadcast.py` + `whatsapp/message_format.py` (mandatory char assertions: 400 / 350 / 300). Subscriber timezone used only at send time for “hrs to lock”.
+
+**Scoring** — `agents/scorer_learner.py` (Agent 5) updates `picks`, rolls up `season_accuracy`, and writes `signal_quality` weights.
+
+**Orchestration (Phase 6)** — `orchestrator/lead_strategist.py` holds immutable `RaceContext` (`evolve_race_context()` / `model_copy`). Scheduler jobs delegate to:
+
+| Agent | Module | Trigger |
+|-------|--------|---------|
+| 1 Context Builder | `agents/context_builder.py` | Thursday |
+| 2 Practice Analyst | `agents/practice_analyst.py` | FP2 + 90min |
+| 3 Quali Strategist | `agents/quali_strategist.py` | Pre-lock |
+| 4 Race Monitor | `agents/race_monitor.py` | Race − 5min (long-lived) |
+| 5 Scorer/Learner | `agents/scorer_learner.py` | Race + 3h |
+
+Subscriber prefs: `live_alerts`, `cadence_preference` (`FULL` / `RACE_DAY_ONLY`). Commands: `LIVE ON/OFF`, `CADENCE FULL/RACEDAY`.
 
 ---
 

@@ -14,6 +14,8 @@ from intelligence.pick_generator import (
     generate_and_log_picks,
     generate_picks,
 )
+from intelligence.price_predictor import predict_price_changes
+from intelligence.repository import get_price_prediction_map
 from intelligence.practice_analyst import analyze_practice_weekend
 from intelligence.repository import get_fantasy_team
 from intelligence.schemas import PickGeneratorInput, PickOutput
@@ -108,6 +110,8 @@ async def run_picks_pipeline(
             weather_forecast = build_weather_forecast(weather_session, samples)
 
     user_team = await get_fantasy_team(phone) if phone else None
+    await predict_price_changes(active.race_key, circuit.openf1_circuit_name)
+    price_predictions = await get_price_prediction_map(active.race_key)
 
     generator_input = PickGeneratorInput(
         circuit=circuit,
@@ -115,6 +119,7 @@ async def run_picks_pipeline(
         qualifying_result=qualifying,
         weather_forecast=weather_forecast,
         user_team=user_team,
+        price_predictions=price_predictions,
         race_key=active.race_key,
         generated_by=_generated_by_label(settings),
     )

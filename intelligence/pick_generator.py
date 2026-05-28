@@ -16,31 +16,42 @@ from intelligence.schemas import (
     QualifyingRow,
     WeatherForecast,
 )
+from fantasy.rules import (
+    DRIVER_PRICES_M,
+    driver_points_qualifying,
+    driver_points_race,
+    driver_price_m,
+    free_transfer_allowance,
+    max_affordable_transfers,
+    transfer_penalty_points,
+)
 from openf1.client import OpenF1Client
 
-# Approximate F1 Fantasy prices (USD millions) — update per season.
-_DRIVER_PRICE_M: dict[str, float] = {
-    "VER": 30.0,
-    "NOR": 28.5,
-    "LEC": 27.0,
-    "PIA": 26.0,
-    "SAI": 24.0,
-    "HAM": 23.0,
-    "RUS": 22.0,
-    "PER": 20.0,
-    "ALO": 18.0,
-    "ALB": 16.0,
-    "GAS": 14.0,
-    "OCO": 13.0,
-    "STR": 12.0,
-    "TSU": 11.0,
-    "HUL": 10.0,
-    "MAG": 9.5,
-    "BOT": 9.0,
-    "ZHOU": 8.5,
-}
-
 _ANOMALY_CONFIDENCE_PENALTY = 12.0
+
+
+def signal_weight_multiplier(
+    signal_type: str,
+    *,
+    circuit_key: str | None = None,
+    quality_entries: dict[str, float] | None = None,
+) -> float:
+    """
+    Agent 5 learned weight for a signal type (0.1–2.0).
+
+    Args:
+        signal_type: e.g. practice_sentiment, anomaly_teammate_gap.
+        circuit_key: Reserved for per-circuit lookup via DB at call site.
+        quality_entries: Pre-loaded multipliers from SignalQuality.
+
+    Returns:
+        Weight multiplier capped to [0.1, 2.0].
+    """
+    _ = circuit_key
+    if not quality_entries:
+        return 1.0
+    raw = quality_entries.get(signal_type, 1.0)
+    return max(0.1, min(2.0, raw))
 
 
 @dataclass(frozen=True)
@@ -59,16 +70,20 @@ def _driver_score(
     circuit: CircuitProfile,
     signals: dict[str, PracticeSignal],
     grid: dict[str, int],
+    signal_weights: dict[str, float] | None = None,
 ) -> float:
     """Score a driver for generic or transfer-in evaluation."""
+    weights = signal_weights or {}
+    w_practice = signal_weight_multiplier("practice_sentiment", quality_entries=weights)
+    w_anomaly = signal_weight_multiplier("anomaly_teammate_gap", quality_entries=weights)
     sig = signals.get(code)
     base = 50.0
     if sig:
-        base += sig.setup_sentiment * 15.0
-        base += sig.tire_confidence * 10.0
-        base += sig.pace_satisfaction * 10.0
+        base += sig.setup_sentiment * 15.0 * w_practice
+        base += sig.tire_confidence * 10.0 * w_practice
+        base += sig.pace_satisfaction * 10.0 * w_practice
         if len(sig.anomaly_flags) >= 2:
-            base -= _ANOMALY_CONFIDENCE_PENALTY * (len(sig.anomaly_flags) - 1)
+            base -= _ANOMALY_CONFIDENCE_PENALTY * (len(sig.anomaly_flags) - 1) * w_anomaly
     grid_pos = grid.get(code)
     if grid_pos is not None:
         ceiling = circuit.positions_gained_ceiling
@@ -118,6 +133,52 @@ def _circuit_note(circuit: CircuitProfile) -> str:
     )[:240]
 
 
+def _price_metadata(
+    *,
+    code_in: str,
+    code_out: str | None,
+    in_team: set[str],
+    price_predictions,
+    has_practice_data: bool,
+) -> dict[str, str | float | None]:
+    pred_map = price_predictions or {}
+    pred = pred_map.get(code_in)
+    if pred is None and (code_out is None or pred_map.get(code_out) is None):
+        return {
+            "price_direction": None,
+            "price_magnitude": None,
+            "price_confidence": None,
+            "price_timing_note": None,
+        }
+    note_parts: list[str] = []
+    if (
+        has_practice_data
+        and pred is not None
+        and pred.predicted_direction == "UP"
+        and float(pred.confidence) > 0.6
+        and code_in not in in_team
+    ):
+        note_parts.append(f"{code_in} rising")
+    pred_out = pred_map.get(code_out) if code_out else None
+    if (
+        has_practice_data
+        and pred_out is not None
+        and pred_out.predicted_direction == "DOWN"
+        and float(pred_out.confidence) > 0.6
+        and code_out in in_team
+    ):
+        note_parts.append(f"{code_out} falling")
+    note = None
+    if note_parts:
+        note = " · ".join(note_parts)
+    return {
+        "price_direction": (pred.predicted_direction if pred else None),
+        "price_magnitude": (float(pred.predicted_magnitude) if pred else None),
+        "price_confidence": (float(pred.confidence) if pred else None),
+        "price_timing_note": (note[:60] if note else None),
+    }
+
+
 def _enumerate_transfers(
     team: FantasyTeam,
     *,
@@ -141,23 +202,41 @@ def _enumerate_transfers(
         return []
 
     budget = team.remaining_budget
-    transfers = team.transfers_available
-    if transfers <= 0:
+    limitless = bool((team.chips_used or {}).get("limitless"))
+    transfer_cap = max_affordable_transfers(
+        team.transfers_available,
+        limitless_chip=limitless,
+    )
+    free_allowance = free_transfer_allowance(
+        team.transfers_available,
+        limitless_chip=limitless,
+    )
+    if transfer_cap <= 0:
         return []
 
     options: list[_TransferOption] = []
-    pool = set(_DRIVER_PRICE_M.keys()) - set(roster)
+    pool = set(DRIVER_PRICES_M.keys()) - set(roster)
 
     for out_code in roster:
-        out_price = _DRIVER_PRICE_M.get(out_code, 15.0)
+        out_price = driver_price_m(out_code)
         for in_code in pool:
-            in_price = _DRIVER_PRICE_M.get(in_code, 15.0)
+            in_price = driver_price_m(in_code)
             delta_cost = in_price - out_price
             if delta_cost > budget:
                 continue
             out_score = _driver_score(out_code, circuit=circuit, signals=signals, grid=grid)
             in_score = _driver_score(in_code, circuit=circuit, signals=signals, grid=grid)
-            expected = round((in_score - out_score) * 0.15, 1)
+            out_pos = grid.get(out_code)
+            in_pos = grid.get(in_code)
+            if out_pos is not None and in_pos is not None:
+                expected = float(
+                    driver_points_qualifying(in_pos)
+                    - driver_points_qualifying(out_pos)
+                    + transfer_penalty_points(1, free_allowance)
+                )
+            else:
+                expected = round((in_score - out_score) * 0.15, 1)
+            expected = round(expected, 1)
             in_sig = signals.get(in_code)
             out_sig = signals.get(out_code)
             conf = min(95.0, max(35.0, 55.0 + expected * 2.0))
@@ -206,7 +285,7 @@ async def _historical_points_hint(
     results = await client.get_session_results(sk)
     for row in results:
         if driver_code_for(row.driver_number) == driver_code and row.position is not None:
-            return max(0.0, 26.0 - float(row.position) * 1.2)
+            return float(driver_points_race(row.position))
     return 0.0
 
 
@@ -243,6 +322,8 @@ def _path_personalized(
         grid=grid,
     )
     picks: list[PickRecommendation] = []
+    team_drivers = {d for d in (ctx.user_team.driver_1, ctx.user_team.driver_2, ctx.user_team.driver_3, ctx.user_team.driver_4, ctx.user_team.driver_5) if d}
+    has_practice_data = bool(ctx.practice_signals)
     for rank, opt in enumerate(options[:3], start=1):
         saved = opt.budget_saved
         save_str = f"Saves ${abs(saved):.1f}M." if saved >= 0 else f"Costs ${abs(saved):.1f}M."
@@ -263,6 +344,13 @@ def _path_personalized(
                 predicted_points_delta=opt.expected_delta,
                 transfer_out=opt.out_code,
                 transfer_in=opt.in_code,
+                **_price_metadata(
+                    code_in=opt.in_code,
+                    code_out=opt.out_code,
+                    in_team=team_drivers,
+                    price_predictions=ctx.price_predictions,
+                    has_practice_data=has_practice_data,
+                ),
             )
         )
     if not picks:
@@ -283,7 +371,7 @@ def _path_generic(
     grid: dict[str, int],
 ) -> PickOutput:
     scored: list[tuple[str, float]] = []
-    for code in _DRIVER_PRICE_M:
+    for code in DRIVER_PRICES_M:
         scored.append(
             (
                 code,
@@ -308,6 +396,13 @@ def _path_generic(
                 reasoning=reasoning,
                 driver_code=code,
                 predicted_points_delta=None,
+                **_price_metadata(
+                    code_in=code,
+                    code_out=None,
+                    in_team=set(),
+                    price_predictions=ctx.price_predictions,
+                    has_practice_data=bool(ctx.practice_signals),
+                ),
             )
         )
     note = _confidence_note(ctx.practice_signals, ctx.weather_forecast)

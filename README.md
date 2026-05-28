@@ -130,6 +130,16 @@ DecodedTransmission (Pydantic v2, frozen)
 
 Contributions are open. The five-agent architecture is the roadmap — see [TECHNICAL.md](TECHNICAL.md) for implementation contracts. New agents must follow the established pattern: typed `AgentDependencies`, `RunContext`-scoped tools, Pydantic v2 output model, asyncio-native throughout. Open an issue before starting a new agent.
 
+## Disclaimer
+
+PitWallAI is an independent open-source fan project. It is **not** affiliated with, endorsed by, or sponsored by Formula One Licensing B.V., the FIA, or the official [F1 Fantasy](https://fantasy.formula1.com/) game. F1, Formula 1, and related marks are trademarks of their respective owners.
+
+Fantasy scoring and prices in this repo are simplified approximations of published game rules — always confirm transfers and points in the official app before lock.
+
+Live timing and session data may be sourced from [OpenF1](https://openf1.org/) and other public APIs; see their terms for attribution and use.
+
+WhatsApp is a trademark of Meta Platforms, Inc. Subscribers opt in via **SUBSCRIBE** and can opt out with **UNSUBSCRIBE**. Phone numbers and team data are stored to deliver picks; do not deploy without a privacy policy appropriate for your jurisdiction.
+
 ## License
 
 MIT

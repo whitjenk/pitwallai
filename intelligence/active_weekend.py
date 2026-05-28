@@ -29,8 +29,8 @@ class ActiveWeekend:
 
     @property
     def race_key(self) -> str:
-        """Stable key for picks audit log."""
-        return f"{self.circuit_key}:{self.year}"
+        """Stable key for picks audit log (e.g. 2026_monaco)."""
+        return f"{self.year}_{self.circuit_key}"
 
 
 def _profile_for_openf1_name(

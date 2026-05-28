@@ -22,6 +22,7 @@ class PicksSettings:
     interval_seconds: int
     race_year: int
     circuit_key_override: str | None
+    api_key: str
 
     @classmethod
     def from_env(cls, *, mode: str = "rehearsal") -> PicksSettings:
@@ -41,10 +42,12 @@ class PicksSettings:
         interval = max(300, int(os.getenv("PITWALL_PICKS_INTERVAL_SECONDS", "1800")))
         year = int(os.getenv("PITWALL_RACE_YEAR", str(os.getenv("PITWALL_YEAR", "2026"))))
         override = os.getenv("PITWALL_CIRCUIT_KEY", "").strip() or None
+        api_key = os.getenv("PITWALL_PICKS_API_KEY", "").strip()
 
         return cls(
             auto_enabled=auto_enabled,
             interval_seconds=interval,
             race_year=year,
             circuit_key_override=override,
+            api_key=api_key,
         )

@@ -5,15 +5,24 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
+from api.picks_auth import require_picks_api_key
 from intelligence.active_weekend import ActiveWeekend
 from intelligence.picks_config import PicksSettings
 from intelligence.picks_pipeline import PicksRunResult
 from intelligence.schemas import PickOutput
 
 router = APIRouter(prefix="/api/picks", tags=["picks"])
+
+
+def _verify_picks_access(
+    request: Request,
+    phone: str | None = Query(default=None),
+    x_pitwall_api_key: str | None = Header(default=None, alias="X-PitWall-API-Key"),
+) -> None:
+    require_picks_api_key(request, phone, x_pitwall_api_key)
 
 
 class ActiveWeekendResponse(BaseModel):
@@ -85,7 +94,7 @@ def _matches_cached(
     return True
 
 
-@router.get("", response_model=PicksResponse)
+@router.get("", response_model=PicksResponse, dependencies=[Depends(_verify_picks_access)])
 async def get_picks(
     request: Request,
     phone: str | None = Query(
@@ -132,7 +141,7 @@ async def get_picks(
     return _result_response(result, cached=False)
 
 
-@router.post("/generate", response_model=PicksResponse)
+@router.post("/generate", response_model=PicksResponse, dependencies=[Depends(_verify_picks_access)])
 async def generate_picks(
     request: Request,
     phone: str | None = Query(default=None),
@@ -161,7 +170,7 @@ async def generate_picks(
     return _result_response(result, cached=False)
 
 
-@router.get("/status")
+@router.get("/status", dependencies=[Depends(_verify_picks_access)])
 async def picks_status(request: Request) -> dict[str, Any]:
     """
     Return picks scheduler status and last run metadata.

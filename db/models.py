@@ -6,6 +6,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
+from pydantic import BaseModel, Field
 from sqlalchemy import (
     Boolean,
     DateTime,
@@ -14,6 +15,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -34,11 +36,26 @@ class Subscriber(Base):
     preferred_provider: Mapped[str] = mapped_column(String(32), nullable=False, default="gemini")
     encrypted_api_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    live_alerts: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    cadence_preference: Mapped[str] = mapped_column(String(20), nullable=False, default="FULL")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         server_default=func.now(),
     )
+
+
+class OpponentProfile(BaseModel):
+    """User-estimated league opponent profile persisted as JSON."""
+
+    nickname: str
+    estimated_budget: float | None = None
+    known_drivers: list[str] = Field(default_factory=list)
+    chip_wildcard_used: bool = False
+    chip_limitless_used: bool = False
+    chip_megadrivers_used: bool = False
+    tendency: str | None = None
+    last_updated: datetime
 
 
 class FantasyTeam(Base):
@@ -64,8 +81,14 @@ class FantasyTeam(Base):
     constructor_1: Mapped[str | None] = mapped_column(String(8), nullable=True)
     constructor_2: Mapped[str | None] = mapped_column(String(8), nullable=True)
     remaining_budget: Mapped[float | None] = mapped_column(Float, nullable=True)
-    transfers_available: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
+    transfers_available: Mapped[int] = mapped_column(Integer, nullable=False, default=-1)
     chips_used: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    league_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    league_position: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    league_total_races: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    league_strategy: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    opponent_profiles: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
+    league_mode_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -86,6 +109,29 @@ class TeamOnboardingState(Base):
     )
     step: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     awaiting_confirm: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class LeagueOnboardingState(Base):
+    """Persisted LEAGUE command conversation state."""
+
+    __tablename__ = "league_onboarding_state"
+
+    phone: Mapped[str] = mapped_column(
+        String(20),
+        ForeignKey("subscribers.phone", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    step: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    awaiting_confirm: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    update_mode: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    pending_nickname: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    draft_opponents: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -118,6 +164,103 @@ class PracticeSignalRow(Base):
     )
 
 
+class RaceEventRow(Base):
+    """Persisted live race monitor events."""
+
+    __tablename__ = "race_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    race_key: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    event_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    lap: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    driver_code: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    utc_timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class RaceMonitorState(Base):
+    """Resume state for Agent 4 after process restart."""
+
+    __tablename__ = "race_monitor_state"
+
+    race_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    session_key: Mapped[int] = mapped_column(Integer, nullable=False)
+    last_lap: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    running: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class ProcessedInboundMessage(Base):
+    """Dedup ledger for inbound WhatsApp webhook message IDs."""
+
+    __tablename__ = "processed_inbound_messages"
+
+    message_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    processed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+
+class LiveAlertDelivery(Base):
+    """Per-subscriber live alert deliveries for cross-instance rate limiting."""
+
+    __tablename__ = "live_alert_deliveries"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    race_key: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    phone: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    sent_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        index=True,
+    )
+
+
+class SignalQualityRow(Base):
+    """Per-circuit rolling signal hit rates (Agent 5 learner)."""
+
+    __tablename__ = "signal_quality"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    circuit_key: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    signal_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    sample_size: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    hit_rate: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class SeasonAccuracy(Base):
+    """Season-level pick accuracy rollup (one row per season)."""
+
+    __tablename__ = "season_accuracy"
+
+    season: Mapped[int] = mapped_column(Integer, primary_key=True)
+    overall_accuracy: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    personalized_accuracy: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    generic_accuracy: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    best_circuit: Mapped[str] = mapped_column(String(64), nullable=False, default="n/a")
+    worst_circuit: Mapped[str] = mapped_column(String(64), nullable=False, default="n/a")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
 class PickRow(Base):
     """
     Append-only pick audit log.
@@ -138,8 +281,92 @@ class PickRow(Base):
     provider: Mapped[str] = mapped_column(String(32), nullable=False)
     circuit_key: Mapped[str] = mapped_column(String(64), nullable=False)
     predicted_points_delta: Mapped[float | None] = mapped_column(Float, nullable=True)
+    transfer_out: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    transfer_in: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    is_contrarian: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    ownership_tier: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    league_strategy_applied: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    opponent_conflict: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     actual_points_delta: Mapped[float | None] = mapped_column(Float, nullable=True)
     was_correct: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+
+class PickOwnershipRow(Base):
+    """Aggregate recommendation ownership proxy for a race."""
+
+    __tablename__ = "pick_ownership"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    race_key: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    driver_code: Mapped[str] = mapped_column(String(8), nullable=False, index=True)
+    pitwallai_ownership_pct: Mapped[float] = mapped_column(Float, nullable=False)
+    recommendation_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+
+class DriverPrice(Base):
+    """Immutable per-race driver price history."""
+
+    __tablename__ = "driver_prices"
+    __table_args__ = (UniqueConstraint("driver_code", "race_key", name="uq_driver_price_driver_race"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    driver_code: Mapped[str] = mapped_column(String(8), nullable=False, index=True)
+    race_key: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    price: Mapped[float] = mapped_column(Float, nullable=False)
+    price_change: Mapped[float | None] = mapped_column(Float, nullable=True)
+    fantasy_points_scored: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ownership_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+
+class PricePrediction(Base):
+    """One-race-ahead price direction prediction."""
+
+    __tablename__ = "price_predictions"
+    __table_args__ = (UniqueConstraint("driver_code", "race_key", name="uq_price_prediction_driver_race"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    driver_code: Mapped[str] = mapped_column(String(8), nullable=False, index=True)
+    race_key: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    predicted_direction: Mapped[str] = mapped_column(String(16), nullable=False)
+    predicted_magnitude: Mapped[float] = mapped_column(Float, nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    reasoning: Mapped[str] = mapped_column(Text, nullable=False)
+    signal_breakdown: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    actual_direction: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    actual_magnitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    was_correct: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+
+class UserReportedPriceChange(Base):
+    """Crowdsourced post-race price change reports from subscribers."""
+
+    __tablename__ = "user_reported_price_changes"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    driver_code: Mapped[str] = mapped_column(String(8), nullable=False, index=True)
+    race_key: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    reported_change: Mapped[float] = mapped_column(Float, nullable=False)
+    reporter_phone: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

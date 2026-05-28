@@ -23,6 +23,7 @@ class WhatsAppSettings(BaseSettings):
     whatsapp_token: str = ""
     whatsapp_phone_number_id: str = ""
     webhook_verify_token: str = ""
+    whatsapp_app_secret: str = ""
     encryption_key: str = ""
     database_url: str = ""
 

@@ -91,6 +91,18 @@ def _score_generic_pick(pick: PickRow, positions: dict[str, int]) -> tuple[float
     return pts, correct
 
 
+def _session_quality_note(picks: list[PickRow]) -> str | None:
+    """Compact weekend scorecard for PitWallAI model quality."""
+    if not picks:
+        return None
+    total = len(picks)
+    correct = sum(1 for p in picks if p.was_correct)
+    scored = [float(p.actual_points_delta) for p in picks if p.actual_points_delta is not None]
+    avg_delta = (sum(scored) / len(scored)) if scored else 0.0
+    sign = "+" if avg_delta >= 0 else ""
+    return f"PitWallAI session: {int(round(100 * correct / total))}% hit · {sign}{avg_delta:.1f} avg pts"
+
+
 async def score_race(race_key: str) -> SeasonStats:
     """
     Score all picks for a race and update season accuracy.
@@ -292,6 +304,7 @@ async def _build_recap_for_subscriber(
         correct_count=correct,
         total_picks=total if total > 0 else 3,
         season_accuracy_pct=season_accuracy,
+        session_note=_session_quality_note(picks),
         swap_note=swap_note,
         next_race_name=next_race_name,
         days_until_next=days_until_next,

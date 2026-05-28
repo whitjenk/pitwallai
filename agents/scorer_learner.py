@@ -77,6 +77,18 @@ def _score_generic_pick(pick, positions: dict[str, int]) -> tuple[float, bool]:
     return pts, pos is not None and pos <= 10
 
 
+def _session_quality_note(picks: list) -> str | None:
+    """Compact post-race quality snapshot for this weekend."""
+    if not picks:
+        return None
+    total = len(picks)
+    correct = sum(1 for p in picks if p.was_correct)
+    scored = [float(p.actual_points_delta) for p in picks if p.actual_points_delta is not None]
+    avg_delta = (sum(scored) / len(scored)) if scored else 0.0
+    sign = "+" if avg_delta >= 0 else ""
+    return f"PitWallAI session: {int(round(100 * correct / total))}% hit · {sign}{avg_delta:.1f} avg pts"
+
+
 async def _update_signal_quality(
     ctx: RaceContext,
     picks: list,
@@ -312,6 +324,7 @@ async def _broadcast_recap(
             correct_count=correct,
             total_picks=total,
             season_accuracy_pct=season_accuracy,
+            session_note=_session_quality_note(picks),
             swap_note=swap_note,
             next_race_name=next_name,
             days_until_next=days,

@@ -197,6 +197,7 @@ def format_recap_message(
     correct_count: int,
     total_picks: int,
     season_accuracy_pct: float,
+    session_note: str | None,
     swap_note: str | None,
     next_race_name: str | None,
     days_until_next: int | None,
@@ -214,6 +215,8 @@ def format_recap_message(
         f"Your picks: {correct_count}/{total_picks} correct",
         f"Season accuracy: {season_accuracy_pct:.0f}%",
     ]
+    if session_note:
+        lines.append(session_note)
     if swap_note:
         lines.append(swap_note)
     if next_race_name and days_until_next is not None:

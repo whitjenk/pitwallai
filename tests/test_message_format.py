@@ -82,6 +82,7 @@ def test_recap_under_300_chars() -> None:
         correct_count=2,
         total_picks=3,
         season_accuracy_pct=67.5,
+        session_note="PitWallAI session: 67% hit · +2.3 avg pts",
         swap_note="Best swap netted +12 pts",
         next_race_name="Barcelona-Catalunya Grand Prix",
         days_until_next=7,

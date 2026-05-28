@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from loguru import logger
+
 from circuits.profiles import CircuitProfile, get_circuit_profile
 from intelligence.active_weekend import ActiveWeekend
 from intelligence.context import OrchestratorContext, get_orchestrator_context
@@ -15,7 +17,12 @@ from intelligence.pick_generator import (
 from intelligence.price_predictor import predict_price_changes
 from intelligence.repository import get_price_prediction_map
 from intelligence.practice_analyst import analyze_practice_weekend
-from intelligence.repository import append_picks, get_fantasy_team, load_practice_signals
+from intelligence.repository import (
+    append_picks,
+    get_fantasy_team,
+    get_latest_team_value_snapshot,
+    load_practice_signals,
+)
 from intelligence.schemas import PickGeneratorInput, PickOutput
 from openf1.client import OpenF1Client
 from pitwallai.agents.radio_intercept.agent import RadioInterceptAgent
@@ -67,6 +74,7 @@ async def generate_picks_for_weekend(
     settings: PitWallSettings,
     phone: str | None = None,
     persist_picks: bool = True,
+    pick_status: str = "sent",
     refresh_practice: bool = False,
     ctx: OrchestratorContext | None = None,
 ) -> PickOutput:
@@ -117,6 +125,18 @@ async def generate_picks_for_weekend(
             weather_forecast = build_weather_forecast(weather_sk, samples)
 
     user_team = await get_fantasy_team(phone) if phone else None
+    if user_team is not None and phone:
+        snap = await get_latest_team_value_snapshot(phone)
+        if snap is not None:
+            stored = user_team.remaining_budget
+            if stored is not None and abs(snap.effective_budget - stored) > 0.5:
+                logger.info(
+                    "effective_budget differs from stored phone={} stored={} calc={}",
+                    phone[:6],
+                    stored,
+                    snap.effective_budget,
+                )
+            user_team.remaining_budget = snap.effective_budget
     await predict_price_changes(weekend.race_key, circuit.openf1_circuit_name)
     price_predictions = await get_price_prediction_map(weekend.race_key)
 
@@ -138,5 +158,6 @@ async def generate_picks_for_weekend(
             output,
             phone=phone,
             circuit_key=weekend.circuit_key,
+            pick_status=pick_status,
         )
     return output

@@ -452,6 +452,11 @@ async def generate_quali_picks(
                     and p.transfer_out
                 ):
                     note_parts.append(f"{p.transfer_out} falling")
+                if pred_in and pred_in.confidence > 0.6:
+                    thr = (pred_in.signal_breakdown or {}).get("threshold") or {}
+                    snippet = thr.get("snippet")
+                    if snippet:
+                        note_parts.append(str(snippet)[:40])
                 patched.append(
                     p.model_copy(
                         update={

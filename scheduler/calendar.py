@@ -24,6 +24,7 @@ class RaceWeekend:
     qualifying_utc: datetime
     race_utc: datetime
     fantasy_lock_utc: datetime
+    is_sprint: bool = False
 
 
 def _race(
@@ -32,6 +33,7 @@ def _race(
     *,
     year: int,
     race_utc: datetime,
+    is_sprint: bool = False,
 ) -> RaceWeekend:
     """
     Build a RaceWeekend from race start (UTC).
@@ -56,13 +58,14 @@ def _race(
         qualifying_utc=qualifying,
         race_utc=race,
         fantasy_lock_utc=fantasy_lock,
+        is_sprint=is_sprint,
     )
 
 
 # 2026 confirmed calendar (22 rounds) — race start times approximate UTC
 CALENDAR_2026: tuple[RaceWeekend, ...] = (
     _race("melbourne", "Australian Grand Prix", year=2026, race_utc=datetime(2026, 3, 8, 5, 0, tzinfo=UTC)),
-    _race("shanghai", "Chinese Grand Prix", year=2026, race_utc=datetime(2026, 3, 15, 7, 0, tzinfo=UTC)),
+    _race("shanghai", "Chinese Grand Prix", year=2026, race_utc=datetime(2026, 3, 15, 7, 0, tzinfo=UTC), is_sprint=True),
     _race("suzuka", "Japanese Grand Prix", year=2026, race_utc=datetime(2026, 3, 29, 5, 0, tzinfo=UTC)),
     _race("miami", "Miami Grand Prix", year=2026, race_utc=datetime(2026, 5, 3, 20, 0, tzinfo=UTC)),
     _race("montreal", "Canadian Grand Prix", year=2026, race_utc=datetime(2026, 5, 24, 18, 0, tzinfo=UTC)),
@@ -77,11 +80,11 @@ CALENDAR_2026: tuple[RaceWeekend, ...] = (
     _race("madrid", "Madrid Grand Prix", year=2026, race_utc=datetime(2026, 9, 13, 13, 0, tzinfo=UTC)),
     _race("baku", "Azerbaijan Grand Prix", year=2026, race_utc=datetime(2026, 9, 26, 12, 0, tzinfo=UTC)),
     _race("marina_bay", "Singapore Grand Prix", year=2026, race_utc=datetime(2026, 10, 11, 12, 0, tzinfo=UTC)),
-    _race("austin", "United States Grand Prix", year=2026, race_utc=datetime(2026, 10, 25, 19, 0, tzinfo=UTC)),
+    _race("austin", "United States Grand Prix", year=2026, race_utc=datetime(2026, 10, 25, 19, 0, tzinfo=UTC), is_sprint=True),
     _race("mexico_city", "Mexican Grand Prix", year=2026, race_utc=datetime(2026, 11, 1, 20, 0, tzinfo=UTC)),
     _race("interlagos", "São Paulo Grand Prix", year=2026, race_utc=datetime(2026, 11, 8, 17, 0, tzinfo=UTC)),
     _race("las_vegas", "Las Vegas Grand Prix", year=2026, race_utc=datetime(2026, 11, 21, 6, 0, tzinfo=UTC)),
-    _race("lusail", "Qatar Grand Prix", year=2026, race_utc=datetime(2026, 11, 29, 16, 0, tzinfo=UTC)),
+    _race("lusail", "Qatar Grand Prix", year=2026, race_utc=datetime(2026, 11, 29, 16, 0, tzinfo=UTC), is_sprint=True),
     _race("yas_marina", "Abu Dhabi Grand Prix", year=2026, race_utc=datetime(2026, 12, 6, 13, 0, tzinfo=UTC)),
 )
 

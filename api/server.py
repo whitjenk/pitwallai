@@ -170,6 +170,9 @@ def create_app(
         from whatsapp.settings import get_whatsapp_settings
 
         await init_db()
+        from whatsapp.app_runtime import register_fastapi_app
+
+        register_fastapi_app(app)
         await seed_price_history()
         picks_settings = PicksSettings.from_env(mode=mode)
         app.state.picks_settings = picks_settings
@@ -352,6 +355,26 @@ def create_app(
             page_title=title,
             meta_description=description,
         )
+        return HTMLResponse(content=html)
+
+    @app.get("/recap/{token}", response_class=HTMLResponse)
+    async def race_recap_page(token: str) -> HTMLResponse:
+        """Public post-race recap share page (token is auth)."""
+        from intelligence.recap_page import render_recap_page_for_token
+
+        html = await render_recap_page_for_token(token)
+        if html is None:
+            raise HTTPException(status_code=404, detail="Recap not found")
+        return HTMLResponse(content=html)
+
+    @app.get("/chips/{token}", response_class=HTMLResponse)
+    async def chip_plan_page(token: str) -> HTMLResponse:
+        """Public chip plan calendar page."""
+        from intelligence.chips_page import render_chips_page_for_token
+
+        html = await render_chips_page_for_token(token)
+        if html is None:
+            raise HTTPException(status_code=404, detail="Chip plan not found")
         return HTMLResponse(content=html)
 
     @app.get("/dashboard")

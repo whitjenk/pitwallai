@@ -31,6 +31,50 @@ class PricePredictionOut(BaseModel):
     confidence: float
     reasoning: str
     signal_breakdown: dict[str, Any]
+    price_threshold_note: str | None = None
+
+
+def _avg_points_on_price_move(hist: list, *, rising: bool) -> float:
+    pts: list[float] = []
+    for row in hist:
+        if row.price_change is None or row.fantasy_points_scored is None:
+            continue
+        if rising and row.price_change >= 0.1:
+            pts.append(float(row.fantasy_points_scored))
+        if not rising and row.price_change <= -0.1:
+            pts.append(float(row.fantasy_points_scored))
+    return sum(pts) / len(pts) if pts else 12.0
+
+
+def _price_threshold_fields(
+    *,
+    practice_align: float,
+    circuit_hist: float,
+    confidence: float,
+    hist: list,
+) -> tuple[str | None, dict[str, Any]]:
+    """Threshold note + breakdown when confidence > 0.6."""
+    rise_pts = _avg_points_on_price_move(hist, rising=True)
+    fall_pts = _avg_points_on_price_move(hist, rising=False)
+    pace_pts = max(0.0, practice_align * 15.0 + circuit_hist * 12.0 + 8.0)
+    gap = pace_pts - rise_pts
+    note: str | None = None
+    snippet: str | None = None
+    if confidence > 0.6:
+        if gap > 0:
+            note = "On pace for price rise — holding looks smart"
+        elif gap < -5:
+            note = "Below rise threshold — price drop risk if underperforms"
+        else:
+            note = "Close to price threshold — borderline hold/sell"
+        snippet = f"needs {rise_pts:.0f}pts for rise, on {pace_pts:.0f}pt pace"
+    return note, {
+        "points_needed_for_rise": round(rise_pts, 1),
+        "points_needed_for_fall": round(fall_pts, 1),
+        "current_pace_pts": round(pace_pts, 1),
+        "threshold_gap": round(gap, 1),
+        "snippet": snippet,
+    }
 
 
 def _norm(values: dict[str, float]) -> dict[str, float]:
@@ -220,6 +264,12 @@ async def predict_price_changes(race_key: str, circuit_key: str) -> list[PricePr
         if len(hist) < 5:
             conf -= 0.1
         conf = max(0.0, min(0.9, conf))
+        threshold_note, threshold_meta = _price_threshold_fields(
+            practice_align=s4.get(code, 0.0),
+            circuit_hist=s3.get(code, 0.0),
+            confidence=conf,
+            hist=hist,
+        )
 
         breakdown = {
             "momentum": {"score": round(s1.get(code, 0.0), 3), "weight": weights["momentum"], "contribution": round(contrib["momentum"], 3)},
@@ -231,6 +281,7 @@ async def predict_price_changes(race_key: str, circuit_key: str) -> list[PricePr
             "direction": direction,
             "magnitude": mag,
             "generated_at": datetime.now(tz=UTC).isoformat(),
+            "threshold": threshold_meta,
         }
         dir_label = "up" if direction == "UP" else "down" if direction == "DOWN" else "stable"
         reasoning = (
@@ -245,6 +296,7 @@ async def predict_price_changes(race_key: str, circuit_key: str) -> list[PricePr
             confidence=round(conf, 2),
             reasoning=reasoning[:220],
             signal_breakdown=breakdown,
+            price_threshold_note=threshold_note,
         )
         rows.append(row)
         upserts.append(row.model_dump(mode="python"))

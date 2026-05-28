@@ -38,6 +38,9 @@ class Subscriber(Base):
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     live_alerts: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     cadence_preference: Mapped[str] = mapped_column(String(20), nullable=False, default="FULL")
+    rehearsal_complete: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    share_cards_private: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    races_received: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -321,7 +324,93 @@ class PickRow(Base):
     opponent_conflict: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     actual_points_delta: Mapped[float | None] = mapped_column(Float, nullable=True)
     was_correct: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    pick_status: Mapped[str] = mapped_column(String(16), nullable=False, default="sent")
     created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+
+class ShareCard(Base):
+    """Public race recap share card (token-only access)."""
+
+    __tablename__ = "share_cards"
+
+    share_token: Mapped[str] = mapped_column(String(36), primary_key=True)
+    phone: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    race_key: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    race_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    circuit_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    picks_correct: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    picks_total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    accuracy_pct: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    season_accuracy_pct: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    best_pick_driver: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    best_pick_delta: Mapped[float | None] = mapped_column(Float, nullable=True)
+    league_position_delta: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    vs_no_change_delta: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pick_details: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
+    is_public: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+
+class ChipPlanStore(Base):
+    """Persisted chip planner output for web share."""
+
+    __tablename__ = "chip_plans"
+
+    share_token: Mapped[str] = mapped_column(String(36), primary_key=True)
+    phone: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    plan_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+
+class TeamValueSnapshot(Base):
+    """Post-race team value vs $100M cap baseline."""
+
+    __tablename__ = "team_value_snapshots"
+    __table_args__ = (UniqueConstraint("phone", "race_key", name="uq_team_value_phone_race"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    phone: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    race_key: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    team_value: Mapped[float] = mapped_column(Float, nullable=False)
+    value_delta: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    effective_budget: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+
+class WeekendNotificationSent(Base):
+    """Dedup automated weekend notifications per subscriber."""
+
+    __tablename__ = "weekend_notifications_sent"
+    __table_args__ = (
+        UniqueConstraint(
+            "race_key",
+            "phone",
+            "notification_type",
+            name="uq_weekend_notification",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    race_key: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    phone: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    notification_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    sent_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         server_default=func.now(),

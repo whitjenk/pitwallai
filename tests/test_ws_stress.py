@@ -187,6 +187,7 @@ async def test_mid_session_disconnect_and_reconnect(server_process) -> None:
         task_c2 = asyncio.create_task(collect_client2(ws2))
 
         events_c1: list[dict[str, Any]] = []
+        events_c1_late: list[dict[str, Any]] = []
         ws1 = await websockets.connect(WS_URL, ping_interval=20, ping_timeout=10)
         try:
             async with httpx.AsyncClient() as client:
@@ -208,7 +209,6 @@ async def test_mid_session_disconnect_and_reconnect(server_process) -> None:
 
             assert len(events_c2) >= count_c2_at_disconnect + 3
 
-            events_c1_late: list[dict[str, Any]] = []
             async with websockets.connect(WS_URL, ping_interval=20, ping_timeout=10) as ws1b:
                 start = time.time()
                 while time.time() - start < 60.0 and len(events_c1_late) < 2:

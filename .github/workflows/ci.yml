@@ -39,8 +39,8 @@ jobs:
         env:
           HF_HUB_DISABLE_TELEMETRY: "1"
 
-      - name: Run unit and e2e tests
-        run: PYTHONPATH=. pytest tests/test_e2e.py tests/test_resilience.py -v
+      - name: Run unit, e2e, and LLM contract tests
+        run: PYTHONPATH=. pytest tests/test_e2e.py tests/test_resilience.py tests/test_llm_contracts.py -v
         env:
           HF_HUB_DISABLE_TELEMETRY: "1"
           PITWALL_DECODE_BACKEND: rules

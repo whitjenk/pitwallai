@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import re
 import time
 from dataclasses import replace
 from typing import Protocol
@@ -15,6 +16,81 @@ from pitwallai.agents.radio_intercept.llm_budget import LLMBudgetGuard
 from pitwallai.agents.radio_intercept.llm_decoder import LLMDecoder
 from pitwallai.agents.radio_intercept.models import AgentDependencies, DecodedTransmission, RadioRawMessage
 from pitwallai.agents.radio_intercept.rules_decoder import RulesDecoder
+
+# Phrases that turn evidence into strategist directives (forbidden in evidence_summary).
+_DIRECTIVE_PHRASES: tuple[str, ...] = (
+    "box now",
+    "pit now",
+    "you should",
+    "you must",
+    "we should",
+    "recommend",
+    "recommended",
+    "immediately",
+    "need to box",
+    "need to pit",
+    "must box",
+    "must pit",
+    "consider boxing",
+    "consider pitting",
+    "deploy now",
+    "push now",
+)
+
+_IMPERATIVE_SENTENCE = re.compile(
+    r"^\s*(box|pit|push|deploy|recommend|consider|must|should)\b",
+    re.IGNORECASE,
+)
+
+
+def _sanitise_evidence_summary(text: str | None) -> str | None:
+    """
+    Strip directive language from LLM evidence summaries.
+
+    The evidence_summary field must contain factual observations only — never
+    instructions, recommendations, or action verbs directed at the strategist.
+
+    Args:
+        text: Raw LLM evidence summary.
+
+    Returns:
+        Sanitised summary, or None if nothing observational remains.
+    """
+    if text is None:
+        return None
+    cleaned = text.strip()
+    if not cleaned:
+        return None
+
+    for phrase in _DIRECTIVE_PHRASES:
+        cleaned = re.sub(re.escape(phrase), "", cleaned, flags=re.IGNORECASE)
+
+    cleaned = re.sub(r"\s{2,}", " ", cleaned).strip(" ,;.-")
+
+    sentences = re.split(r"(?<=[.!?])\s+", cleaned)
+    observational = [
+        sentence.strip()
+        for sentence in sentences
+        if sentence.strip() and not _IMPERATIVE_SENTENCE.match(sentence.strip())
+    ]
+    result = " ".join(observational).strip()
+    return result if result else None
+
+
+def apply_llm_output_guards(transmission: DecodedTransmission) -> DecodedTransmission:
+    """
+    Apply post-LLM boundary guards before the result is cached or emitted.
+
+    Args:
+        transmission: LLM decode output after schema validation.
+
+    Returns:
+        Transmission with sanitised evidence_summary.
+    """
+    sanitised = _sanitise_evidence_summary(transmission.evidence_summary)
+    if sanitised == transmission.evidence_summary:
+        return transmission
+    return transmission.model_copy(update={"evidence_summary": sanitised})
 
 
 class TransmissionDecoder(Protocol):
@@ -88,11 +164,11 @@ class HybridDecoder:
             ValueError: If LLM backend requested without model configured.
         """
         effective = settings
-        if settings.decode_backend in (DecodeBackend.LLM, DecodeBackend.HYBRID) and not settings.llm_enabled:
+        if settings.decode_backend in (DecodeBackend.LLM, DecodeBackend.HYBRID) and not settings.llm_model:
             if settings.decode_backend == DecodeBackend.LLM:
                 raise ValueError(
                     "PITWALL_LLM_MODEL must be set for decode backend 'llm' "
-                    "(e.g. openai:gpt-4o-mini)"
+                    "(default: gemini-2.0-flash via Vertex AI)"
                 )
             logger.warning("Hybrid mode without LLM model — running rules-only")
             effective = replace(settings, decode_backend=DecodeBackend.RULES)
@@ -113,11 +189,14 @@ class HybridDecoder:
         if effective.decode_backend in (DecodeBackend.LLM, DecodeBackend.HYBRID) and effective.llm_enabled:
             semaphore = asyncio.Semaphore(effective.llm_max_concurrency)
             self._llm = LLMDecoder(
-                effective.llm_model,
+                effective,
                 semaphore=semaphore,
                 budget_guard=self._budget,
             )
             logger.bind(
+                provider=effective.llm_provider,
+                model=effective.llm_model,
+                vertex=effective.llm_use_vertex,
                 max_session_calls=effective.llm_max_calls_per_session,
                 max_usd_session=effective.llm_max_estimated_usd_per_session,
                 max_usd_day=effective.llm_max_estimated_usd_per_day,
@@ -201,7 +280,7 @@ class HybridDecoder:
 
         result = await self._llm.decode(message, deps)
         await self._budget.record(message.session_key)
-        return result
+        return apply_llm_output_guards(result)
 
     @property
     def budget_guard(self) -> LLMBudgetGuard:

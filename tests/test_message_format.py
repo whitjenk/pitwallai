@@ -8,12 +8,85 @@ from intelligence.schemas import PickOutput, PickRecommendation
 from scheduler.calendar import get_race_weekend
 from whatsapp.message_format import (
     GENERIC_MAX_CHARS,
+    GENERIC_MAX_CHARS_CORE,
+    GENERIC_MAX_CHARS_TOTAL,
     PERSONALIZED_MAX_CHARS,
+    PERSONALIZED_MAX_CHARS_CORE,
+    PERSONALIZED_MAX_CHARS_TOTAL,
+    PICK_BROADCAST_FOOTER,
     RECAP_MAX_CHARS,
+    SEASON_RECAP_MAX_CHARS,
     format_generic_picks,
     format_personalized_picks,
     format_recap_message,
+    format_season_recap_message,
 )
+
+
+def test_personalized_includes_constructor_pit_tendency_when_sampled() -> None:
+    weekend = get_race_weekend("2026_monaco")
+    assert weekend is not None
+    output = PickOutput(
+        picks=[
+            PickRecommendation(
+                rank=1,
+                headline="Swap STR → LEC. +9 expected pts.",
+                confidence=74.0,
+                reasoning="Leclerc P4; historical pit tendency noted.",
+                driver_code="LEC",
+                predicted_points_delta=9.0,
+                transfer_out="STR",
+                transfer_in="LEC",
+                constructor_strategy_note=(
+                    "FER pit tendency (5 races): early 75% in pace-competitive stops (6), "
+                    "cross-team undercut 80% (8 attempts)"
+                ),
+            ),
+        ],
+        personalized=True,
+        circuit_note="Monaco",
+        confidence_note="Strong signals",
+        generated_by="quali_strategist",
+    )
+    msg = format_personalized_picks(weekend, output, timezone="Europe/London")
+    assert "Historical pit trend (FER)" in msg
+    assert "pace-competitive" in msg
+    assert "Monaco" in msg
+    assert PICK_BROADCAST_FOOTER in msg
+    assert "buy now" not in msg.lower()
+    assert len(msg) <= PERSONALIZED_MAX_CHARS_TOTAL
+    core, _, footer = msg.partition(f"\n\n{PICK_BROADCAST_FOOTER}")
+    assert len(core) <= PERSONALIZED_MAX_CHARS_CORE
+    assert footer == ""
+
+
+def test_personalized_omits_pit_tendency_without_min_samples() -> None:
+    weekend = get_race_weekend("2026_monaco")
+    assert weekend is not None
+    output = PickOutput(
+        picks=[
+            PickRecommendation(
+                rank=1,
+                headline="Swap STR → LEC. +9 expected pts.",
+                confidence=74.0,
+                reasoning="Leclerc P4.",
+                driver_code="LEC",
+                predicted_points_delta=9.0,
+                transfer_out="STR",
+                transfer_in="LEC",
+                constructor_strategy_note=(
+                    "FER pit tendency (2 races): early 100% in pace-competitive stops (2), "
+                    "cross-team undercut 50% (1 attempts)"
+                ),
+            ),
+        ],
+        personalized=True,
+        circuit_note="Monaco",
+        confidence_note="OK",
+        generated_by="quali_strategist",
+    )
+    msg = format_personalized_picks(weekend, output, timezone="Europe/London")
+    assert "Historical pit trend" not in msg
 
 
 def test_personalized_under_400_chars() -> None:
@@ -48,7 +121,8 @@ def test_personalized_under_400_chars() -> None:
         generated_by="rules",
     )
     msg = format_personalized_picks(weekend, output, timezone="Europe/London")
-    assert len(msg) <= PERSONALIZED_MAX_CHARS
+    assert PICK_BROADCAST_FOOTER in msg
+    assert len(msg) <= PERSONALIZED_MAX_CHARS_TOTAL
 
 
 def test_generic_under_350_chars() -> None:
@@ -71,7 +145,8 @@ def test_generic_under_350_chars() -> None:
         generated_by="rules",
     )
     msg = format_generic_picks(weekend, output, timezone="America/New_York")
-    assert len(msg) <= GENERIC_MAX_CHARS
+    assert PICK_BROADCAST_FOOTER in msg
+    assert len(msg) <= GENERIC_MAX_CHARS_TOTAL
 
 
 def test_recap_under_300_chars() -> None:
@@ -80,6 +155,7 @@ def test_recap_under_300_chars() -> None:
         correct_count=2,
         total_picks=3,
         season_accuracy_pct=67.5,
+        session_note="PitWallAI GP picks: 67% hit · +2.3 avg race pts",
         swap_note="Best swap netted +12 pts",
         next_race_name="Barcelona-Catalunya Grand Prix",
         days_until_next=7,
@@ -108,4 +184,50 @@ def test_long_reasoning_truncated_not_bloated() -> None:
         generated_by="rules",
     )
     msg = format_generic_picks(weekend, output, timezone="UTC")
-    assert len(msg) <= GENERIC_MAX_CHARS
+    assert PICK_BROADCAST_FOOTER in msg
+    assert len(msg) <= GENERIC_MAX_CHARS_TOTAL
+
+
+def test_personalized_price_line_uses_in_game_transfer_language() -> None:
+    weekend = get_race_weekend("2026_monaco")
+    assert weekend is not None
+    output = PickOutput(
+        picks=[
+            PickRecommendation(
+                rank=1,
+                headline="Swap STR → LEC. +9 expected pts.",
+                confidence=74.0,
+                reasoning="Leclerc P4.",
+                driver_code="LEC",
+                predicted_points_delta=9.0,
+                transfer_out="STR",
+                transfer_in="LEC",
+                price_confidence=0.8,
+                price_direction="UP",
+                price_magnitude=0.3,
+                price_timing_note="LEC rising",
+            ),
+        ],
+        personalized=True,
+        circuit_note="Monaco",
+        confidence_note="OK",
+        generated_by="quali_strategist",
+    )
+    msg = format_personalized_picks(weekend, output, timezone="Europe/London")
+    assert "In-game price predicted" in msg
+    assert "transfer in before price rises in-game" in msg
+
+
+def test_season_recap_shareable_message_limit() -> None:
+    msg = format_season_recap_message(
+        season=2026,
+        personalized_accuracy_pct=61.0,
+        community_accuracy_pct=58.0,
+        best_call="ALB at Monaco (+12 pts)",
+        worst_call="SAI at Silverstone (-9 pts)",
+        biggest_signal="practice radio sentiment was 71% predictive",
+        share_url="https://pitwallai.app/you/abc123token",
+    )
+    assert "Season complete" in msg
+    assert "Reply SHARE" in msg
+    assert len(msg) <= SEASON_RECAP_MAX_CHARS

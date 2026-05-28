@@ -232,8 +232,9 @@ async def predict_price_changes(race_key: str, circuit_key: str) -> list[PricePr
             "magnitude": mag,
             "generated_at": datetime.now(tz=UTC).isoformat(),
         }
+        dir_label = "up" if direction == "UP" else "down" if direction == "DOWN" else "stable"
         reasoning = (
-            f"Price likely {direction} from momentum {s1.get(code,0.0):+.2f}, "
+            f"In-game price predicted {dir_label} from momentum {s1.get(code,0.0):+.2f}, "
             f"value trend {s2.get(code,0.0):+.2f}, and circuit bias {s3.get(code,0.0):+.2f}."
         )
         row = PricePredictionOut(

@@ -21,6 +21,7 @@ from intelligence.repository import (
     upsert_signal_quality_row,
     update_price_prediction_actuals,
 )
+from intelligence.season_recap import build_season_recap
 from intelligence.scorer import _fetch_final_positions, _points_for_position
 from openf1.client import OpenF1Client
 from orchestrator.race_context import (
@@ -29,6 +30,7 @@ from orchestrator.race_context import (
     evolve_race_context,
     RaceContext,
 )
+from intelligence.recap_metrics import hit_rate_pct, momentum_suffix, prev_race_key, session_quality_note
 from scheduler.calendar import get_next_race_weekend, get_race_weekend, profile_circuit_key
 from circuits.profiles import get_circuit_profile
 from whatsapp.message_format import format_recap_message
@@ -250,7 +252,16 @@ async def run_scorer_and_learner(
             logger.info("Price prediction scored race_key={} updated={} hit_rate={:.2f}", race_key, updated, hit_rate)
     new_ctx = evolve_race_context(ctx, signal_quality=signal_quality)
 
-    await _broadcast_recap(new_ctx, overall, signal_quality.quality_note)
+    await _broadcast_recap(
+        new_ctx,
+        overall,
+        signal_quality.quality_note,
+        share_secret=(
+            deps.settings.whatsapp_app_secret
+            or deps.settings.webhook_verify_token
+            or "pitwallai-season-share-local-secret"
+        ),
+    )
 
     logger.bind(race_key=race_key, overall=overall).info("Agent 5 scorer and learner complete")
     return new_ctx
@@ -260,12 +271,15 @@ async def _broadcast_recap(
     ctx: RaceContext,
     season_accuracy: float,
     quality_note: str | None,
+    *,
+    share_secret: str,
 ) -> None:
     """Post-race recap with optional signal quality note for FULL cadence."""
     from intelligence.repository import get_fantasy_team
     from orchestrator.race_context import CadencePreference
 
     race_key = ctx.race_weekend.race_key
+    season_finale = ctx.race_weekend.circuit_key == "yas_marina"
     subs = await list_subscribers_for_race_picks(race_key)
     next_weekend = get_next_race_weekend(after=ctx.race_weekend.race_utc)
     next_name = next_weekend.display_name if next_weekend else None
@@ -283,6 +297,15 @@ async def _broadcast_recap(
             picks = await get_picks_for_race(race_key, phone=None)
         correct = sum(1 for p in picks if p.was_correct)
         total = len(picks) if picks else 3
+        hit_pct = hit_rate_pct(picks) if picks else 0.0
+        prev_hit_pct: float | None = None
+        previous_race = prev_race_key(race_key)
+        if previous_race:
+            prev_picks = await get_picks_for_race(previous_race, phone=sub.phone)
+            if not prev_picks:
+                prev_picks = await get_picks_for_race(previous_race, phone=None)
+            if prev_picks:
+                prev_hit_pct = hit_rate_pct(prev_picks)
 
         swap_note: str | None = None
         team = await get_fantasy_team(sub.phone)
@@ -299,6 +322,10 @@ async def _broadcast_recap(
             correct_count=correct,
             total_picks=total,
             season_accuracy_pct=season_accuracy,
+            session_note=(
+                (session_quality_note(picks) or "")
+                + momentum_suffix(hit_pct, prev_hit_pct)
+            ).strip(),
             swap_note=swap_note,
             next_race_name=next_name,
             days_until_next=days,
@@ -311,5 +338,22 @@ async def _broadcast_recap(
 
         try:
             await send_message(sub.phone, msg)
+            if season_finale:
+                season_recap = await build_season_recap(
+                    phone=sub.phone,
+                    season=2026,
+                    share_base_url="https://pitwallai.app",
+                    share_secret=share_secret,
+                )
+                season_msg = (
+                    "🏁 Season complete.\n"
+                    f"Your GP picks: {season_recap.personalized_accuracy_pct:.0f}% hit rate (race results)\n"
+                    f"PitWallAI community: {season_recap.community_accuracy_pct:.0f}% GP hit rate\n"
+                    f"Best call: {season_recap.best_call}\n"
+                    f"Worst call: {season_recap.worst_call}\n"
+                    f"Biggest signal this season: {season_recap.biggest_signal}\n"
+                    f"See your full season: {season_recap.share_url}"
+                )
+                await send_message(sub.phone, season_msg)
         except Exception as exc:
             logger.error("Recap failed phone={}: {}", mask_phone(sub.phone), exc)

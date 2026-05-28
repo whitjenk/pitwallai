@@ -10,11 +10,17 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from loguru import logger
 from pydantic import BaseModel
 
 from api.picks import router as picks_router
+from intelligence.season_recap import (
+    build_latest_session_snapshot,
+    build_season_recap,
+    parse_share_token,
+)
+from intelligence.share_page import render_season_share_html
 from openf1.client import OpenF1Client
 from api.rehearsal import SCENARIOS, RehearsalEngine
 from pitwallai.agents.radio_intercept.agent import RadioInterceptAgent
@@ -129,6 +135,16 @@ def create_app(
         allow_methods=["GET", "POST"],
         allow_headers=["*"],
     )
+
+    def _season_share_secret() -> str:
+        from whatsapp.settings import get_whatsapp_settings
+
+        wa_settings = get_whatsapp_settings()
+        if wa_settings.whatsapp_app_secret.strip():
+            return wa_settings.whatsapp_app_secret.strip()
+        if wa_settings.webhook_verify_token.strip():
+            return wa_settings.webhook_verify_token.strip()
+        return "pitwallai-season-share-local-secret"
 
     @app.on_event("startup")
     async def on_startup() -> None:
@@ -287,6 +303,56 @@ def create_app(
         key = session_key if session_key is not None else app.state.session.session_key
         snap = await agent.budget_guard.snapshot(key)
         return agent.budget_guard.to_public_dict(snap)
+
+    @app.get("/api/season/{token}")
+    async def season_recap(token: str) -> dict[str, Any]:
+        """Return a public share payload for a season recap token."""
+        parsed = parse_share_token(token, _season_share_secret())
+        if parsed is None:
+            raise HTTPException(status_code=404, detail="Invalid season recap token")
+        phone, season = parsed
+        recap = await build_season_recap(
+            phone=phone,
+            season=season,
+            share_base_url="https://pitwallai.app",
+            share_secret=_season_share_secret(),
+        )
+        return {
+            "season": recap.season,
+            "personalized_accuracy_pct": recap.personalized_accuracy_pct,
+            "community_accuracy_pct": recap.community_accuracy_pct,
+            "best_call": recap.best_call,
+            "worst_call": recap.worst_call,
+            "biggest_signal": recap.biggest_signal,
+            "share_url": recap.share_url,
+        }
+
+    @app.get("/you/{token}", response_class=HTMLResponse)
+    async def season_recap_page(token: str) -> HTMLResponse:
+        """Render a public, share-friendly season recap page."""
+        parsed = parse_share_token(token, _season_share_secret())
+        if parsed is None:
+            raise HTTPException(status_code=404, detail="Invalid season recap token")
+        phone, season = parsed
+        recap = await build_season_recap(
+            phone=phone,
+            season=season,
+            share_base_url="https://pitwallai.app",
+            share_secret=_season_share_secret(),
+        )
+        session = await build_latest_session_snapshot(phone, season)
+        title = f"PitWallAI {recap.season} Season Recap"
+        description = (
+            f"GP pick hit rate {recap.personalized_accuracy_pct:.0f}% vs community "
+            f"{recap.community_accuracy_pct:.0f}% (race results) — best call: {recap.best_call}"
+        )
+        html = render_season_share_html(
+            recap,
+            session=session,
+            page_title=title,
+            meta_description=description,
+        )
+        return HTMLResponse(content=html)
 
     @app.get("/dashboard")
     async def dashboard() -> FileResponse:

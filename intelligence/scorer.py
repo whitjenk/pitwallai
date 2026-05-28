@@ -19,6 +19,12 @@ from intelligence.repository import (
     upsert_season_accuracy,
 )
 from openf1.client import OpenF1Client
+from intelligence.recap_metrics import (
+    hit_rate_pct,
+    momentum_suffix,
+    prev_race_key,
+    session_quality_note,
+)
 from scheduler.calendar import get_next_race_weekend, get_race_weekend
 from whatsapp.message_format import format_recap_message
 from whatsapp.sender import mask_phone, send_message
@@ -28,7 +34,12 @@ from fantasy.rules import driver_points_race as _official_race_points
 
 @dataclass(frozen=True, slots=True)
 class SeasonStats:
-    """Aggregated season accuracy metrics."""
+    """
+    Aggregated season GP pick hit rates.
+
+    ``was_correct`` reflects Grand Prix race outcomes (see recap_metrics.PICK_SCORING_SCOPE).
+    DB column names retain ``*_accuracy`` for compatibility.
+    """
 
     season: int
     overall_accuracy: float
@@ -71,7 +82,7 @@ def _score_personalized_pick(
     pick: PickRow,
     positions: dict[str, int],
 ) -> tuple[float, bool]:
-    """Points delta for swap recommendation vs keeping transfer_out driver."""
+    """GP race points delta for swap vs keeping transfer_out (official race scale)."""
     in_code = pick.transfer_in or pick.driver_code
     out_code = pick.transfer_out
     in_pts = _points_for_position(positions.get(in_code))
@@ -84,7 +95,7 @@ def _score_personalized_pick(
 
 
 def _score_generic_pick(pick: PickRow, positions: dict[str, int]) -> tuple[float, bool]:
-    """Generic pick correct if driver finished in the points (top 10)."""
+    """Generic pick correct if driver scored GP race points (finished P1–P10)."""
     pos = positions.get(pick.driver_code)
     pts = _points_for_position(pos)
     correct = pos is not None and pos <= 10
@@ -93,7 +104,7 @@ def _score_generic_pick(pick: PickRow, positions: dict[str, int]) -> tuple[float
 
 async def score_race(race_key: str) -> SeasonStats:
     """
-    Score all picks for a race and update season accuracy.
+    Score all picks against the Grand Prix race result and update season hit rates.
 
     Args:
         race_key: Calendar race key (e.g. 2026_monaco).
@@ -155,7 +166,7 @@ async def score_race(race_key: str) -> SeasonStats:
 
 
 async def _compute_season_stats(season: int) -> SeasonStats:
-    """Aggregate accuracy from all scored picks in a season."""
+    """Aggregate GP pick hit rate from all scored picks in a season."""
     from sqlalchemy import select
 
     from db.models import PickRow
@@ -269,6 +280,17 @@ async def _build_recap_for_subscriber(
 
     correct = sum(1 for p in picks if p.was_correct)
     total = len(picks)
+    hit_pct = hit_rate_pct(picks) if picks else 0.0
+
+    prev_hit_pct: float | None = None
+    previous_race = prev_race_key(race_key)
+    if previous_race:
+        prev_picks = await get_picks_for_race(previous_race, phone=sub.phone)
+        if not prev_picks:
+            prev_picks = await get_picks_for_race(previous_race, phone=None)
+        if prev_picks:
+            prev_correct = sum(1 for p in prev_picks if p.was_correct)
+            prev_hit_pct = hit_rate_pct(prev_picks)
 
     swap_note: str | None = None
     team = await get_fantasy_team(sub.phone)
@@ -292,6 +314,10 @@ async def _build_recap_for_subscriber(
         correct_count=correct,
         total_picks=total if total > 0 else 3,
         season_accuracy_pct=season_accuracy,
+        session_note=(
+            (session_quality_note(picks) or "")
+            + momentum_suffix(hit_pct, prev_hit_pct)
+        ).strip(),
         swap_note=swap_note,
         next_race_name=next_race_name,
         days_until_next=days_until_next,

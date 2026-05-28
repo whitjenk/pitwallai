@@ -17,6 +17,12 @@ from fantasy.rules import (
     max_affordable_transfers,
     transfer_penalty_points,
 )
+from intelligence.constructor_strategy import (
+    MIN_LEAD_WINDOW_SAMPLES,
+    MIN_SAMPLE_RACES,
+    MIN_UNDERCUT_ATTEMPTS,
+)
+from intelligence.drivers import constructor_code_for_driver
 from intelligence.pick_generator import (
     PickOutput,
     PickRecommendation,
@@ -102,6 +108,56 @@ def _practice_modifier(sig: PracticeSignal | None, weights: dict[str, float]) ->
     return mod
 
 
+def _constructor_strategy_modifier(
+    driver_code: str,
+    ctx: RaceContext,
+    champ: ChampionshipRow | None,
+) -> tuple[float, str]:
+    """
+    Small score nudge from historical OpenF1 pit proxies at this circuit.
+
+    Uses pace-competitive early-stop rate and cross-team undercut success
+    (finish-order proxy). Suppressed unless sample thresholds are met.
+    """
+    intel = ctx.circuit_intel or {}
+    profiles = intel.get("constructor_strategy_profiles") or {}
+    constructor = constructor_code_for_driver(driver_code)
+    profile = profiles.get(constructor)
+    if not profile:
+        return 0.0, ""
+
+    lead_samples = float(profile.get("lead_window_samples") or 0.0)
+    sample_races = float(profile.get("sample_races") or 0.0)
+    undercut_attempts = float(profile.get("undercut_attempts") or 0.0)
+    early_rate = float(profile.get("early_pit_rate") or 0.0)
+    undercut_rate = float(profile.get("undercut_success_rate") or 0.0)
+    hedge_rate = float(profile.get("hedge_rate") or 0.0)
+    if (
+        sample_races < MIN_SAMPLE_RACES
+        or lead_samples < MIN_LEAD_WINDOW_SAMPLES
+        or undercut_attempts < MIN_UNDERCUT_ATTEMPTS
+    ):
+        return 0.0, ""
+
+    pressure = champ.championship_pressure if champ else 0.5
+    desperation_boost = 1.0 + max(0.0, pressure - 0.6) * 0.6
+    undercut_component = (undercut_rate - 0.5) * 6.0 * desperation_boost
+    early_component = (early_rate - 0.5) * 4.0
+    hedge_component = (hedge_rate - 0.4) * 1.5
+    bonus = undercut_component + early_component + hedge_component
+    if abs(bonus) < 0.5:
+        return 0.0, ""
+
+    note = (
+        f"{constructor} pit tendency ({int(sample_races)} races): "
+        f"early {int(round(early_rate * 100))}% in pace-competitive stops "
+        f"({int(round(lead_samples))}), "
+        f"cross-team undercut {int(round(undercut_rate * 100))}% "
+        f"({int(round(undercut_attempts))} attempts)"
+    )
+    return round(bonus, 2), note
+
+
 def _qualifying_bonus(grid_pos: int | None, overtaking_difficulty: float) -> float:
     if grid_pos is None:
         return 0.0
@@ -134,7 +190,7 @@ def _score_driver(
     grid: dict[str, int],
     signals: dict[str, PracticeSignal],
     weights: dict[str, float],
-) -> tuple[float, str]:
+) -> tuple[float, str, str]:
     circuit = ctx.circuit_profile
     champ = (ctx.championship_snapshot or {}).get(code)
     sig = signals.get(code)
@@ -149,9 +205,13 @@ def _score_driver(
     base += _practice_modifier(sig, weights)
     if champ:
         base += champ.championship_pressure * 3.0
+    strategy_bonus, strategy_note = _constructor_strategy_modifier(code, ctx, champ)
+    base += strategy_bonus
     base = min(base, circuit.positions_gained_ceiling * 4.0)
     reasoning = _conflict_note(code, sig, champ)
-    return base, reasoning
+    if strategy_note:
+        reasoning = f"{reasoning}; {strategy_note}" if reasoning else strategy_note
+    return base, reasoning, strategy_note
 
 
 async def _load_qualifying(client: OpenF1Client, ctx: RaceContext) -> list[QualifyingRow]:
@@ -190,8 +250,8 @@ def _enumerate_single_transfers(
             in_price = driver_price_m(in_code)
             if in_price - out_price > budget:
                 continue
-            in_score, in_reason = _score_driver(in_code, ctx, grid, signals, weights)
-            out_score, out_reason = _score_driver(out_code, ctx, grid, signals, weights)
+            in_score, in_reason, in_strategy = _score_driver(in_code, ctx, grid, signals, weights)
+            out_score, out_reason, _ = _score_driver(out_code, ctx, grid, signals, weights)
             out_pos, in_pos = grid.get(out_code), grid.get(in_code)
             if out_pos is not None and in_pos is not None:
                 delta = float(
@@ -215,6 +275,7 @@ def _enumerate_single_transfers(
                 predicted_points_delta=delta,
                 transfer_out=out_code,
                 transfer_in=in_code,
+                constructor_strategy_note=(in_strategy[:120] if in_strategy else None),
             )
             combos.append(
                 _ScoredCombo([pick], delta, conf, reasoning, True, raw_expected_delta=delta),
@@ -254,8 +315,8 @@ def _enumerate_double_transfers(
             reasons: list[str] = []
             picks: list[PickRecommendation] = []
             for out_c, in_c in zip(out_pair, in_pair, strict=True):
-                in_s, r_in = _score_driver(in_c, ctx, grid, signals, weights)
-                out_s, r_out = _score_driver(out_c, ctx, grid, signals, weights)
+                in_s, r_in, in_strategy = _score_driver(in_c, ctx, grid, signals, weights)
+                out_s, r_out, _ = _score_driver(out_c, ctx, grid, signals, weights)
                 out_pos, in_pos = grid.get(out_c), grid.get(in_c)
                 if out_pos is not None and in_pos is not None:
                     delta += driver_points_qualifying(in_pos) - driver_points_qualifying(out_pos)
@@ -278,6 +339,7 @@ def _enumerate_double_transfers(
                     predicted_points_delta=delta,
                     transfer_out=out_pair[0],
                     transfer_in=in_pair[0],
+                    constructor_strategy_note=(in_strategy[:120] if in_strategy else None),
                 )
             )
             combos.append(_ScoredCombo(picks, delta, conf, reasoning, True))
@@ -408,13 +470,13 @@ async def generate_quali_picks(
                 generated_by=generated_by,
             )
 
-    scored: list[tuple[str, float, str]] = []
+    scored: list[tuple[str, float, str, str]] = []
     for code in DRIVER_PRICES_M:
-        score, reason = _score_driver(code, ctx, grid, signal_map, weights)
-        scored.append((code, score, reason))
+        score, reason, strategy_note = _score_driver(code, ctx, grid, signal_map, weights)
+        scored.append((code, score, reason, strategy_note))
     scored.sort(key=lambda x: x[1], reverse=True)
     picks = []
-    for rank, (code, score, reason) in enumerate(scored[:3], start=1):
+    for rank, (code, score, reason, strategy_note) in enumerate(scored[:3], start=1):
         conf = min(90.0, max(40.0, score * 0.9))
         sig = signal_map.get(code)
         if sig and len(sig.anomaly_flags) >= 2:
@@ -441,6 +503,7 @@ async def generate_quali_picks(
                     )
                     else None
                 ),
+                constructor_strategy_note=(strategy_note[:120] if strategy_note else None),
             )
         )
     return PickOutput(

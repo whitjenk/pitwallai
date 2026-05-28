@@ -68,6 +68,7 @@ class PickRecommendation(BaseModel):
     price_magnitude: float | None = None
     price_confidence: float | None = None
     price_timing_note: str | None = None
+    constructor_strategy_note: str | None = None
 
 
 class PickOutput(BaseModel):

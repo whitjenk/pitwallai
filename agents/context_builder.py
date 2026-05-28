@@ -12,6 +12,8 @@ from loguru import logger
 
 from agents.base import AgentOutput, AgentRunDependencies
 from circuits.profiles import CircuitProfile
+from intelligence.constructor_strategy import build_constructor_strategy_profiles
+from intelligence.repository import upsert_constructor_strategy_rows
 from intelligence.schemas import WeatherForecast
 from openf1.client import OpenF1Client
 from orchestrator.race_context import ChampionshipRow, evolve_race_context, RaceContext
@@ -183,11 +185,56 @@ async def _load_circuit_intel(
 
     avg_gain = sum(gains) / len(gains) if gains else circuit.positions_gained_ceiling
     sc_prob = sc_count / races if races else circuit.safety_car_probability
+    strategy_profiles = await build_constructor_strategy_profiles(client, circuit)
+    strategy_rows = [
+        {
+            "constructor_code": p.constructor_code,
+            "sample_races": p.sample_races,
+            "lead_window_samples": p.lead_window_samples,
+            "early_pit_count": p.early_pit_count,
+            "early_pit_rate": p.early_pit_rate,
+            "undercut_attempts": p.undercut_attempts,
+            "undercut_successes": p.undercut_successes,
+            "undercut_success_rate": p.undercut_success_rate,
+            "hedge_events": p.hedge_events,
+            "hedge_rate": p.hedge_rate,
+        }
+        for p in strategy_profiles
+    ]
+    if strategy_rows:
+        await upsert_constructor_strategy_rows(circuit.circuit_key, strategy_rows)
+
+    strategy_summary: list[str] = []
+    for p in sorted(strategy_profiles, key=lambda x: x.early_pit_rate, reverse=True)[:3]:
+        if p.lead_window_samples < 5 or p.sample_races < 3:
+            continue
+        strategy_summary.append(
+            (
+                f"{p.constructor_code}: early stop in pace-competitive window "
+                f"{p.early_pit_count}/{p.lead_window_samples} "
+                f"({int(round(p.early_pit_rate * 100))}%) across {p.sample_races} races"
+            )
+        )
     return {
         "avg_positions_gained_top5": round(avg_gain, 1),
         "safety_car_probability_observed": round(sc_prob, 2),
         "sample_races": races,
         "typical_strategy": "2-stop" if circuit.tire_deg_rate > 0.65 else "1-stop",
+        "constructor_strategy_profiles": {
+            p.constructor_code: {
+                "sample_races": p.sample_races,
+                "lead_window_samples": p.lead_window_samples,
+                "early_pit_count": p.early_pit_count,
+                "early_pit_rate": p.early_pit_rate,
+                "undercut_attempts": p.undercut_attempts,
+                "undercut_successes": p.undercut_successes,
+                "undercut_success_rate": p.undercut_success_rate,
+                "hedge_events": p.hedge_events,
+                "hedge_rate": p.hedge_rate,
+            }
+            for p in strategy_profiles
+        },
+        "constructor_strategy_summary": strategy_summary,
     }
 
 

@@ -120,6 +120,16 @@ class RaceControlMessage(_OpenF1Base):
     flag: str | None = None
 
 
+class DriverSessionRow(_OpenF1Base):
+    """GET /v1/drivers row for a session."""
+
+    session_key: int
+    driver_number: int
+    name_acronym: str | None = None
+    full_name: str | None = None
+    team_name: str | None = None
+
+
 class SessionResultRow(_OpenF1Base):
     """GET /v1/session_result row (qualifying / race results)."""
 

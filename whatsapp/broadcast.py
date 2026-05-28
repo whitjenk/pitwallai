@@ -16,7 +16,11 @@ from openf1.client import OpenF1Client
 from pitwallai.agents.radio_intercept.config import PitWallSettings
 from scheduler.calendar import RaceWeekend, get_race_weekend
 from scheduler.jobs import _require_ctx
-from whatsapp.message_format import format_generic_picks, format_personalized_picks
+from whatsapp.message_format import (
+    PICK_BROADCAST_FOOTER,
+    format_generic_picks,
+    format_personalized_picks,
+)
 from whatsapp.sender import mask_phone, send_message
 
 
@@ -152,6 +156,7 @@ async def _broadcast_to_subscriber(
         )
 
         message = _format_message(weekend, output, sub, personalized=personalized)
+        assert PICK_BROADCAST_FOOTER in message, "Pick broadcast missing mandatory footer"
         await send_message(phone, message)
 
         logger.bind(

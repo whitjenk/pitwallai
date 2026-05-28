@@ -2,6 +2,8 @@
 
 > The most useful thing an F1 fantasy fan has on race weekend.
 
+> **Independent fan project.** PitWallAI is not affiliated with, endorsed by, or connected to Formula 1, F1 Fantasy, ESPN, or any F1 team or constructor. All recommendations are informational only and intended for use within the F1 Fantasy game. Nothing here constitutes financial, betting, or investment advice.
+
 PitWallAI is an open-source multi-agent intelligence system that delivers personalized F1 fantasy picks to your WhatsApp — budget-aware, circuit-adjusted, and powered by signals no pundit has access to.
 
 *[Screenshot placeholder: WhatsApp message showing race picks]*
@@ -39,9 +41,11 @@ Text **HELP** for all commands.
 
 ---
 
-## Season accuracy
+## Season GP pick hit rate
 
-[Link to live leaderboard] — updated after every race.
+Picks are scored against **Grand Prix race results** using the official F1 Fantasy race points scale (not qualifying or sprint). Updated after every race.
+
+[Link to live leaderboard]
 
 ---
 
@@ -134,11 +138,17 @@ Contributions are open. The five-agent architecture is the roadmap — see [TECH
 
 PitWallAI is an independent open-source fan project. It is **not** affiliated with, endorsed by, or sponsored by Formula One Licensing B.V., the FIA, or the official [F1 Fantasy](https://fantasy.formula1.com/) game. F1, Formula 1, and related marks are trademarks of their respective owners.
 
+**AI-generated intelligence.** Picks, recaps, radio decoding, and other outputs may use rules engines, statistical models, and large language models. They can be wrong, incomplete, or out of date — especially when data is missing, sessions change, or the official game applies penalties after the fact. PitWallAI is **not** financial or betting advice. You are responsible for your own fantasy decisions; always verify lineup, budget, transfers, and lock time in the official F1 Fantasy app.
+
 Fantasy scoring and prices in this repo are simplified approximations of published game rules — always confirm transfers and points in the official app before lock.
 
 Live timing and session data may be sourced from [OpenF1](https://openf1.org/) and other public APIs; see their terms for attribution and use.
 
 WhatsApp is a trademark of Meta Platforms, Inc. Subscribers opt in via **SUBSCRIBE** and can opt out with **UNSUBSCRIBE**. Phone numbers and team data are stored to deliver picks; do not deploy without a privacy policy appropriate for your jurisdiction.
+
+## Legal
+
+PitWallAI is an independent fan project not affiliated with Formula 1, F1 Fantasy, ESPN, or any F1 constructor. All picks are informational only. See [DISCLAIMER.md](DISCLAIMER.md) for full terms.
 
 ## License
 

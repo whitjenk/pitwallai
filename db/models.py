@@ -261,6 +261,38 @@ class SeasonAccuracy(Base):
     )
 
 
+class ConstructorStrategyRow(Base):
+    """Per-circuit constructor pit-strategy tendency aggregates."""
+
+    __tablename__ = "constructor_strategy"
+    __table_args__ = (
+        UniqueConstraint(
+            "circuit_key",
+            "constructor_code",
+            name="uq_constructor_strategy_circuit_constructor",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    circuit_key: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    constructor_code: Mapped[str] = mapped_column(String(8), nullable=False, index=True)
+    sample_races: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    lead_window_samples: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    early_pit_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    early_pit_rate: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    undercut_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    undercut_successes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    undercut_success_rate: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    hedge_events: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    hedge_rate: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
 class PickRow(Base):
     """
     Append-only pick audit log.

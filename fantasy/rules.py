@@ -96,6 +96,13 @@ _DRIVER_QUALI_POINTS: dict[int, int] = {
 
 PENALTY_NOT_CLASSIFIED_RACE = -20
 PENALTY_NOT_CLASSIFIED_SPRINT = -10
+PENALTY_QUALIFYING_NC = -5  # NC / DSQ / no time set (official qualifying)
+PENALTY_CONSTRUCTOR_DRIVER_DSQ = -20  # Per disqualified driver (constructor race/quali)
+
+# Constructor pit-stop race points (fastest stop of the team's two drivers)
+PIT_STOP_WORLD_RECORD_S = 1.8  # Published record (McLaren, 2023 Qatar)
+PIT_STOP_FASTEST_BONUS = 5
+PIT_STOP_WORLD_RECORD_BONUS = 15
 
 # Approximate 2026 prices (USD millions) — refresh from in-game values when available
 DRIVER_PRICES_M: dict[str, float] = {
@@ -198,7 +205,11 @@ def validate_team_under_budget(
 
 def driver_points_race(finishing_position: int | None, *, classified: bool = True) -> int:
     """
-    Official Grand Prix points for a finishing position.
+    Official Grand Prix **finishing-position** points (P1–P10 scale).
+
+    Full F1 Fantasy race scoring also awards positions gained/lost, overtakes,
+    fastest lap, and Driver of the Day — not modeled here. PitWallAI pick scoring
+    uses this position scale only (see intelligence/recap_metrics.PICK_SCORING_SCOPE).
 
     Args:
         finishing_position: 1–10 for points positions.
@@ -223,22 +234,120 @@ def driver_points_sprint(finishing_position: int | None, *, classified: bool = T
     return _DRIVER_SPRINT_POINTS.get(finishing_position, 0)
 
 
-def driver_points_qualifying(grid_position: int | None) -> int:
-    """Official qualifying points (P1–P10)."""
-    if grid_position is None or grid_position > 10:
+def driver_points_qualifying(grid_position: int | None, *, classified: bool = True) -> int:
+    """
+    Official qualifying points (P1–P10).
+
+    NC / DSQ / no time set = -5 per published F1 Fantasy rules.
+    """
+    if not classified or grid_position is None:
+        return PENALTY_QUALIFYING_NC
+    if grid_position > 10:
         return 0
     return _DRIVER_QUALI_POINTS.get(grid_position, 0)
 
 
-def constructor_points_race(
-    driver_race_points: list[int],
+def constructor_qualifying_progression(
+    drivers_in_q2: int,
+    drivers_in_q3: int,
 ) -> int:
     """
-    Constructor race score = sum of both drivers' race points (simplified).
+    Official constructor qualifying progression bonus (0–2 drivers each phase).
 
-    Pit-stop bonuses and other constructor-only categories are not modeled yet.
+    Neither Q2: -1 · one Q2: +1 · both Q2: +3 · one Q3: +5 · both Q3: +10
     """
-    return sum(driver_race_points)
+    q2 = max(0, min(2, drivers_in_q2))
+    q3 = max(0, min(2, drivers_in_q3))
+    if q3 == 2:
+        return 10
+    if q3 == 1:
+        return 5
+    if q2 == 2:
+        return 3
+    if q2 == 1:
+        return 1
+    return -1
+
+
+def qualifying_phase_counts_from_grid(
+    grid_positions: list[int | None],
+    *,
+    classified: list[bool] | None = None,
+) -> tuple[int, int]:
+    """
+    Estimate Q2/Q3 reach from final qualifying positions (when session flags unavailable).
+
+    P1–10 → reached Q3 (and Q2); P11–15 → reached Q2 only; P16+ / NC → neither.
+    """
+    drivers_in_q2 = 0
+    drivers_in_q3 = 0
+    for idx, pos in enumerate(grid_positions[:2]):
+        ok = True
+        if classified is not None and idx < len(classified):
+            ok = classified[idx]
+        if not ok or pos is None:
+            continue
+        if pos <= 10:
+            drivers_in_q3 += 1
+            drivers_in_q2 += 1
+        elif pos <= 15:
+            drivers_in_q2 += 1
+    return drivers_in_q2, drivers_in_q3
+
+
+def constructor_points_qualifying(
+    driver_quali_points: list[int],
+    *,
+    drivers_in_q2: int,
+    drivers_in_q3: int,
+) -> int:
+    """Constructor qualifying = sum of drivers' quali pts + Q2/Q3 progression bonus."""
+    driver_total = sum(driver_quali_points[:2])
+    return driver_total + constructor_qualifying_progression(drivers_in_q2, drivers_in_q3)
+
+
+def constructor_pit_stop_points(pit_stop_duration_s: float | None) -> int:
+    """
+    Constructor race pit-stop points from team's fastest stop duration (seconds).
+
+    Official bands: >3.0s=0 · 2.50–2.99=2 · 2.20–2.49=5 · 2.00–2.19=10 · <2.0=20
+    """
+    if pit_stop_duration_s is None:
+        return 0
+    duration = float(pit_stop_duration_s)
+    if duration >= 3.0:
+        return 0
+    if duration >= 2.5:
+        return 2
+    if duration >= 2.2:
+        return 5
+    if duration >= 2.0:
+        return 10
+    return 20
+
+
+def constructor_points_race(
+    driver_race_points: list[int],
+    *,
+    pit_stop_duration_s: float | None = None,
+    has_fastest_pit_in_race: bool = False,
+    pit_world_record: bool = False,
+    drivers_dsq: int = 0,
+) -> int:
+    """
+    Official constructor Grand Prix score.
+
+    Sum of both drivers' race points (excludes Driver of the Day), plus pit-stop
+    time tier, fastest-pit bonus (+5), world-record bonus (+15), minus -20 per DSQ driver.
+    """
+    total = sum(driver_race_points[:2])
+    total += constructor_pit_stop_points(pit_stop_duration_s)
+    if pit_world_record and pit_stop_duration_s is not None and pit_stop_duration_s <= PIT_STOP_WORLD_RECORD_S:
+        total += PIT_STOP_WORLD_RECORD_BONUS
+    elif has_fastest_pit_in_race:
+        total += PIT_STOP_FASTEST_BONUS
+    total += PENALTY_CONSTRUCTOR_DRIVER_DSQ * max(0, min(2, drivers_dsq))
+    return total
 
 
 def transfer_penalty_points(transfers_used: int, free_allowance: int) -> int:

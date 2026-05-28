@@ -12,6 +12,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 
 from db.models import (
+    ConstructorStrategyRow,
     DriverPrice,
     FantasyTeam,
     LeagueOnboardingState,
@@ -814,3 +815,73 @@ async def update_price_prediction_actuals(
             row.was_correct = (row.predicted_direction == actual_dir)
             updated += 1
     return updated
+
+
+async def upsert_constructor_strategy_rows(
+    circuit_key: str,
+    rows: list[dict[str, Any]],
+) -> int:
+    """Upsert constructor strategy tendencies for a circuit."""
+    updated = 0
+    if not rows:
+        return updated
+    async with get_session() as session:
+        for row in rows:
+            result = await session.execute(
+                select(ConstructorStrategyRow).where(
+                    ConstructorStrategyRow.circuit_key == circuit_key,
+                    ConstructorStrategyRow.constructor_code == row["constructor_code"],
+                )
+            )
+            existing = result.scalars().first()
+            if existing is None:
+                session.add(
+                    ConstructorStrategyRow(
+                        circuit_key=circuit_key,
+                        constructor_code=row["constructor_code"],
+                        sample_races=int(row["sample_races"]),
+                        lead_window_samples=int(row["lead_window_samples"]),
+                        early_pit_count=int(row["early_pit_count"]),
+                        early_pit_rate=float(row["early_pit_rate"]),
+                        undercut_attempts=int(row["undercut_attempts"]),
+                        undercut_successes=int(row["undercut_successes"]),
+                        undercut_success_rate=float(row["undercut_success_rate"]),
+                        hedge_events=int(row["hedge_events"]),
+                        hedge_rate=float(row["hedge_rate"]),
+                    )
+                )
+            else:
+                existing.sample_races = int(row["sample_races"])
+                existing.lead_window_samples = int(row["lead_window_samples"])
+                existing.early_pit_count = int(row["early_pit_count"])
+                existing.early_pit_rate = float(row["early_pit_rate"])
+                existing.undercut_attempts = int(row["undercut_attempts"])
+                existing.undercut_successes = int(row["undercut_successes"])
+                existing.undercut_success_rate = float(row["undercut_success_rate"])
+                existing.hedge_events = int(row["hedge_events"])
+                existing.hedge_rate = float(row["hedge_rate"])
+            updated += 1
+    return updated
+
+
+async def load_constructor_strategy(circuit_key: str) -> dict[str, dict[str, Any]]:
+    """Load persisted constructor strategy rows keyed by constructor code."""
+    async with get_session() as session:
+        result = await session.execute(
+            select(ConstructorStrategyRow).where(ConstructorStrategyRow.circuit_key == circuit_key)
+        )
+        rows = list(result.scalars().all())
+    return {
+        row.constructor_code: {
+            "sample_races": row.sample_races,
+            "lead_window_samples": row.lead_window_samples,
+            "early_pit_count": row.early_pit_count,
+            "early_pit_rate": row.early_pit_rate,
+            "undercut_attempts": row.undercut_attempts,
+            "undercut_successes": row.undercut_successes,
+            "undercut_success_rate": row.undercut_success_rate,
+            "hedge_events": row.hedge_events,
+            "hedge_rate": row.hedge_rate,
+        }
+        for row in rows
+    }

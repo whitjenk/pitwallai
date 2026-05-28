@@ -18,6 +18,37 @@ from whatsapp.message_format import (
 )
 
 
+def test_personalized_includes_constructor_strategy_edge() -> None:
+    weekend = get_race_weekend("2026_monaco")
+    assert weekend is not None
+    output = PickOutput(
+        picks=[
+            PickRecommendation(
+                rank=1,
+                headline="Swap STR → LEC. +9 expected pts.",
+                confidence=74.0,
+                reasoning="Leclerc P4; FER strategy trend noted.",
+                driver_code="LEC",
+                predicted_points_delta=9.0,
+                transfer_out="STR",
+                transfer_in="LEC",
+                constructor_strategy_note=(
+                    "FER strategy trend: early-window 78% (12 samples), undercut success 71%"
+                ),
+            ),
+        ],
+        personalized=True,
+        circuit_note="Monaco",
+        confidence_note="Strong signals",
+        generated_by="quali_strategist",
+    )
+    msg = format_personalized_picks(weekend, output, timezone="Europe/London")
+    assert "Strategy edge: FER" in msg
+    assert "undercut" in msg.lower()
+    assert "Monaco" in msg
+    assert len(msg) <= PERSONALIZED_MAX_CHARS
+
+
 def test_personalized_under_400_chars() -> None:
     weekend = get_race_weekend("2026_monaco")
     assert weekend is not None

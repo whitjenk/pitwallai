@@ -63,3 +63,30 @@ def team_for_driver(driver_code: str) -> str:
         "ZHOU": "Kick Sauber",
     }
     return teams.get(driver_code.upper(), "Unknown")
+
+
+def constructor_code_for_driver(driver_code: str) -> str:
+    """Return fantasy constructor code (e.g. FER, RBR) for driver code."""
+    mapping: dict[str, str] = {
+        "VER": "RBR",
+        "PER": "RBR",
+        "NOR": "MCL",
+        "PIA": "MCL",
+        "LEC": "FER",
+        "SAI": "FER",
+        "HAM": "MER",
+        "RUS": "MER",
+        "ALO": "AM",
+        "STR": "AM",
+        "GAS": "ALP",
+        "OCO": "ALP",
+        "ALB": "WIL",
+        "SAR": "WIL",
+        "TSU": "RB",
+        "LAW": "RB",
+        "HUL": "HAA",
+        "MAG": "HAA",
+        "BOT": "SAU",
+        "ZHOU": "SAU",
+    }
+    return mapping.get(driver_code.upper(), "UNK")

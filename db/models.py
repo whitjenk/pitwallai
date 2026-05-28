@@ -118,6 +118,25 @@ class PracticeSignalRow(Base):
     )
 
 
+class SeasonAccuracy(Base):
+    """Season-level pick accuracy rollup (one row per season)."""
+
+    __tablename__ = "season_accuracy"
+
+    season: Mapped[int] = mapped_column(Integer, primary_key=True)
+    overall_accuracy: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    personalized_accuracy: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    generic_accuracy: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    best_circuit: Mapped[str] = mapped_column(String(64), nullable=False, default="n/a")
+    worst_circuit: Mapped[str] = mapped_column(String(64), nullable=False, default="n/a")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
 class PickRow(Base):
     """
     Append-only pick audit log.
@@ -138,6 +157,8 @@ class PickRow(Base):
     provider: Mapped[str] = mapped_column(String(32), nullable=False)
     circuit_key: Mapped[str] = mapped_column(String(64), nullable=False)
     predicted_points_delta: Mapped[float | None] = mapped_column(Float, nullable=True)
+    transfer_out: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    transfer_in: Mapped[str | None] = mapped_column(String(8), nullable=True)
     actual_points_delta: Mapped[float | None] = mapped_column(Float, nullable=True)
     was_correct: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     created_at: Mapped[datetime] = mapped_column(

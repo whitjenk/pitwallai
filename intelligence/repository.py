@@ -8,7 +8,7 @@ from typing import Any
 
 from sqlalchemy import select
 
-from db.models import FantasyTeam, PickRow, PracticeSignalRow, TeamOnboardingState
+from db.models import FantasyTeam, PickRow, PracticeSignalRow, SeasonAccuracy, Subscriber, TeamOnboardingState
 from db.session import get_session
 from intelligence.schemas import PickOutput, PracticeSignal
 
@@ -156,6 +156,85 @@ async def set_onboarding_state(
         return row
 
 
+async def list_active_subscribers() -> list[Subscriber]:
+    """Return all active WhatsApp subscribers."""
+    async with get_session() as session:
+        result = await session.execute(
+            select(Subscriber).where(Subscriber.active.is_(True))
+        )
+        return list(result.scalars().all())
+
+
+async def get_picks_for_race(
+    race_key: str,
+    *,
+    phone: str | None = None,
+) -> list[PickRow]:
+    """Load pick audit rows for a race, optionally filtered by phone."""
+    async with get_session() as session:
+        stmt = select(PickRow).where(PickRow.race_key == race_key)
+        if phone is not None:
+            stmt = stmt.where(PickRow.phone == phone)
+        else:
+            stmt = stmt.where(PickRow.phone.is_(None))
+        stmt = stmt.order_by(PickRow.pick_rank)
+        result = await session.execute(stmt)
+        return list(result.scalars().all())
+
+
+async def list_subscribers_for_race_picks(race_key: str) -> list[Subscriber]:
+    """Subscribers who received picks for this race (distinct phones on audit log)."""
+    async with get_session() as session:
+        result = await session.execute(
+            select(PickRow.phone).where(
+                PickRow.race_key == race_key,
+                PickRow.phone.is_not(None),
+            ).distinct()
+        )
+        phones = [row[0] for row in result.all() if row[0]]
+        if not phones:
+            return await list_active_subscribers()
+        subs: list[Subscriber] = []
+        for phone in phones:
+            sub = await session.get(Subscriber, phone)
+            if sub and sub.active:
+                subs.append(sub)
+        return subs
+
+
+async def upsert_season_accuracy(
+    *,
+    season: int,
+    overall_accuracy: float,
+    personalized_accuracy: float,
+    generic_accuracy: float,
+    best_circuit: str,
+    worst_circuit: str,
+) -> SeasonAccuracy:
+    """Upsert season accuracy stats."""
+    async with get_session() as session:
+        row = await session.get(SeasonAccuracy, season)
+        if row is None:
+            row = SeasonAccuracy(
+                season=season,
+                overall_accuracy=overall_accuracy,
+                personalized_accuracy=personalized_accuracy,
+                generic_accuracy=generic_accuracy,
+                best_circuit=best_circuit,
+                worst_circuit=worst_circuit,
+            )
+            session.add(row)
+        else:
+            row.overall_accuracy = overall_accuracy
+            row.personalized_accuracy = personalized_accuracy
+            row.generic_accuracy = generic_accuracy
+            row.best_circuit = best_circuit
+            row.worst_circuit = worst_circuit
+            row.updated_at = datetime.now(tz=UTC)
+        await session.flush()
+        return row
+
+
 async def append_picks(
     race_key: str,
     output: PickOutput,
@@ -186,6 +265,8 @@ async def append_picks(
                     provider=output.generated_by,
                     circuit_key=circuit_key,
                     predicted_points_delta=pick.predicted_points_delta,
+                    transfer_out=pick.transfer_out,
+                    transfer_in=pick.transfer_in,
                 )
             )
             ids.append(row_id)

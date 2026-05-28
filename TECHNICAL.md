@@ -16,6 +16,8 @@ Developer-facing documentation for the radio intercept pipeline, WhatsApp integr
 | Practice Analyst (FP1/FP2 + anomalies) | Shipped |
 | Pick generator (PATH A/B) + audit log | Shipped |
 | `/api/picks` + scheduled picks job | Shipped |
+| APScheduler race calendar + WhatsApp broadcast | Shipped |
+| Post-race scorer + recap broadcast | Shipped |
 | Quali Strategist | Planned |
 | Scorer + season leaderboard | Planned |
 | `TEAM` fantasy setup command | Shipped |
@@ -202,6 +204,28 @@ The pipeline (`intelligence/picks_pipeline.py`) runs FP1/FP2 practice analysis �
 - `PITWALL_RACE_YEAR` — default `2026`
 
 Active weekend detection uses OpenF1 Race sessions nearest to “now”, unless `PITWALL_CIRCUIT_KEY` is set.
+
+---
+
+## Race weekend delivery (Phase 4)
+
+**Calendar** — `scheduler/calendar.py` hard-codes 22 confirmed 2026 rounds (Bahrain/Jeddah cancelled). All times UTC; `fantasy_lock_utc` = race − 1hr. `race_key` format: `2026_monaco`.
+
+**APScheduler** — `scheduler/jobs.py` + `scheduler/runtime.py`:
+
+| Job | Trigger | Action |
+|-----|---------|--------|
+| `thursday_context` | race − 72h | Agent 1 stub (logs, no-op) |
+| `practice_analysis` | FP2 + 90min | FP1/FP2 practice analyst |
+| `quali_broadcast` | fantasy_lock − 3h | `broadcast_race_picks()` |
+| `race_monitor_start` | race − 5min | Agent 4 stub |
+| `post_race_scorer` | race + 3h | `score_race()` + `broadcast_race_recap()` |
+
+Jobs persist in Postgres table `apscheduler_jobs` (same `DATABASE_URL`, sync driver). Stable IDs `{race_key}:{job}` + `replace_existing=True` prevent duplicates on Railway restart.
+
+**WhatsApp broadcast** — `whatsapp/broadcast.py` + `whatsapp/message_format.py` (mandatory char assertions: 400 / 350 / 300). Subscriber timezone used only at send time for “hrs to lock”.
+
+**Scoring** — `intelligence/scorer.py` updates `picks.actual_points_delta` / `was_correct`, rolls up `season_accuracy`.
 
 ---
 

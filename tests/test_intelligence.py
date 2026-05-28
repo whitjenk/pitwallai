@@ -36,7 +36,7 @@ def test_generic_pick_generator() -> None:
             ],
             weather_forecast=None,
             user_team=None,
-            race_key="monaco:2026",
+            race_key="2026_monaco",
             generated_by="rules",
         )
     )

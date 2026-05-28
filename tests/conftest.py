@@ -53,6 +53,5 @@ async def decoder(
     """
     dec = RadioInterceptDecoder(agent=agent, vector_store=vector_store)
     dec._running = True
-    dec._deps.session_key = 9158
     yield dec
     await dec.stop()

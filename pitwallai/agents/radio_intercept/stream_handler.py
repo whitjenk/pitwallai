@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import random
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 
@@ -274,7 +275,6 @@ class RadioInterceptDecoder:
                                 )
                                 continue
 
-                        self._deps.session_key = message.session_key
                         await self._input_queue.put(message)
 
             except websockets.exceptions.ConnectionClosed as exc:
@@ -315,8 +315,8 @@ class RadioInterceptDecoder:
                 if msg is None:
                     break
 
-                self._deps.session_key = msg.session_key
-                result = await self._agent.decode(msg, self._deps)
+                msg_deps = replace(self._deps, session_key=msg.session_key)
+                result = await self._agent.decode(msg, msg_deps)
                 await self._output_queue.put(result)
             except DecodeValidationError as exc:
                 self._log.bind(
@@ -344,7 +344,7 @@ class RadioInterceptDecoder:
                 WebSocketEvent(
                     event_type=StreamEventType.TRANSMISSION_DECODED,
                     payload=result,
-                    session_key=self._deps.session_key,
+                    session_key=result.session_key,
                     emitted_at=emitted_at,
                 )
             ]
@@ -356,7 +356,7 @@ class RadioInterceptDecoder:
                             "latency_ms": result.processing_latency_ms,
                             "driver": result.driver_code,
                         },
-                        session_key=self._deps.session_key,
+                        session_key=result.session_key,
                         emitted_at=emitted_at,
                     )
                 )
@@ -369,7 +369,7 @@ class RadioInterceptDecoder:
                     WebSocketEvent(
                         event_type=StreamEventType.COMPETITOR_INTEL_UNCONFIRMED,
                         payload=result,
-                        session_key=self._deps.session_key,
+                        session_key=result.session_key,
                         emitted_at=emitted_at,
                     )
                 )
@@ -442,13 +442,11 @@ async def main() -> None:
     subscriber: asyncio.Queue[WebSocketEvent] = asyncio.Queue(maxsize=10)
     decoder.subscribe(subscriber)
     decoder._running = True
-    decoder._deps.session_key = 9158
 
     consumer_task = asyncio.create_task(decoder._agent_consumer())
     emitter_task = asyncio.create_task(decoder._output_emitter())
 
     for mock in _mock_messages():
-        decoder._deps.session_key = mock.session_key
         await decoder._input_queue.put(mock)
 
     await decoder._input_queue.put(None)

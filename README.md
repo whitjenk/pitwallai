@@ -1,182 +1,229 @@
-On a modern F1 pit wall, a strategist is processing two driver radios, live timing, tire models, weather, and race control simultaneously. PitWallAI decodes competitor team radio in real time and surfaces structured tactical intelligence — intent, strategic signal, historical precedent — before the rival team confirms their call on the broadcast feed.
+# PitWallAI
 
-![CI](https://github.com/whitjenk/f1-tactical-intelligence-hive/actions/workflows/ci.yml/badge.svg) ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue) ![License: MIT](https://img.shields.io/badge/license-MIT-green) ![Status: Research Preview](https://img.shields.io/badge/status-research%20preview-orange) ![FastAPI](https://img.shields.io/badge/FastAPI-0.111%2B-009688) ![Pydantic AI](https://img.shields.io/badge/Pydantic%20AI-0.0.13%2B-violet) ![OpenF1](https://img.shields.io/badge/OpenF1-WebSocket-red)
+> The most useful thing an F1 fantasy fan has on race weekend.
 
-*For strategists: a live intelligence feed that informs without directing. For engineers: an async multi-agent pipeline built on OpenF1, vector retrieval, optional Pydantic AI, and ChromaDB.*
+PitWallAI is an open-source multi-agent intelligence system that delivers personalized F1 fantasy picks to your WhatsApp — budget-aware, circuit-adjusted, and powered by signals no pundit has access to.
 
-## See it in 60 seconds
+*[Screenshot placeholder: WhatsApp message showing race picks]*
 
-There is a built-in Monaco Grand Prix rehearsal scenario — 12 radio events across laps 34–40, four teams, one strategic battle. No API key is required for the default path. Run it with three commands:
+[![CI](https://github.com/whitjenk/f1-tactical-intelligence-hive/actions/workflows/ci.yml/badge.svg)](https://github.com/whitjenk/f1-tactical-intelligence-hive/actions/workflows/ci.yml)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![OpenF1](https://img.shields.io/badge/OpenF1-WebSocket-red)](https://openf1.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.111%2B-009688)](https://fastapi.tiangolo.com/)
 
-```bash
-git clone https://github.com/your-handle/pitwallai.git && cd pitwallai
-pip install -r requirements.txt
-python main.py --mode rehearsal --speed 3.0
-# Dashboard → http://localhost:8000/dashboard
-```
+---
 
-What you will see on the dashboard:
+## What it does
 
-- Lap 37: Ferrari boxes. Before it hits the broadcast, the competitor intel panel surfaces a 91% reliability signal with the evidence transcript. An amber gate holds it until a human acknowledges it.
-- Lap 38: Norris reports his fronts are gone. The system decodes CRITICAL tire complaint, fires a TIRE_DEGRADATION_HIGH strategic signal, and the latency gauge shows end-to-end decode in real time (typically sub-100ms on the default rules path).
-- Lap 40: After the pit stop, PUSH_MODE decoded, pace shift signal confirmed. The Monaco track map updates with driver positions and event pins at the sector where each call originated.
+Three hours before race lock, you get a WhatsApp message. Not generic advice — picks filtered to your actual team, your remaining budget, and your available transfers. Backed by five agents that have been working since Thursday.
 
-*No live race connection required. The rehearsal runs entirely on local mock data.*
+| When | Agent | What it does |
+|------|--------|----------------|
+| **Thursday** | Context Builder | Ingests circuit history, championship pressure per driver, weather forecast, and FIA directives for the week. |
+| **Friday** | Practice Analyst | Processes FP1/FP2. Extracts structured sentiment from team radio and flags statistical anomalies (e.g. 0.8s off FP1 pace on used rubber). |
+| **Saturday night** | Quali Strategist | Takes your team, budget, and qualifying result. Models legal transfer combinations and surfaces the one swap that pencils out. |
+| **Sunday (live)** | Live Race Monitor | Watches the OpenF1 stream. Safety car on lap 23? Alert before the commentators finish the sentence. |
+| **Sunday night** | Scorer | Logs every pick against the actual result. The system gets measurably smarter each race. |
 
-## The problem it solves
+**What ships in this repo today:** the **Live Race Monitor** core (Radio Intercept Decoder), a real-time strategist dashboard, Monaco rehearsal mode, and the **WhatsApp subscriber foundation** (subscribe, webhook, outbound messaging). The fantasy pick agents and `TEAM` setup flow are on the roadmap — see [Project status](#project-status).
 
-During a live grand prix, a strategist tracking competitor radio manually is always behind. By the time a pit call is confirmed on the FOM broadcast, the window for a reactive undercut is already closing. The radio transmission that precedes a pit call — the tire complaint three laps earlier, the gap query, the engineer's carefully worded non-answer — contains the signal. Getting to it structured, grounded in historical precedent, and in front of the right person before it resolves is the entire value proposition.
+---
 
-The second problem is cognitive load. A race strategist in a live stint is managing too many parallel streams to manually pattern-match against historical race data in real time. PitWallAI does not replace that judgement. It compresses the information surface — extracting intent, translating jargon, surfacing relevant historical outcomes — so the strategist spends their cognitive budget on decisions, not data triage.
+## Subscribe
 
-## How it works
+Text **SUBSCRIBE** to the PitWallAI WhatsApp number *(configure your Meta Business number in production)*.
 
-*For strategists: radio in, structured intelligence out, under 800ms. For engineers: OpenF1 WebSocket → asyncio queue → rules-first decoder with ChromaDB retrieval (optional Pydantic AI escalation) → validated struct → FastAPI WebSocket → React dashboard.*
+1. Reply with your IANA timezone (e.g. `Europe/London`).
+2. You are in — race-weekend alerts use that timezone.
 
-```
-OpenF1 WebSocket  (/v1/team_radio)
-        │
-        ▼
-  asyncio.Queue  ←── backpressure guard (max depth 50)
-        │
-        ▼
-Radio Intercept Decoder
-  ├── rules path (default)     →  vector vote + pattern match  (~5–80ms)
-  └── optional LLM path      →  Pydantic AI + provider tool calls
-        ├── query_historical_context  →  ChromaDB  (sentence-transformers embeddings)
-        ├── lookup_jargon             →  40-term F1 glossary
-        └── get_driver_context        →  driver communication profiles
-        │
-        ▼
-  DecodedTransmission  (Pydantic v2, frozen)
-  ├── decoded_intent: RadioIntent
-  ├── strategic_signal: StrategicSignal
-  ├── urgency_level: UrgencyLevel
-  ├── competitor_intel: CompetitorIntel | None  ← requires human confirmation
-  ├── evidence_summary: str | None              ← observation, never instruction
-  └── processing_latency_ms: float
-        │
-        ▼
-  FastAPI WebSocket  →  React dashboard
-```
+| Command | Action |
+|---------|--------|
+| `SUBSCRIBE` | Join alerts (prompts for timezone) |
+| `UNSUBSCRIBE` | Stop alerts (soft delete — we never hard-delete your row) |
+| `HELP` | Command list |
+| `SETTINGS` | BYOK API key page → [pitwallai.app/settings](https://pitwallai.app/settings) |
+| `TEAM` | *Coming soon* — set your fantasy team for personalized picks |
 
-| Agent | Status | Responsibility |
-|---|---|---|
-| Radio Intercept Decoder | Built | Decodes competitor radio, extracts tactical intent |
-| Race Control & Regulations | Planned | Analyses steward updates, penalty risk assessment |
-| Telemetry Verification | Planned | Validates human claims against live sensor data |
-| Lead Strategist Orchestrator | Planned | Synthesises all agents into a single briefing stream |
+*Free. Open source. No app required.*
 
-## Design principles
+---
 
-**Evidence, not instructions**
+## Season accuracy
 
-The output field is called `evidence_summary`, not `recommended_action`. It is a factual observation connecting what the system heard to historical precedent: *"Transcript matches 3 of 4 pre-box indicators observed at Bahrain 2023 lap 31. Gap to leader is 2.1s and closing."* Never: *"Box Lando now."* The strategist decides. The system informs. A strategist who second-guesses their own read because an AI gave a conflicting instruction has introduced hesitation into a decision that costs tenths of a second. That is not a tool — that is a liability.
+**[Live leaderboard](https://github.com/whitjenk/f1-tactical-intelligence-hive)** — updated after every race *(placeholder until Scorer agent ships)*.
 
-**Competitor intel requires a human gate**
+---
 
-Any `CompetitorIntel` object carries a `ConfirmationState`: `UNCONFIRMED → ACKNOWLEDGED → ACTED_ON`. Unconfirmed competitor intel renders behind a visual gate on the dashboard — a pulsing amber border, an explicit acknowledgement button. A mis-decoded competitor signal acted on directly is not just a missed opportunity. In a close fight, it is a lost race. The pipeline earns trust through provenance: every intel output shows the evidence transcript that drove it and the historical documents it matched against.
-
-**800ms is the contract, not a target**
-
-The value of a decoded radio intercept is in the window before the call is confirmed on broadcast. After that, it is noise. The `exceeds_latency_target` flag on every `DecodedTransmission` and the live latency gauge on the dashboard make this constraint visible in real time. The benchmark script (`bench.py`) profiles each pipeline stage independently — embedding, vector retrieval, LLM inference, validation — so latency regressions are diagnosable, not just observable.
-
-## The dashboard
-
-A single HTML file, no build step, opens in any browser after `python main.py`. Designed to feel like mission control, not a side project.
-
-Left column — a live scrolling feed of decoded transmissions. Each card shows the driver in their team color, the raw transcript, the decoded intent as a color-coded badge (gray through red by urgency), jargon translated into plain English, and the processing latency in the corner. New cards slide in from the bottom.
-
-Center column — the strategic intelligence board. Active strategic signals at the top. Below that, the competitor intel panel: the feature that earns the most attention in any demo. Unconfirmed intel cards pulse amber until a human acknowledges them. Acknowledged intel turns solid blue. Acted-on intel moves to a session timeline at the bottom of the column.
-
-Right column — the Monaco circuit map showing live driver positions and sector event pins, a latency gauge, an intent distribution chart, and urgency counters. In rehearsal mode, this column also shows scenario progress and speed controls.
-
-## For F1 data scientists
-
-The system ingests from OpenF1's `/v1/team_radio` WebSocket endpoint. Rehearsal mode uses a hardcoded scenario with `session_key=9158` (Monaco 2024): 12 sequential events across laps 34–40. The vector store is ChromaDB in-memory, seeded with 22 hand-crafted historical transcripts. The intended production path is PostgreSQL + pgvector with real historical radio indexed from past sessions via FastF1.
-
-Transcripts are embedded using `sentence-transformers` (`all-MiniLM-L6-v2`). On the default rules path, retrieval runs on every decode via vector similarity and weighted intent voting. On the optional LLM path, the agent calls `query_historical_context` as an explicit tool — retrieval sits inside the model's reasoning chain, not as a blind pre-fetch. Each `DecodedTransmission` includes `context_doc_ids` for full retrieval provenance. Set `PITWALL_DECODE_BACKEND=hybrid` to escalate only low-confidence decodes to an LLM; hard budget caps (`PITWALL_LLM_BUDGET_ACK`, per-session call limits, daily spend ceiling) prevent runaway API cost during a race.
-
-New agents follow the same contract: a typed `AgentDependencies` dataclass, `RunContext`-scoped tools, a Pydantic v2 output model, and `asyncio`-native execution. The `RadioInterceptDecoder` fan-out pattern means additional agents can subscribe to the output queue without modifying existing code. The most immediately useful extension is a Telemetry Verification Agent that cross-references decoded radio claims against live sector times from `/v1/car_data`.
-
-## Quickstart
+## Run it yourself
 
 ### Prerequisites
 
-Python 3.11+ (3.9 will not work — the codebase uses `match` and modern typing). pip. An LLM provider API key is optional and only required if you enable `hybrid` or `llm` decode backends.
+- **Python 3.11+** (3.9 will not work)
+- Optional: **PostgreSQL** `DATABASE_URL` for WhatsApp subscribers (Railway injects this in production)
+- Optional: Meta **WhatsApp Cloud API** credentials for live messaging
+- No LLM API key required for the default **rules** decode path
 
-### Install and run
+### Install
 
 ```bash
-git clone https://github.com/your-handle/pitwallai.git
-cd pitwallai
-python3.11 -m venv venv && source venv/bin/activate
+git clone https://github.com/whitjenk/f1-tactical-intelligence-hive.git
+cd f1-tactical-intelligence-hive
+python3.11 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
+cp .env.example .env
+# Edit .env — see Environment variables below
 python main.py --mode rehearsal --speed 3.0
 ```
 
-*Open `http://localhost:8000/dashboard`. The Monaco scenario runs automatically.*
+Open **http://localhost:8000/dashboard** — the Monaco rehearsal scenario runs automatically (12 radio events, laps 34–40, four teams).
 
-Optional LLM escalation (not required for the demo):
+### Environment variables
+
+Copy `.env.example` to `.env`. Key groups:
+
+| Group | Variables | Purpose |
+|-------|-----------|---------|
+| **Decode** | `PITWALL_DECODE_BACKEND` | `rules` (default, free), `hybrid`, or `llm` |
+| **LLM (optional)** | `PITWALL_LLM_PROVIDER`, `PITWALL_LLM_MODEL`, `PITWALL_LLM_BUDGET_ACK` | Vertex Gemini default: `gemini-2.0-flash` |
+| **WhatsApp** | `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WEBHOOK_VERIFY_TOKEN` | Meta Cloud API + webhook verify |
+| **Security** | `ENCRYPTION_KEY` | Fernet key for stored user API keys (BYOK) |
+| **Database** | `DATABASE_URL` | Postgres for subscribers (Railway auto-provides) |
+
+Generate a Fernet key:
 
 ```bash
-export PITWALL_LLM_BUDGET_ACK=1
-export PITWALL_LLM_MODEL=openai:gpt-4o-mini
-python main.py --mode rehearsal --decode-backend hybrid
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+### WhatsApp webhook (local)
+
+Expose port 8000 (e.g. [ngrok](https://ngrok.com/)) and point Meta’s webhook to:
+
+- **Callback URL:** `https://<your-host>/webhook`
+- **Verify token:** same as `WEBHOOK_VERIFY_TOKEN` in `.env`
+
+```bash
+curl "http://localhost:8000/webhook?hub.mode=subscribe&hub.verify_token=YOUR_TOKEN&hub.challenge=test123"
+# → test123
 ```
 
 ### CLI flags
 
 | Flag | Default | Description |
-|---|---|---|
-| `--mode` | `rehearsal` | `live` connects to OpenF1 WebSocket; `rehearsal` replays the Monaco scenario |
-| `--speed` | `3.0` | Rehearsal playback multiplier. `1.0` is real time, `5.0` completes in ~90 seconds |
-| `--port` | `8000` | FastAPI server port |
-| `--decode-backend` | `rules` | `rules` (no API, default), `hybrid` (rules + LLM on low confidence), or `llm` |
-| `--llm-model` | *(none)* | Pydantic AI model id, e.g. `openai:gpt-4o-mini` or `anthropic:claude-3-5-sonnet-20241022` |
-| `--bind-host` | `127.0.0.1` | HTTP bind address |
+|------|---------|-------------|
+| `--mode` | `rehearsal` | `live` = OpenF1 WebSocket; `rehearsal` = Monaco script |
+| `--speed` | `3.0` | Rehearsal playback multiplier |
+| `--port` | `8000` | HTTP port |
+| `--decode-backend` | `rules` | `rules`, `hybrid`, or `llm` |
+
+### Deploy on Railway
+
+`railway.toml` starts the app with:
+
+```bash
+uvicorn main:app --host 0.0.0.0 --port $PORT
+```
+
+Set `PITWALL_MODE`, `DATABASE_URL`, and WhatsApp env vars in the Railway dashboard.
+
+---
+
+## See it in 60 seconds (dashboard)
+
+No API key. No live race required.
+
+```bash
+pip install -r requirements.txt
+python main.py --mode rehearsal --speed 3.0
+```
+
+What you will see:
+
+- **Lap 37:** Ferrari pit intel surfaces with evidence before broadcast confirmation; amber gate until a human acknowledges.
+- **Lap 38:** Norris tire complaint decoded as CRITICAL; sub-100ms on the default rules path.
+- **Lap 40:** PUSH_MODE and pace-shift signal; Monaco track map with driver dots and event pins.
+
+---
+
+## How the live monitor works today
+
+```
+OpenF1 WebSocket  (/v1/team_radio)
+        │
+        ▼
+  asyncio.Queue  ←── backpressure guard
+        │
+        ▼
+Radio Intercept Decoder
+  ├── rules path (default)     →  vector vote + pattern match
+  └── optional LLM path      →  Pydantic AI + ChromaDB tools
+        │
+        ▼
+  DecodedTransmission  (intent, signal, urgency, competitor intel)
+        │
+        ├──► FastAPI WebSocket  →  React dashboard
+        └──► WhatsApp broadcast (foundation in place)
+```
+
+**Design principles**
+
+- **Evidence, not instructions** — `evidence_summary` is observational, never “box now.”
+- **Competitor intel requires a human gate** — `UNCONFIRMED → ACKNOWLEDGED → ACTED_ON`.
+- **800ms is the contract** — decode latency is measured and surfaced on every transmission.
+
+---
 
 ## Testing
 
-Three layers — deterministic, pipeline contracts, full system. Run them in order.
-
 ```bash
-# No LLM calls — tests async runtime, error isolation, sentinel handling (~10s)
-pytest tests/test_resilience.py -v
+# Pipeline + resilience (CI — no server, no LLM)
+pytest tests/test_e2e.py tests/test_resilience.py tests/test_llm_contracts.py -v
 
-# Pipeline contracts — Monaco scenario decode assertions (~10s, rules backend)
-pytest tests/test_e2e.py -v
+# WebSocket fan-out (~90s, starts server subprocess)
+pytest tests/test_ws_stress.py -v
 
-# Requires server running — tests multi-client WebSocket fan-out (~90s)
-pytest tests/test_ws_stress.py -v --timeout=120
-
-# Profiles each pipeline stage, writes latency_report.json
-python bench.py --runs 20
+# Latency benchmark → latency_report.json
+python bench.py --runs 20 --backend rules
 ```
+
+---
 
 ## Stack
 
 | Layer | Technology |
-|---|---|
-| Agent orchestration | Pydantic AI (optional LLM path) |
-| Decode (default) | Rules engine + ChromaDB vector vote |
-| LLM (optional) | Provider-agnostic via Pydantic AI (OpenAI, Anthropic, etc.) |
-| Data validation | Pydantic v2 |
-| Vector store | ChromaDB (in-memory) |
-| Embeddings | `sentence-transformers` (`all-MiniLM-L6-v2`) |
-| Live data | OpenF1 API (WebSocket + REST) |
-| Async runtime | Python `asyncio` + `websockets` |
-| API server | FastAPI + uvicorn |
-| Dashboard | React 18 + Recharts + Tailwind CSS (CDN) |
-| Logging | loguru |
+|-------|------------|
+| Agents | Pydantic AI (optional LLM), rules engine (default) |
+| Vector store | ChromaDB + sentence-transformers |
+| Live data | OpenF1 WebSocket |
+| API | FastAPI + uvicorn |
+| Dashboard | React 18 (CDN, no build step) |
+| WhatsApp | Meta Cloud API |
+| Subscribers | PostgreSQL + SQLAlchemy (async) |
+| Secrets at rest | cryptography (Fernet) |
+
+---
 
 ## Project status
 
-This repository contains Agent 1 of a planned four-agent system. The current implementation is a research preview — the pipeline is functional and the Monaco rehearsal demo is stable on the default rules path without any API spend, but live race deployment would require production-grade vector storage (PostgreSQL + pgvector), latency validation against real OpenF1 stream conditions, and a formal review process for competitor intel before it reaches a strategist. The three remaining agents are scoped and the contribution path is open.
+| Component | Status |
+|-----------|--------|
+| Radio Intercept Decoder + dashboard | **Shipped** |
+| WhatsApp webhook, commands, `send_message` | **Shipped** |
+| Postgres subscriber schema + BYOK encryption | **Shipped** |
+| Context Builder, Practice Analyst, Quali Strategist | Planned |
+| Fantasy `TEAM` command + personalized picks | Planned |
+| Scorer + season leaderboard | Planned |
+
+This is a research preview moving toward full fantasy-weekend coverage. Contributions welcome — open an issue before starting a new agent.
+
+---
 
 ## Contributing
 
-Contributions are open. The architecture table in the previous section is the most direct signal of what is most useful to build next. New agents must follow the established contract: typed `AgentDependencies`, `RunContext`-scoped tools, structured Pydantic output, `asyncio`-native execution throughout. Open an issue before starting work on a new agent so the scope can be aligned.
+New agents should follow the established contract: typed `AgentDependencies`, shared tools, Pydantic v2 outputs, and `asyncio`-native execution. The decoder fan-out pattern lets additional agents subscribe without modifying existing pipelines.
+
+---
 
 ## License
 

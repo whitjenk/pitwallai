@@ -1,6 +1,6 @@
 On a modern F1 pit wall, a strategist is processing two driver radios, live timing, tire models, weather, and race control simultaneously. PitWallAI decodes competitor team radio in real time and surfaces structured tactical intelligence — intent, strategic signal, historical precedent — before the rival team confirms their call on the broadcast feed.
 
-![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue) ![License: MIT](https://img.shields.io/badge/license-MIT-green) ![Status: Research Preview](https://img.shields.io/badge/status-research%20preview-orange) ![FastAPI](https://img.shields.io/badge/FastAPI-0.111%2B-009688) ![Pydantic AI](https://img.shields.io/badge/Pydantic%20AI-0.0.13%2B-violet) ![OpenF1](https://img.shields.io/badge/OpenF1-WebSocket-red)
+![CI](https://github.com/whitjenk/f1-tactical-intelligence-hive/actions/workflows/ci.yml/badge.svg) ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue) ![License: MIT](https://img.shields.io/badge/license-MIT-green) ![Status: Research Preview](https://img.shields.io/badge/status-research%20preview-orange) ![FastAPI](https://img.shields.io/badge/FastAPI-0.111%2B-009688) ![Pydantic AI](https://img.shields.io/badge/Pydantic%20AI-0.0.13%2B-violet) ![OpenF1](https://img.shields.io/badge/OpenF1-WebSocket-red)
 
 *For strategists: a live intelligence feed that informs without directing. For engineers: an async multi-agent pipeline built on OpenF1, vector retrieval, optional Pydantic AI, and ChromaDB.*
 

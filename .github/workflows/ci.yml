@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Cache Hugging Face models
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/huggingface
+            ~/.cache/torch
+          key: hf-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            hf-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Pre-download embedding model
+        run: |
+          python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+        env:
+          HF_HUB_DISABLE_TELEMETRY: "1"
+
+      - name: Run unit and e2e tests
+        run: PYTHONPATH=. pytest tests/test_e2e.py tests/test_resilience.py -v
+        env:
+          HF_HUB_DISABLE_TELEMETRY: "1"
+          PITWALL_DECODE_BACKEND: rules

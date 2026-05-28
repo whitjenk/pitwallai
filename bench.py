@@ -2,7 +2,7 @@
 """
 PitWallAI Latency Benchmark
 Measures wall-clock time for each stage of the decode pipeline.
-Target: median end-to-end < 800ms, p95 < 1200ms.
+Target: median (P50) end-to-end < 800ms, P95 < 1200ms.
 
 Usage: python bench.py [--runs N] [--backend rules|hybrid|llm] [--verbose]
 """
@@ -50,15 +50,27 @@ BACKEND_NOTES: dict[str, str] = {
 }
 
 
-def _percentiles(values: list[float]) -> dict[str, float]:
-    """Compute median, p75, p95, and max for a list of timings."""
+def _stage_stats(values: list[float]) -> dict[str, float]:
+    """Compute mean, P50, P75, P95, P99, and max for a list of timings (ms)."""
     if not values:
-        return {"median": 0.0, "p75": 0.0, "p95": 0.0, "max": 0.0}
+        return {
+            "mean": 0.0,
+            "p50": 0.0,
+            "median": 0.0,
+            "p75": 0.0,
+            "p95": 0.0,
+            "p99": 0.0,
+            "max": 0.0,
+        }
     arr = np.array(values, dtype=float)
+    p50 = float(np.percentile(arr, 50))
     return {
-        "median": float(np.percentile(arr, 50)),
+        "mean": float(np.mean(arr)),
+        "p50": p50,
+        "median": p50,
         "p75": float(np.percentile(arr, 75)),
         "p95": float(np.percentile(arr, 95)),
+        "p99": float(np.percentile(arr, 99)),
         "max": float(np.max(arr)),
     }
 
@@ -100,20 +112,7 @@ async def _benchmark_message(
     *,
     verbose: bool,
 ) -> dict[str, float]:
-    """
-    Time each decode stage for a single message.
-
-    Args:
-        message: Raw radio message.
-        vector_store: Vector store instance.
-        agent: Decoder agent.
-        deps: Agent dependencies (read-only template).
-        inference_key: Stage key for decode timing (rules_inference or llm_inference).
-        verbose: Print per-run detail.
-
-    Returns:
-        Dict of stage timings in milliseconds.
-    """
+    """Time each decode stage for a single message."""
     total_start = time.perf_counter()
 
     embed_start = time.perf_counter()
@@ -166,14 +165,14 @@ def _print_table(
     inference_key: str,
     target_met: bool,
 ) -> None:
-    """Print formatted benchmark table with ANSI colors."""
+    """Print formatted benchmark table with mean and percentile columns."""
     green = "\033[32m"
     red = "\033[31m"
     reset = "\033[0m"
     print(f"\nPITWALLAI LATENCY BENCHMARK — {runs} runs  [backend: {backend}]")
-    print("─" * 57)
-    print(f"{'Stage':<18}{'Median':>10}{'p75':>10}{'p95':>10}{'Max':>10}")
-    print("─" * 57)
+    print("─" * 68)
+    print(f"{'Stage':<18}{'Mean':>10}{'P50':>10}{'P95':>10}{'P99':>10}{'Max':>10}")
+    print("─" * 68)
     labels = [
         ("Embedding", "embedding"),
         ("Vector Query", "vector_query"),
@@ -183,32 +182,22 @@ def _print_table(
     for label, key in labels:
         stats = stage_stats[key]
         print(
-            f"{label:<18}{stats['median']:>9.0f}ms{stats['p75']:>9.0f}ms"
-            f"{stats['p95']:>9.0f}ms{stats['max']:>9.0f}ms"
+            f"{label:<18}{stats['mean']:>9.0f}ms{stats['p50']:>9.0f}ms"
+            f"{stats['p95']:>9.0f}ms{stats['p99']:>9.0f}ms{stats['max']:>9.0f}ms"
         )
-    print("─" * 57)
+    print("─" * 68)
     total_stats = stage_stats["total"]
     print(
-        f"{'END-TO-END TOTAL':<18}{total_stats['median']:>9.0f}ms{total_stats['p75']:>9.0f}ms"
-        f"{total_stats['p95']:>9.0f}ms{total_stats['max']:>9.0f}ms"
+        f"{'END-TO-END TOTAL':<18}{total_stats['mean']:>9.0f}ms{total_stats['p50']:>9.0f}ms"
+        f"{total_stats['p95']:>9.0f}ms{total_stats['p99']:>9.0f}ms{total_stats['max']:>9.0f}ms"
     )
-    print("─" * 57)
+    print("─" * 68)
     status = f"{green}PASS{reset}" if target_met else f"{red}FAIL{reset}"
-    print(f"TARGET (800ms):     {status}")
+    print(f"TARGET (P50<800ms, P95<1200ms): {status}")
 
 
 async def run_benchmark(runs: int, backend: str, verbose: bool) -> dict[str, Any]:
-    """
-    Execute the full benchmark suite.
-
-    Args:
-        runs: Number of messages to benchmark (max 20).
-        backend: Decode backend (rules, hybrid, llm).
-        verbose: Enable per-message logging.
-
-    Returns:
-        JSON-serializable report dict.
-    """
+    """Execute the full benchmark suite and write latency_report.json."""
     os.environ["PITWALL_DECODE_BACKEND"] = backend
     inference_key = _inference_stage_key(backend)
 
@@ -242,8 +231,8 @@ async def run_benchmark(runs: int, backend: str, verbose: bool) -> dict[str, Any
         for key, value in timings.items():
             stage_results[key].append(value)
 
-    stage_stats = {key: _percentiles(vals) for key, vals in stage_results.items()}
-    target_met = stage_stats["total"]["median"] < 800.0 and stage_stats["total"]["p95"] < 1200.0
+    stage_stats = {key: _stage_stats(vals) for key, vals in stage_results.items()}
+    target_met = stage_stats["total"]["p50"] < 800.0 and stage_stats["total"]["p95"] < 1200.0
     breach_count = sum(1 for value in stage_results["total"] if value >= 800.0)
 
     report = {
@@ -277,7 +266,7 @@ def main() -> None:
     )
     parser.add_argument("--verbose", action="store_true", help="Per-message timing output")
     args = parser.parse_args()
-    asyncio.run(run_benchmark(min(args.runs, 20), args.backend, args.verbose))
+    asyncio.run(run_benchmark(max(args.runs, 20), args.backend, args.verbose))
 
 
 if __name__ == "__main__":

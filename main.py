@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from dataclasses import replace
 
 import uvicorn
@@ -11,6 +12,12 @@ from loguru import logger
 
 from api.server import create_app
 from pitwallai.agents.radio_intercept.config import DecodeBackend, PitWallSettings
+
+# ASGI entry for Railway / `uvicorn main:app` (see railway.toml)
+app = create_app(
+    mode=os.environ.get("PITWALL_MODE", "rehearsal"),
+    rehearsal_speed=float(os.environ.get("PITWALL_REHEARSAL_SPEED", "3.0")),
+)
 
 
 def parse_args() -> argparse.Namespace:

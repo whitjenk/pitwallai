@@ -96,6 +96,7 @@ _DRIVER_QUALI_POINTS: dict[int, int] = {
 
 PENALTY_NOT_CLASSIFIED_RACE = -20
 PENALTY_NOT_CLASSIFIED_SPRINT = -10
+PENALTY_QUALIFYING_NC = -5  # NC / DSQ / no time set (official qualifying)
 
 # Approximate 2026 prices (USD millions) — refresh from in-game values when available
 DRIVER_PRICES_M: dict[str, float] = {
@@ -223,9 +224,15 @@ def driver_points_sprint(finishing_position: int | None, *, classified: bool = T
     return _DRIVER_SPRINT_POINTS.get(finishing_position, 0)
 
 
-def driver_points_qualifying(grid_position: int | None) -> int:
-    """Official qualifying points (P1–P10)."""
-    if grid_position is None or grid_position > 10:
+def driver_points_qualifying(grid_position: int | None, *, classified: bool = True) -> int:
+    """
+    Official qualifying points (P1–P10).
+
+    NC / DSQ / no time set = -5 per published F1 Fantasy rules.
+    """
+    if not classified or grid_position is None:
+        return PENALTY_QUALIFYING_NC
+    if grid_position > 10:
         return 0
     return _DRIVER_QUALI_POINTS.get(grid_position, 0)
 

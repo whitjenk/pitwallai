@@ -18,7 +18,7 @@ from whatsapp.message_format import (
 )
 
 
-def test_personalized_includes_constructor_strategy_edge() -> None:
+def test_personalized_includes_constructor_pit_tendency_when_sampled() -> None:
     weekend = get_race_weekend("2026_monaco")
     assert weekend is not None
     output = PickOutput(
@@ -27,13 +27,14 @@ def test_personalized_includes_constructor_strategy_edge() -> None:
                 rank=1,
                 headline="Swap STR → LEC. +9 expected pts.",
                 confidence=74.0,
-                reasoning="Leclerc P4; FER strategy trend noted.",
+                reasoning="Leclerc P4; historical pit tendency noted.",
                 driver_code="LEC",
                 predicted_points_delta=9.0,
                 transfer_out="STR",
                 transfer_in="LEC",
                 constructor_strategy_note=(
-                    "FER strategy trend: early-window 78% (12 samples), undercut success 71%"
+                    "FER pit tendency (5 races): early 75% in pace-competitive stops (6), "
+                    "cross-team undercut 80% (8 attempts)"
                 ),
             ),
         ],
@@ -43,10 +44,39 @@ def test_personalized_includes_constructor_strategy_edge() -> None:
         generated_by="quali_strategist",
     )
     msg = format_personalized_picks(weekend, output, timezone="Europe/London")
-    assert "Strategy edge: FER" in msg
-    assert "undercut" in msg.lower()
+    assert "Historical pit trend (FER)" in msg
+    assert "pace-competitive" in msg
     assert "Monaco" in msg
     assert len(msg) <= PERSONALIZED_MAX_CHARS
+
+
+def test_personalized_omits_pit_tendency_without_min_samples() -> None:
+    weekend = get_race_weekend("2026_monaco")
+    assert weekend is not None
+    output = PickOutput(
+        picks=[
+            PickRecommendation(
+                rank=1,
+                headline="Swap STR → LEC. +9 expected pts.",
+                confidence=74.0,
+                reasoning="Leclerc P4.",
+                driver_code="LEC",
+                predicted_points_delta=9.0,
+                transfer_out="STR",
+                transfer_in="LEC",
+                constructor_strategy_note=(
+                    "FER pit tendency (2 races): early 100% in pace-competitive stops (2), "
+                    "cross-team undercut 50% (1 attempts)"
+                ),
+            ),
+        ],
+        personalized=True,
+        circuit_note="Monaco",
+        confidence_note="OK",
+        generated_by="quali_strategist",
+    )
+    msg = format_personalized_picks(weekend, output, timezone="Europe/London")
+    assert "Historical pit trend" not in msg
 
 
 def test_personalized_under_400_chars() -> None:

@@ -17,6 +17,11 @@ from fantasy.rules import (
     max_affordable_transfers,
     transfer_penalty_points,
 )
+from intelligence.constructor_strategy import (
+    MIN_LEAD_WINDOW_SAMPLES,
+    MIN_SAMPLE_RACES,
+    MIN_UNDERCUT_ATTEMPTS,
+)
 from intelligence.drivers import constructor_code_for_driver
 from intelligence.pick_generator import (
     PickOutput,
@@ -109,10 +114,10 @@ def _constructor_strategy_modifier(
     champ: ChampionshipRow | None,
 ) -> tuple[float, str]:
     """
-    Team-level strategy tendency bonus from historical pit behavior.
+    Small score nudge from historical OpenF1 pit proxies at this circuit.
 
-    Biases driver score toward constructors with strong undercut conversion and
-    timely early-stop behavior in lead-fight windows at this circuit.
+    Uses pace-competitive early-stop rate and cross-team undercut success
+    (finish-order proxy). Suppressed unless sample thresholds are met.
     """
     intel = ctx.circuit_intel or {}
     profiles = intel.get("constructor_strategy_profiles") or {}
@@ -123,10 +128,15 @@ def _constructor_strategy_modifier(
 
     lead_samples = float(profile.get("lead_window_samples") or 0.0)
     sample_races = float(profile.get("sample_races") or 0.0)
+    undercut_attempts = float(profile.get("undercut_attempts") or 0.0)
     early_rate = float(profile.get("early_pit_rate") or 0.0)
     undercut_rate = float(profile.get("undercut_success_rate") or 0.0)
     hedge_rate = float(profile.get("hedge_rate") or 0.0)
-    if sample_races < 2 or lead_samples < 2:
+    if (
+        sample_races < MIN_SAMPLE_RACES
+        or lead_samples < MIN_LEAD_WINDOW_SAMPLES
+        or undercut_attempts < MIN_UNDERCUT_ATTEMPTS
+    ):
         return 0.0, ""
 
     pressure = champ.championship_pressure if champ else 0.5
@@ -139,8 +149,11 @@ def _constructor_strategy_modifier(
         return 0.0, ""
 
     note = (
-        f"{constructor} strategy trend: early-window {int(round(early_rate * 100))}% "
-        f"({int(round(lead_samples))} samples), undercut success {int(round(undercut_rate * 100))}%"
+        f"{constructor} pit tendency ({int(sample_races)} races): "
+        f"early {int(round(early_rate * 100))}% in pace-competitive stops "
+        f"({int(round(lead_samples))}), "
+        f"cross-team undercut {int(round(undercut_rate * 100))}% "
+        f"({int(round(undercut_attempts))} attempts)"
     )
     return round(bonus, 2), note
 

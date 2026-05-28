@@ -69,9 +69,18 @@ def _best_and_worst_calls(rows: list[PickRow]) -> tuple[str, str]:
     return (best_label, worst_label)
 
 
-async def _biggest_signal_for_season() -> str:
+async def _biggest_signal_for_season(season: int) -> str:
+    season_circuit_keys = {
+        w.circuit_key for w in CALENDAR_2026 if w.race_key.startswith(f"{season}_")
+    }
     async with get_session() as session:
-        result = await session.execute(select(SignalQualityRow))
+        if not season_circuit_keys:
+            return "No dominant signal yet"
+        result = await session.execute(
+            select(SignalQualityRow).where(
+                SignalQualityRow.circuit_key.in_(season_circuit_keys),
+            )
+        )
         rows = list(result.scalars().all())
     if not rows:
         return "No dominant signal yet"
@@ -214,7 +223,7 @@ async def build_season_recap(
         community_rows = list(community_result.scalars().all())
 
     best_call, worst_call = _best_and_worst_calls(personal_rows)
-    biggest_signal = await _biggest_signal_for_season()
+    biggest_signal = await _biggest_signal_for_season(season)
     token = build_share_token(phone=phone, season=season, secret=share_secret)
     share_url = f"{share_base_url.rstrip('/')}/you/{token}"
     return SeasonRecap(

@@ -59,28 +59,38 @@ def _short_reason(pick: PickRecommendation, max_len: int = 72) -> str:
 
 
 _STRATEGY_NOTE_RE = re.compile(
-    r"([A-Z]{2,4}) strategy trend: early-window (\d+)%.*undercut success (\d+)%",
+    r"([A-Z]{2,4}) pit tendency \((\d+) races\): "
+    r"early (\d+)% in pace-competitive stops \((\d+)\), "
+    r"cross-team undercut (\d+)% \((\d+) attempts\)",
 )
 
 
-def _strategy_edge_line(note: str | None, circuit_label: str) -> str | None:
-    """Short WhatsApp line from quali strategist constructor_strategy_note."""
+def _constructor_pit_tendency_line(note: str | None, circuit_label: str) -> str | None:
+    """
+    Observation-only pit tendency line (historical OpenF1 proxies).
+
+    Suppressed unless quali strategist met minimum sample thresholds.
+    """
     if not note or not note.strip():
         return None
     m = _STRATEGY_NOTE_RE.search(note)
     if not m:
-        return _truncate(f"⚙️ Strategy edge: {note.strip()}", 72)
-    team, early_pct, undercut_pct = m.group(1), int(m.group(2)), int(m.group(3))
+        return None
+    team = m.group(1)
+    races = int(m.group(2))
+    early_pct = int(m.group(3))
+    pace_stops = int(m.group(4))
+    undercut_pct = int(m.group(5))
+    undercut_attempts = int(m.group(6))
+    if races < 3 or pace_stops < 5 or undercut_attempts < 3:
+        return None
     place = (circuit_label.split() or ["this circuit"])[0]
-    if undercut_pct >= 60 and early_pct >= 55:
-        profile = "strong early stops & undercut"
-    elif undercut_pct >= 60:
-        profile = "undercut profile strong"
-    elif early_pct >= 55:
-        profile = "early-stop tendency strong"
-    else:
-        profile = f"early-window {early_pct}%, undercut {undercut_pct}%"
-    return f"⚙️ Strategy edge: {team} {profile} at {place}"
+    return _truncate(
+        f"⚙️ Historical pit trend ({team}): early {early_pct}% "
+        f"({pace_stops} pace-competitive stops, {races} races), "
+        f"cross-team undercut {undercut_pct}% ({undercut_attempts} attempts) at {place}",
+        120,
+    )
 
 
 def _opponent_label_from_reason(reasoning: str) -> str | None:
@@ -138,7 +148,7 @@ def format_personalized_picks(
         elif best.price_direction == "DOWN":
             lines.append(f"📉 Price likely -${(best.price_magnitude or 0.0):.1f}M next race — sell now")
 
-    strategy_line = _strategy_edge_line(
+    strategy_line = _constructor_pit_tendency_line(
         best.constructor_strategy_note,
         weekend.display_name,
     )

@@ -206,13 +206,13 @@ async def _load_circuit_intel(
 
     strategy_summary: list[str] = []
     for p in sorted(strategy_profiles, key=lambda x: x.early_pit_rate, reverse=True)[:3]:
-        if p.lead_window_samples < 3:
+        if p.lead_window_samples < 5 or p.sample_races < 3:
             continue
         strategy_summary.append(
             (
-                f"{p.constructor_code}: pits early in lead-fight windows "
-                f"{p.early_pit_count}/{p.lead_window_samples} races "
-                f"({int(round(p.early_pit_rate * 100))}%)"
+                f"{p.constructor_code}: early stop in pace-competitive window "
+                f"{p.early_pit_count}/{p.lead_window_samples} "
+                f"({int(round(p.early_pit_rate * 100))}%) across {p.sample_races} races"
             )
         )
     return {

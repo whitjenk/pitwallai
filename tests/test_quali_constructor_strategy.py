@@ -20,8 +20,9 @@ def _ctx_with_strategy() -> RaceContext:
             "constructor_strategy_profiles": {
                 "FER": {
                     "sample_races": 5,
-                    "lead_window_samples": 4,
+                    "lead_window_samples": 6,
                     "early_pit_rate": 0.75,
+                    "undercut_attempts": 8,
                     "undercut_success_rate": 0.8,
                     "hedge_rate": 0.3,
                 }
@@ -42,7 +43,7 @@ def test_constructor_strategy_modifier_positive_for_strong_profile() -> None:
     )
     bonus, note = _constructor_strategy_modifier("LEC", ctx, champ)
     assert bonus > 0.0
-    assert "FER strategy trend" in note
+    assert "FER pit tendency" in note
 
 
 def test_constructor_strategy_modifier_none_for_missing_profile() -> None:

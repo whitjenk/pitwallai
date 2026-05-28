@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from openf1.cache import CacheTier, cache_get, cache_key_for, cache_set
 from openf1.models import (
     CarDataSample,
+    DriverSessionRow,
     LapRecord,
     PitStop,
     PositionSample,
@@ -259,3 +260,8 @@ class OpenF1Client:
             SessionResultRow,
             tier=CacheTier.LAP,
         )
+
+    async def get_drivers(self, session_key: int) -> list[DriverSessionRow]:
+        """Fetch driver roster for a session (number → acronym mapping)."""
+        params: dict[str, Any] = {"session_key": session_key}
+        return await self._fetch_typed("drivers", params, DriverSessionRow, tier=CacheTier.LAP)

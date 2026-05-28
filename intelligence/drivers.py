@@ -2,8 +2,35 @@
 
 from __future__ import annotations
 
-# 2025 grid baseline — extend as seasons change.
-_DRIVER_NUMBER_TO_CODE: dict[int, str] = {
+# FIA 2026 grid (fallback when session /drivers roster is unavailable).
+# Source: FIA 2026 entry list / formula1.com driver numbers.
+_DRIVER_NUMBER_TO_CODE_2026: dict[int, str] = {
+    1: "NOR",
+    3: "VER",
+    5: "BOR",
+    6: "HAD",
+    10: "GAS",
+    11: "PER",
+    12: "ANT",
+    14: "ALO",
+    16: "LEC",
+    18: "STR",
+    23: "ALB",
+    27: "HUL",
+    30: "LAW",
+    31: "OCO",
+    41: "LIN",
+    43: "COL",
+    44: "HAM",
+    55: "SAI",
+    63: "RUS",
+    77: "BOT",
+    81: "PIA",
+    87: "BEA",
+}
+
+# Legacy numbers for pre-2026 OpenF1 sessions (same driver number, different holder).
+_DRIVER_NUMBER_TO_CODE_LEGACY: dict[int, str] = {
     1: "VER",
     4: "NOR",
     10: "GAS",
@@ -20,14 +47,21 @@ _DRIVER_NUMBER_TO_CODE: dict[int, str] = {
     44: "HAM",
     55: "SAI",
     63: "RUS",
-    81: "PIA",
     77: "BOT",
+    81: "PIA",
+}
+
+_DRIVER_NUMBER_TO_CODE: dict[int, str] = {
+    **_DRIVER_NUMBER_TO_CODE_LEGACY,
+    **_DRIVER_NUMBER_TO_CODE_2026,
 }
 
 
 def driver_code_for(driver_number: int) -> str:
     """
-    Map OpenF1 driver_number to three-letter code.
+    Map OpenF1 driver_number to three-letter code (static fallback).
+
+    Prefer session roster from OpenF1 GET /v1/drivers when building race aggregates.
 
     Args:
         driver_number: OpenF1 driver number.
@@ -42,25 +76,32 @@ def team_for_driver(driver_code: str) -> str:
     """Return a display team name for a driver code."""
     teams: dict[str, str] = {
         "VER": "Red Bull Racing",
-        "PER": "Red Bull Racing",
+        "HAD": "Red Bull Racing",
+        "PER": "Cadillac",
         "NOR": "McLaren",
         "PIA": "McLaren",
         "LEC": "Ferrari",
-        "SAI": "Ferrari",
-        "HAM": "Mercedes",
+        "HAM": "Ferrari",
+        "SAI": "Williams",
         "RUS": "Mercedes",
+        "ANT": "Mercedes",
         "ALO": "Aston Martin",
         "STR": "Aston Martin",
         "GAS": "Alpine",
-        "OCO": "Alpine",
+        "COL": "Alpine",
+        "OCO": "Haas",
+        "BEA": "Haas",
         "ALB": "Williams",
-        "SAR": "Williams",
-        "TSU": "RB",
-        "LAW": "RB",
-        "HUL": "Haas",
+        "LAW": "Racing Bulls",
+        "LIN": "Racing Bulls",
+        "HUL": "Audi",
+        "BOR": "Audi",
+        "BOT": "Cadillac",
+        # Legacy codes still referenced in historical data / prices
         "MAG": "Haas",
-        "BOT": "Kick Sauber",
+        "TSU": "Racing Bulls",
         "ZHOU": "Kick Sauber",
+        "SAR": "Williams",
     }
     return teams.get(driver_code.upper(), "Unknown")
 
@@ -69,24 +110,31 @@ def constructor_code_for_driver(driver_code: str) -> str:
     """Return fantasy constructor code (e.g. FER, RBR) for driver code."""
     mapping: dict[str, str] = {
         "VER": "RBR",
-        "PER": "RBR",
+        "HAD": "RBR",
+        "PER": "CAD",
         "NOR": "MCL",
         "PIA": "MCL",
         "LEC": "FER",
-        "SAI": "FER",
-        "HAM": "MER",
+        "HAM": "FER",
+        "SAI": "WIL",
         "RUS": "MER",
+        "ANT": "MER",
         "ALO": "AM",
         "STR": "AM",
         "GAS": "ALP",
-        "OCO": "ALP",
+        "COL": "ALP",
+        "OCO": "HAA",
+        "BEA": "HAA",
         "ALB": "WIL",
-        "SAR": "WIL",
-        "TSU": "RB",
         "LAW": "RB",
-        "HUL": "HAA",
+        "LIN": "RB",
+        "HUL": "SAU",
+        "BOR": "SAU",
+        "BOT": "CAD",
+        # Legacy
         "MAG": "HAA",
-        "BOT": "SAU",
+        "TSU": "RB",
         "ZHOU": "SAU",
+        "SAR": "WIL",
     }
     return mapping.get(driver_code.upper(), "UNK")

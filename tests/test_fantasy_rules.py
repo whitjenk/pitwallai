@@ -10,6 +10,7 @@ from fantasy.rules import (
     PENALTY_EXTRA_TRANSFER_PTS,
     PENALTY_NOT_CLASSIFIED_RACE,
     PENALTY_NOT_CLASSIFIED_SPRINT,
+    PENALTY_QUALIFYING_NC,
     driver_points_qualifying,
     driver_points_race,
     driver_points_sprint,
@@ -61,6 +62,11 @@ def test_validate_unknown_driver() -> None:
 def test_quali_points_not_race_scale() -> None:
     assert driver_points_qualifying(1) == 10
     assert driver_points_race(1) == 25
+
+
+def test_quali_nc_penalty() -> None:
+    assert driver_points_qualifying(None, classified=False) == PENALTY_QUALIFYING_NC
+    assert driver_points_qualifying(11) == 0
 
 
 def test_free_transfer_allowance() -> None:

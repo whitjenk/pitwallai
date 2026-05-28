@@ -7,9 +7,15 @@ from scheduler.calendar import CALENDAR_2026
 
 TrendKind = str  # "up" | "down" | "flat" | "none"
 
+# How PitWallAI scores picks after each Grand Prix (see intelligence/scorer.py).
+PICK_SCORING_SCOPE = (
+    "Driver picks scored vs official F1 Fantasy Grand Prix race points (P1–P10; DNF/NC −20). "
+    "Qualifying, sprint, and constructor assets are not included."
+)
+
 
 def hit_rate_pct(picks: list[PickRow]) -> float:
-    """Percent of picks marked correct."""
+    """Percent of picks marked correct (GP race outcome)."""
     if not picks:
         return 0.0
     correct = sum(1 for p in picks if p.was_correct)
@@ -17,7 +23,7 @@ def hit_rate_pct(picks: list[PickRow]) -> float:
 
 
 def avg_points_delta(picks: list[PickRow]) -> float:
-    """Mean actual points delta for scored picks."""
+    """Mean actual GP race points delta for scored picks."""
     scored = [float(p.actual_points_delta) for p in picks if p.actual_points_delta is not None]
     if not scored:
         return 0.0
@@ -25,13 +31,13 @@ def avg_points_delta(picks: list[PickRow]) -> float:
 
 
 def session_quality_note(picks: list[PickRow]) -> str | None:
-    """Compact weekend scorecard for PitWallAI model quality."""
+    """Compact weekend scorecard for PitWallAI GP pick quality."""
     if not picks:
         return None
     hit = int(round(hit_rate_pct(picks)))
     avg = avg_points_delta(picks)
     sign = "+" if avg >= 0 else ""
-    return f"PitWallAI session: {hit}% hit · {sign}{avg:.1f} avg pts"
+    return f"PitWallAI GP picks: {hit}% hit · {sign}{avg:.1f} avg race pts"
 
 
 def prev_race_key(race_key: str) -> str | None:

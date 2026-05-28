@@ -39,9 +39,11 @@ Text **HELP** for all commands.
 
 ---
 
-## Season accuracy
+## Season GP pick hit rate
 
-[Link to live leaderboard] — updated after every race.
+Picks are scored against **Grand Prix race results** using the official F1 Fantasy race points scale (not qualifying or sprint). Updated after every race.
+
+[Link to live leaderboard]
 
 ---
 

@@ -347,8 +347,8 @@ async def _broadcast_recap(
                 )
                 season_msg = (
                     "🏁 Season complete.\n"
-                    f"Your personalized picks: {season_recap.personalized_accuracy_pct:.0f}% accuracy\n"
-                    f"PitWallAI community: {season_recap.community_accuracy_pct:.0f}% accuracy\n"
+                    f"Your GP picks: {season_recap.personalized_accuracy_pct:.0f}% hit rate (race results)\n"
+                    f"PitWallAI community: {season_recap.community_accuracy_pct:.0f}% GP hit rate\n"
                     f"Best call: {season_recap.best_call}\n"
                     f"Worst call: {season_recap.worst_call}\n"
                     f"Biggest signal this season: {season_recap.biggest_signal}\n"

@@ -343,8 +343,8 @@ def create_app(
         session = await build_latest_session_snapshot(phone, season)
         title = f"PitWallAI {recap.season} Season Recap"
         description = (
-            f"Personalized picks {recap.personalized_accuracy_pct:.0f}% vs community "
-            f"{recap.community_accuracy_pct:.0f}% — best call: {recap.best_call}"
+            f"GP pick hit rate {recap.personalized_accuracy_pct:.0f}% vs community "
+            f"{recap.community_accuracy_pct:.0f}% (race results) — best call: {recap.best_call}"
         )
         html = render_season_share_html(
             recap,

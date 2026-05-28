@@ -44,6 +44,7 @@ class SessionSnapshot:
 
 
 def _accuracy_pct(rows: list[PickRow]) -> float:
+    """GP pick hit rate (% correct vs Grand Prix race result)."""
     if not rows:
         return 0.0
     correct = sum(1 for row in rows if row.was_correct)

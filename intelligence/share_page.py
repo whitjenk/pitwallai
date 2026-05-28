@@ -145,21 +145,21 @@ def render_season_share_html(
             "up",
             vs_community,
             label=f"+{vs_community} vs community",
-            aria_label=f"Ahead of community baseline by {vs_community} percentage points",
+            aria_label=f"Ahead of community GP pick hit rate by {vs_community} percentage points",
         )
     elif vs_community < 0:
         community_pill = _trend_pill_html(
             "down",
             abs(vs_community),
             label=f"{vs_community} vs community",
-            aria_label=f"Behind community baseline by {abs(vs_community)} percentage points",
+            aria_label=f"Behind community GP pick hit rate by {abs(vs_community)} percentage points",
         )
     else:
         community_pill = _trend_pill_html(
             "flat",
             0,
             label="Matched community",
-            aria_label="Matched community baseline accuracy",
+            aria_label="Matched community GP pick hit rate",
         )
 
     session_block = ""
@@ -203,11 +203,11 @@ def render_season_share_html(
       <div class="hero">
         <div>
           <div class="hero-value">{recap.personalized_accuracy_pct:.0f}%</div>
-          <div class="hero-label">Your personalized picks accuracy</div>
+          <div class="hero-label">Your GP pick hit rate (race results)</div>
         </div>
         {community_pill}
       </div>
-      <div class="line"><strong>Community baseline:</strong> {recap.community_accuracy_pct:.0f}%</div>
+      <div class="line"><strong>Community GP hit rate:</strong> {recap.community_accuracy_pct:.0f}%</div>
       {session_block}
       <div class="line"><strong>Best call:</strong> {escape(recap.best_call)}</div>
       <div class="line"><strong>Worst call:</strong> {escape(recap.worst_call)}</div>

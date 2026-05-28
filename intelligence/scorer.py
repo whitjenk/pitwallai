@@ -34,7 +34,12 @@ from fantasy.rules import driver_points_race as _official_race_points
 
 @dataclass(frozen=True, slots=True)
 class SeasonStats:
-    """Aggregated season accuracy metrics."""
+    """
+    Aggregated season GP pick hit rates.
+
+    ``was_correct`` reflects Grand Prix race outcomes (see recap_metrics.PICK_SCORING_SCOPE).
+    DB column names retain ``*_accuracy`` for compatibility.
+    """
 
     season: int
     overall_accuracy: float
@@ -77,7 +82,7 @@ def _score_personalized_pick(
     pick: PickRow,
     positions: dict[str, int],
 ) -> tuple[float, bool]:
-    """Points delta for swap recommendation vs keeping transfer_out driver."""
+    """GP race points delta for swap vs keeping transfer_out (official race scale)."""
     in_code = pick.transfer_in or pick.driver_code
     out_code = pick.transfer_out
     in_pts = _points_for_position(positions.get(in_code))
@@ -90,7 +95,7 @@ def _score_personalized_pick(
 
 
 def _score_generic_pick(pick: PickRow, positions: dict[str, int]) -> tuple[float, bool]:
-    """Generic pick correct if driver finished in the points (top 10)."""
+    """Generic pick correct if driver scored GP race points (finished P1–P10)."""
     pos = positions.get(pick.driver_code)
     pts = _points_for_position(pos)
     correct = pos is not None and pos <= 10
@@ -99,7 +104,7 @@ def _score_generic_pick(pick: PickRow, positions: dict[str, int]) -> tuple[float
 
 async def score_race(race_key: str) -> SeasonStats:
     """
-    Score all picks for a race and update season accuracy.
+    Score all picks against the Grand Prix race result and update season hit rates.
 
     Args:
         race_key: Calendar race key (e.g. 2026_monaco).
@@ -161,7 +166,7 @@ async def score_race(race_key: str) -> SeasonStats:
 
 
 async def _compute_season_stats(season: int) -> SeasonStats:
-    """Aggregate accuracy from all scored picks in a season."""
+    """Aggregate GP pick hit rate from all scored picks in a season."""
     from sqlalchemy import select
 
     from db.models import PickRow

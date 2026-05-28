@@ -256,8 +256,8 @@ async def _handle_season(phone: str, *, compact: bool = False) -> str:
     return "\n".join(
         [
             "🏁 PitWallAI season recap",
-            f"My personalized picks: {recap.personalized_accuracy_pct:.0f}% accuracy",
-            f"Community baseline: {recap.community_accuracy_pct:.0f}% accuracy",
+            f"My GP picks: {recap.personalized_accuracy_pct:.0f}% hit rate (race results)",
+            f"Community GP hit rate: {recap.community_accuracy_pct:.0f}%",
             f"Best call: {recap.best_call}",
             f"Worst call: {recap.worst_call}",
             f"Biggest signal: {recap.biggest_signal}",

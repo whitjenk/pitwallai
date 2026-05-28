@@ -254,8 +254,8 @@ def format_recap_message(
     lines = [
         f"✅ {circuit_name} results",
         "",
-        f"Your picks: {correct_count}/{total_picks} correct",
-        f"Season accuracy: {season_accuracy_pct:.0f}%",
+        f"Your GP picks: {correct_count}/{total_picks} correct",
+        f"Season GP hit rate: {season_accuracy_pct:.0f}%",
     ]
     if session_note:
         lines.append(session_note)
@@ -287,8 +287,8 @@ def format_season_recap_message(
     """Format a user-shareable end-of-season recap artifact."""
     lines = [
         "🏁 Season complete.",
-        f"Your personalized picks: {personalized_accuracy_pct:.0f}% accuracy",
-        f"PitWallAI community: {community_accuracy_pct:.0f}% accuracy",
+        f"Your GP picks: {personalized_accuracy_pct:.0f}% hit rate (race results)",
+        f"PitWallAI community: {community_accuracy_pct:.0f}% hit rate",
         f"Best call: {best_call}",
         f"Worst call: {worst_call}",
         f"Biggest signal this season: {biggest_signal}",

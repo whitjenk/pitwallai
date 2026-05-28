@@ -219,7 +219,7 @@ Active weekend detection uses OpenF1 Race sessions nearest to “now”, unless 
 
 **Calendar** — `scheduler/calendar.py` hard-codes 22 confirmed 2026 rounds (Bahrain/Jeddah cancelled). All times UTC; `fantasy_lock_utc` = race − 1hr. `race_key` format: `2026_monaco`.
 
-**F1 Fantasy rules** — `fantasy/rules.py` centralizes official game logic ([game rules](https://fantasy.formula1.com/en/game-rules)): $100M cap (5 drivers + 2 constructors), $3M price floor, 2 free transfers/week (bank +1 → max 3), −10 pts per extra transfer, race points 25–1 (P1–P10), DNF/NC −20 (sprint −10), and six 2026 chips. Pick generation, quali strategist, post-race scoring, and `TEAM` onboarding import from here. Asset prices are approximate placeholders until synced from in-game values.
+**F1 Fantasy rules** — `fantasy/rules.py` centralizes official game logic ([game rules](https://fantasy.formula1.com/en/game-rules)): $100M cap (5 drivers + 2 constructors), $3M price floor, 2 free transfers/week (bank +1 → max 3), −10 pts per extra transfer, driver race points 25–1 (P1–P10), DNF/NC −20 (sprint −10), quali NC −5, constructor quali progression (Q2/Q3), constructor race pit-stop tiers (+5 fastest / +15 world record), and six 2026 chips. Pick generation, quali strategist, post-race scoring, and `TEAM` onboarding import from here. Asset prices are approximate placeholders until synced from in-game values.
 
 **APScheduler** — `scheduler/jobs.py` + `scheduler/runtime.py`:
 
@@ -235,7 +235,7 @@ Jobs persist in Postgres table `apscheduler_jobs` (same `DATABASE_URL`, sync dri
 
 **WhatsApp broadcast** — `whatsapp/broadcast.py` + `whatsapp/message_format.py` (mandatory char assertions: 400 / 350 / 300). Subscriber timezone used only at send time for “hrs to lock”.
 
-**Scoring** — `agents/scorer_learner.py` (Agent 5) updates `picks`, rolls up `season_accuracy`, and writes `signal_quality` weights.
+**Scoring** — `agents/scorer_learner.py` (Agent 5) scores driver picks vs **Grand Prix race results** only (official race points scale; see `recap_metrics.PICK_SCORING_SCOPE`). Rolls up `season_accuracy` (GP pick hit rate) and writes `signal_quality` weights. User-facing copy says “GP hit rate”, not generic “accuracy”.
 
 **Orchestration (Phase 6)** — `orchestrator/lead_strategist.py` holds immutable `RaceContext` (`evolve_race_context()` / `model_copy`). Scheduler jobs delegate to:
 

@@ -15,6 +15,40 @@ class DecodeBackend(str, Enum):
     HYBRID = "hybrid"
 
 
+def _parse_llm_provider_and_model(
+    provider_raw: str,
+    model_raw: str,
+) -> tuple[str, str]:
+    """
+    Resolve provider and bare model name from env / legacy pydantic-ai strings.
+
+    Supports legacy ``provider:model`` in PITWALL_LLM_MODEL (e.g. openai:gpt-4o-mini).
+
+    Args:
+        provider_raw: PITWALL_LLM_PROVIDER value.
+        model_raw: PITWALL_LLM_MODEL value.
+
+    Returns:
+        Tuple of (provider, model_name).
+    """
+    model_raw = model_raw.strip()
+    provider_raw = provider_raw.strip().lower() or "gemini"
+
+    if ":" in model_raw:
+        legacy_provider, _, legacy_model = model_raw.partition(":")
+        legacy_provider = legacy_provider.strip().lower()
+        legacy_model = legacy_model.strip()
+        if legacy_provider in ("google-gla", "google-vertex", "google"):
+            return "gemini", legacy_model or "gemini-2.0-flash"
+        if legacy_provider == "anthropic":
+            return "claude", legacy_model or "claude-3-5-sonnet-latest"
+        if legacy_provider == "openai":
+            return "openai", legacy_model or "gpt-4o-mini"
+        return legacy_provider, legacy_model
+
+    return provider_raw, model_raw or "gemini-2.0-flash"
+
+
 @dataclass(frozen=True, slots=True)
 class PitWallSettings:
     """
@@ -22,7 +56,11 @@ class PitWallSettings:
 
     Attributes:
         decode_backend: Primary decode strategy (rules, llm, hybrid).
-        llm_model: Pydantic AI model id (provider:model), empty disables LLM.
+        llm_provider: LLM vendor (gemini, claude, openai, ollama).
+        llm_model: Bare model name (e.g. gemini-2.0-flash).
+        llm_use_vertex: Use Vertex AI for gemini (ADC); False uses Google AI Studio key.
+        vertex_project: Google Cloud project id for Vertex AI.
+        vertex_location: Google Cloud region for Vertex AI.
         llm_escalation_threshold: Hybrid mode escalates when rules confidence is below this.
         llm_max_concurrency: Maximum concurrent LLM requests.
         decode_dedup_ttl_seconds: TTL for identical-transcript decode cache.
@@ -40,10 +78,15 @@ class PitWallSettings:
         llm_max_estimated_usd_per_day: Estimated USD cap per UTC day.
         llm_estimated_cost_per_call_usd: Conservative cost estimate per LLM call.
         llm_budget_cooldown_seconds: Cooldown after any cap breach.
+        ollama_base_url: OpenAI-compatible Ollama base URL.
     """
 
     decode_backend: DecodeBackend
+    llm_provider: str
     llm_model: str
+    llm_use_vertex: bool
+    vertex_project: str
+    vertex_location: str
     llm_escalation_threshold: float
     llm_max_concurrency: int
     decode_dedup_ttl_seconds: int
@@ -61,6 +104,7 @@ class PitWallSettings:
     llm_max_estimated_usd_per_day: float
     llm_estimated_cost_per_call_usd: float
     llm_budget_cooldown_seconds: int
+    ollama_base_url: str
 
     @classmethod
     def from_env(cls) -> PitWallSettings:
@@ -76,6 +120,11 @@ class PitWallSettings:
         except ValueError:
             backend = DecodeBackend.RULES
 
+        llm_provider, llm_model = _parse_llm_provider_and_model(
+            os.getenv("PITWALL_LLM_PROVIDER", "gemini"),
+            os.getenv("PITWALL_LLM_MODEL", "gemini-2.0-flash"),
+        )
+
         cors = os.getenv("PITWALL_CORS_ORIGINS", "http://localhost:8000,http://127.0.0.1:8000")
         origins = tuple(origin.strip() for origin in cors.split(",") if origin.strip())
 
@@ -86,9 +135,19 @@ class PitWallSettings:
             "i_accept",
         )
 
+        use_vertex = os.getenv("PITWALL_LLM_USE_VERTEX", "true").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+
         return cls(
             decode_backend=backend,
-            llm_model=os.getenv("PITWALL_LLM_MODEL", "").strip(),
+            llm_provider=llm_provider,
+            llm_model=llm_model,
+            llm_use_vertex=use_vertex,
+            vertex_project=os.getenv("GOOGLE_CLOUD_PROJECT", "").strip(),
+            vertex_location=os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1").strip(),
             llm_escalation_threshold=float(os.getenv("PITWALL_LLM_ESCALATION_THRESHOLD", "0.65")),
             llm_max_concurrency=max(1, int(os.getenv("PITWALL_LLM_MAX_CONCURRENCY", "2"))),
             decode_dedup_ttl_seconds=max(0, int(os.getenv("PITWALL_DECODE_DEDUP_TTL", "30"))),
@@ -112,9 +171,18 @@ class PitWallSettings:
             llm_budget_cooldown_seconds=max(
                 0, int(os.getenv("PITWALL_LLM_BUDGET_COOLDOWN_SECONDS", "300"))
             ),
+            ollama_base_url=os.getenv(
+                "PITWALL_OLLAMA_BASE_URL", "http://localhost:11434/v1"
+            ).strip(),
         )
 
     @property
     def llm_enabled(self) -> bool:
-        """Return True when an LLM model id is configured."""
+        """Return True when LLM decode is configured (always has default model)."""
         return bool(self.llm_model)
+
+    def llm_api_key(self) -> str:
+        """Resolve BYOK API key for the configured provider."""
+        from pitwallai.agents.radio_intercept.model_factory import resolve_api_key
+
+        return resolve_api_key(self.llm_provider)

@@ -10,9 +10,12 @@ from typing import TYPE_CHECKING
 from loguru import logger
 from pydantic import ValidationError
 from pydantic_ai import Agent, RunContext
+from pydantic_ai.models import Model
 
+from pitwallai.agents.radio_intercept.config import PitWallSettings
 from pitwallai.agents.radio_intercept.errors import DecodeRuntimeError, DecodeValidationError
 from pitwallai.agents.radio_intercept.llm_budget import LLMBudgetGuard
+from pitwallai.agents.radio_intercept.model_factory import get_model
 from pitwallai.agents.radio_intercept.prompts import build_system_prompt
 from pitwallai.agents.radio_intercept.decode_utils import finalize_transmission
 from pitwallai.agents.radio_intercept.models import (
@@ -31,27 +34,27 @@ if TYPE_CHECKING:
     pass
 
 
-def _create_llm_agent(model_id: str) -> Agent[AgentDependencies, DecodedTransmission]:
+def _create_llm_agent(model: str | Model) -> Agent[AgentDependencies, DecodedTransmission]:
     """
-    Instantiate a Pydantic AI agent for the configured model id.
+    Instantiate a Pydantic AI agent for the configured model.
 
     Args:
-        model_id: Provider-prefixed model string (e.g. openai:gpt-4o-mini).
+        model: Pydantic AI Model instance or legacy provider:model string.
 
     Returns:
-        Configured Agent.
+        Configured Agent with shared prompt and output schema.
     """
     try:
         agent = Agent(
-            model_id,
+            model,
             deps_type=AgentDependencies,
-            result_type=DecodedTransmission,
+            output_type=DecodedTransmission,
         )
     except TypeError:
         agent = Agent(
-            model_id,
+            model,
             deps_type=AgentDependencies,
-            output_type=DecodedTransmission,
+            result_type=DecodedTransmission,
         )
 
     @agent.system_prompt
@@ -74,7 +77,7 @@ class LLMDecoder:
 
     def __init__(
         self,
-        model_id: str,
+        settings: PitWallSettings,
         semaphore: asyncio.Semaphore | None = None,
         budget_guard: LLMBudgetGuard | None = None,
     ) -> None:
@@ -82,12 +85,21 @@ class LLMDecoder:
         Initialize the LLM decoder.
 
         Args:
-            model_id: Full Pydantic AI model identifier.
+            settings: Application settings (provider, model, Vertex config).
             semaphore: Optional concurrency limiter for API calls.
             budget_guard: Optional budget guard (checked by HybridDecoder before calls).
         """
-        self._model_id = model_id
-        self._agent = _create_llm_agent(model_id)
+        self._settings = settings
+        model = get_model(
+            settings.llm_provider,
+            settings.llm_api_key(),
+            model_name=settings.llm_model,
+            vertex_project=settings.vertex_project or None,
+            vertex_location=settings.vertex_location,
+            use_vertex=settings.llm_use_vertex,
+            ollama_base_url=settings.ollama_base_url,
+        )
+        self._agent = _create_llm_agent(model)
         self._semaphore = semaphore
         self._budget_guard = budget_guard
 

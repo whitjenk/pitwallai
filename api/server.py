@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse
 from loguru import logger
 from pydantic import BaseModel
 
+from api.picks import router as picks_router
 from api.rehearsal import SCENARIOS, RehearsalEngine
 from pitwallai.agents.radio_intercept.agent import RadioInterceptAgent
 from pitwallai.agents.radio_intercept.config import PitWallSettings
@@ -111,6 +112,7 @@ def create_app(
     pitwall_settings = settings or PitWallSettings.from_env()
 
     app = FastAPI(title="PitWallAI Radio Intercept Decoder", version="1.0")
+    app.include_router(picks_router)
     app.state.mode = mode
     app.state.rehearsal_speed = rehearsal_speed
     app.state.settings = pitwall_settings
@@ -137,6 +139,26 @@ def create_app(
         """
         log = logger.bind(mode=mode)
         log.info("Initializing PitWallAI components")
+
+        from intelligence.context import init_orchestrator_context
+
+        app.state.orchestrator_context = init_orchestrator_context()
+        app.state.last_picks_result = None
+
+        from db.session import init_db
+        from intelligence.picks_config import PicksSettings
+        from intelligence.picks_scheduler import PicksScheduler
+
+        await init_db()
+        picks_settings = PicksSettings.from_env(mode=mode)
+        app.state.picks_settings = picks_settings
+        app.state.picks_scheduler = PicksScheduler(app, picks_settings)
+        if picks_settings.auto_enabled:
+            app.state.picks_scheduler.start()
+            log.info(
+                "Picks auto-generation enabled (every {}s)",
+                picks_settings.interval_seconds,
+            )
 
         vector_store = MockVectorStore(
             embedding_cache_size=pitwall_settings.embedding_cache_size,
@@ -192,6 +214,9 @@ def create_app(
     @app.on_event("shutdown")
     async def on_shutdown() -> None:
         """Stop decoder pipeline and cancel background tasks."""
+        scheduler = getattr(app.state, "picks_scheduler", None)
+        if scheduler is not None:
+            await scheduler.stop()
         decoder: RadioInterceptDecoder = app.state.decoder
         await decoder.stop()
         for task in app.state.pipeline_tasks:

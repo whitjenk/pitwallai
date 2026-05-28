@@ -284,7 +284,11 @@ python bench.py --runs 20 --backend rules
 uvicorn main:app --host 0.0.0.0 --port $PORT
 ```
 
-Set `DATABASE_URL`, WhatsApp vars, and `PITWALL_MODE` in the Railway dashboard. Tables are created on startup via `init_db()` when `DATABASE_URL` is present.
+Set `DATABASE_URL`, WhatsApp vars, and `PITWALL_MODE` in the Railway dashboard. On startup, `init_db()` runs `db/migrate.upgrade_schema()`: `create_all` for new tables plus `ALTER TABLE … ADD COLUMN IF NOT EXISTS` for additive Phase 7 columns (`pick_status`, `rehearsal_complete`, etc.). No separate Alembic step required.
+
+**Subscriber rehearsal:** After first `TEAM` confirm (next race >5 days away), `onboarding/rehearsal.py` sends a compressed Monaco 2024 weekend using OpenF1 session `9158` and the same message formatters as production. Set `PITWALL_REHEARSAL_FAST=1` for ~25s spacing in dev. Texting any command pauses rehearsal pacing so replies take priority.
+
+**PICKS command:** Resolved via `whatsapp/app_runtime.get_pick_runtime()` — registered FastAPI app first, then scheduler context, then rules-only lazy runtime if embeddings are available.
 
 ---
 

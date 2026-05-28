@@ -3,15 +3,33 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
+import os
+from datetime import UTC, datetime, timedelta
 
 from loguru import logger
 
 from intelligence.repository import get_subscriber
+from onboarding.monaco_messages import (
+    build_fp2_delta_message,
+    build_sample_counterfactual_message,
+    build_saturday_picks_message,
+    build_sc_live_alert_message,
+    build_welcome_context_message,
+    lock_time_label,
+    rehearsal_delays_seconds,
+)
+from openf1.client import OpenF1Client
 from scheduler.calendar import get_next_race_weekend
+from whatsapp.app_runtime import get_pick_runtime
 from whatsapp.sender import mask_phone, send_message
 
 _REHEARSAL_RUNNING: set[str] = set()
+_rehearsal_user_active: dict[str, datetime] = {}
+
+
+def notify_rehearsal_user_activity(phone: str) -> None:
+    """Pause rehearsal pacing when the subscriber sends a real command."""
+    _rehearsal_user_active[phone] = datetime.now(tz=UTC)
 
 
 async def maybe_start_rehearsal(phone: str) -> bool:
@@ -32,50 +50,61 @@ async def maybe_start_rehearsal(phone: str) -> bool:
     if phone in _REHEARSAL_RUNNING:
         return False
     _REHEARSAL_RUNNING.add(phone)
-    asyncio.create_task(_run_rehearsal(phone, nxt.display_name, nxt.race_utc))
+    asyncio.create_task(_run_rehearsal(phone, nxt.display_name, nxt.race_utc, sub.timezone))
     return True
 
 
-async def _run_rehearsal(phone: str, next_race_name: str, next_race_utc: datetime) -> None:
-    """Background compressed Monaco 2024 walkthrough (historical data)."""
-    from db.session import get_session
+async def _sleep_with_activity_pause(phone: str, seconds: float) -> None:
+    """Sleep in chunks; extend delay if subscriber recently sent a command."""
+    remaining = seconds
+    while remaining > 0:
+        active_at = _rehearsal_user_active.get(phone)
+        if active_at and datetime.now(tz=UTC) - active_at < timedelta(minutes=2):
+            await asyncio.sleep(min(60.0, remaining))
+            remaining = max(0.0, remaining - 60.0)
+            continue
+        step = min(10.0, remaining)
+        await asyncio.sleep(step)
+        remaining -= step
+
+
+async def _run_rehearsal(
+    phone: str,
+    next_race_name: str,
+    next_race_utc: datetime,
+    timezone: str,
+) -> None:
+    """Background Monaco 2024 walkthrough using OpenF1 session 9158."""
     from db.models import Subscriber
+    from db.session import get_session
+
+    fast = os.environ.get("PITWALL_REHEARSAL_FAST", "").strip() in {"1", "true", "yes"}
+    delays = rehearsal_delays_seconds(fast=fast)
+    runtime = get_pick_runtime(allow_lazy=True)
+    client = OpenF1Client()
 
     try:
-        await send_message(
-            phone,
-            "🏁 Welcome to PitWallAI!\n"
-            "Before your first real race, here's a sample weekend (Monaco 2024 — historical).\n"
-            "FP2 signals, Saturday picks, live alert, and post-race recap follow.",
-        )
-        await asyncio.sleep(15 * 60)
-        await send_message(
-            phone,
-            "📻 FP2 signal update (Monaco 2024 sample)\n\n"
-            "NOR strong practice signal in FP2.\n"
-            "LEC anomaly flag: pace deficit vs teammate in FP2.\n"
-            "Saturday pick still shows LEC — consider reviewing before lock.",
-        )
-        await asyncio.sleep(30 * 60)
-        await send_message(
-            phone,
-            "🎯 Saturday picks (Monaco 2024 sample)\n"
-            "Personalised swap example based on your squad — historical quali grid applied.",
-        )
-        await asyncio.sleep(45 * 60)
-        await send_message(
-            phone,
-            "🚨 Live alert (Monaco 2024 sample)\n"
-            "Safety Car deployed lap 32 — observed from race replay data.",
-        )
-        await asyncio.sleep(30 * 60)
-        await send_message(
-            phone,
-            "📊 Monaco 2024 sample recap\n\n"
-            "2/3 picks scored this weekend.\n"
-            "Season GP hit rate builds from your real races.\n"
-            "Full recap format arrives after each real Sunday race.",
-        )
+        await send_message(phone, build_welcome_context_message())
+
+        await _sleep_with_activity_pause(phone, delays[0])
+        await send_message(phone, build_fp2_delta_message(lock_label=lock_time_label(timezone)))
+
+        await _sleep_with_activity_pause(phone, delays[1])
+        if runtime is not None:
+            picks_msg = await build_saturday_picks_message(phone, runtime, timezone=timezone)
+        else:
+            picks_msg = (
+                "🎯 Saturday picks (Monaco 2024 sample)\n"
+                "Service warming up — text PICKS on your first real race for live picks."
+            )
+        await send_message(phone, picks_msg)
+
+        await _sleep_with_activity_pause(phone, delays[2])
+        await send_message(phone, await build_sc_live_alert_message(client))
+
+        await _sleep_with_activity_pause(phone, delays[3])
+        await send_message(phone, build_sample_counterfactual_message())
+
         date_str = next_race_utc.astimezone(UTC).strftime("%d %b")
         await send_message(
             phone,
@@ -91,3 +120,4 @@ async def _run_rehearsal(phone: str, next_race_name: str, next_race_utc: datetim
         logger.error("rehearsal failed phone={}: {}", mask_phone(phone), exc)
     finally:
         _REHEARSAL_RUNNING.discard(phone)
+        _rehearsal_user_active.pop(phone, None)

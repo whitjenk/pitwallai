@@ -84,7 +84,7 @@ async def broadcast_counterfactual_recaps(race_key: str) -> dict[str, int]:
     return {"sent": sent, "failed": failed}
 
 
-async def broadcast_friday_delta(race_key: str, *, app: object, settings: object) -> dict[str, int]:
+async def broadcast_friday_delta(race_key: str) -> dict[str, int]:
     """FP2 signal delta — suppressed on sprint weekends (no FP2)."""
     weekend = get_race_weekend(race_key)
     if weekend is None or weekend.is_sprint:
@@ -272,10 +272,13 @@ async def send_picks_on_demand(
     phone: str,
     *,
     client: OpenF1Client,
-    app: object,
-    settings: object,
+    runtime: object,
 ) -> str:
     """PICKS command — recommendations through Saturday lock."""
+    from whatsapp.app_runtime import PickRuntime
+
+    if not isinstance(runtime, PickRuntime):
+        raise TypeError("runtime must be PickRuntime")
     now = datetime.now(tz=UTC)
     weekend = get_next_race_weekend(after=now)
     if weekend is None:
@@ -290,9 +293,9 @@ async def send_picks_on_demand(
     output = await generate_picks_for_weekend(
         weekend,
         client=client,
-        agent=app.state.agent,
-        vector_store=app.state.vector_store,
-        settings=settings,
+        agent=runtime.agent,
+        vector_store=runtime.vector_store,
+        settings=runtime.settings,
         phone=phone,
         persist_picks=False,
     )

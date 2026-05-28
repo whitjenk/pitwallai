@@ -170,6 +170,9 @@ def create_app(
         from whatsapp.settings import get_whatsapp_settings
 
         await init_db()
+        from whatsapp.app_runtime import register_fastapi_app
+
+        register_fastapi_app(app)
         await seed_price_history()
         picks_settings = PicksSettings.from_env(mode=mode)
         app.state.picks_settings = picks_settings

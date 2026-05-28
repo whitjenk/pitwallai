@@ -17,7 +17,7 @@ from whatsapp.phase7 import broadcast_friday_delta
 async def test_friday_delta_skips_sprint_weekend() -> None:
     """Sprint weekends have no FP2 — Friday delta must not broadcast."""
     sprint = next(w for w in CALENDAR_2026 if w.is_sprint)
-    result = await broadcast_friday_delta(sprint.race_key, app=MagicMock(), settings=MagicMock())
+    result = await broadcast_friday_delta(sprint.race_key)
     assert result.get("skipped") == "sprint_weekend"
     assert result.get("sent") == 0
 

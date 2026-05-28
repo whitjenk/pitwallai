@@ -169,17 +169,6 @@ def _handle_help() -> str:
     )
 
 
-def _app_deps():
-    """FastAPI app + settings when scheduler context is registered."""
-    try:
-        from scheduler.jobs import _require_ctx
-
-        app = _require_ctx().app
-        return app, app.state.settings
-    except RuntimeError:
-        return None, None
-
-
 def _handle_settings() -> str:
     """Return BYOK settings link."""
     return _truncate(f"Manage API keys & provider: {_SETTINGS_URL}")
@@ -322,6 +311,9 @@ async def handle_inbound_text(phone: str, text: str, raw_text: str) -> None:
         text: Uppercased message body for command matching.
         raw_text: Original message body (for timezone capture).
     """
+    from onboarding.rehearsal import notify_rehearsal_user_activity
+
+    notify_rehearsal_user_activity(phone)
     reply: str | list[str]
 
     try:
@@ -377,19 +369,21 @@ async def handle_inbound_text(phone: str, text: str, raw_text: str) -> None:
         elif text in {"CADENCE RACEDAY", "CADENCE RACE_DAY_ONLY"}:
             reply = await _handle_cadence(phone, mode="RACE_DAY_ONLY")
         elif text == "PICKS":
+            from openf1.client import OpenF1Client
+            from whatsapp.app_runtime import get_pick_runtime
             from whatsapp.phase7 import send_picks_on_demand
 
-            app, settings = _app_deps()
-            if app is None:
+            try:
+                runtime = get_pick_runtime(allow_lazy=True)
+            except Exception:
+                runtime = None
+            if runtime is None:
                 reply = _truncate("PICKS unavailable — service starting up.")
             else:
-                from openf1.client import OpenF1Client
-
                 reply = await send_picks_on_demand(
                     phone,
                     client=OpenF1Client(),
-                    app=app,
-                    settings=settings,
+                    runtime=runtime,
                 )
         elif text == "CHIPS":
             from whatsapp.phase7 import send_chips_summary

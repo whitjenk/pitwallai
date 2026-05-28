@@ -81,12 +81,8 @@ async def job_friday_delta(race_key: str) -> None:
     """FP2 delta broadcast (skipped on sprint weekends)."""
     from whatsapp.phase7 import broadcast_friday_delta
 
-    ctx = _require_ctx()
-    await broadcast_friday_delta(
-        race_key,
-        app=ctx.app,
-        settings=ctx.app.state.settings,
-    )
+    _require_ctx()
+    await broadcast_friday_delta(race_key)
 
 
 async def job_post_race_counterfactual(race_key: str) -> None:

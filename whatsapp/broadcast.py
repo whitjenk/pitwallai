@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections import Counter
 from typing import Any
 
 from loguru import logger
 
 from db.models import FantasyTeam, Subscriber
-from intelligence.repository import list_active_subscribers
+from intelligence.repository import list_active_subscribers, save_pick_ownership
 from intelligence.schemas import PickOutput
 from intelligence.weekend_picks import generate_picks_for_weekend
 from openf1.client import OpenF1Client
@@ -26,6 +27,7 @@ class BroadcastResult:
     phone: str
     success: bool
     personalized: bool
+    recommended_drivers: list[str]
     error: str | None = None
 
 
@@ -79,6 +81,24 @@ async def broadcast_race_picks(race_key: str) -> dict[str, Any]:
         pass
 
     sent = sum(1 for r in results if r.success)
+    ownership_counts: Counter[str] = Counter()
+    for row in results:
+        if not row.success:
+            continue
+        ownership_counts.update(row.recommended_drivers)
+    if sent > 0 and ownership_counts:
+        await save_pick_ownership(
+            race_key,
+            [
+                {
+                    "driver_code": code,
+                    "pitwallai_ownership_pct": round(100.0 * count / sent, 1),
+                    "recommendation_count": count,
+                }
+                for code, count in ownership_counts.items()
+            ],
+        )
+
     failed = sum(1 for r in results if not r.success)
     personalized = sum(1 for r in results if r.success and r.personalized)
 
@@ -141,7 +161,12 @@ async def _broadcast_to_subscriber(
             chars=len(message),
         ).info("Pick broadcast sent")
 
-        return BroadcastResult(phone=phone, success=True, personalized=personalized)
+        return BroadcastResult(
+            phone=phone,
+            success=True,
+            personalized=personalized,
+            recommended_drivers=[p.driver_code for p in output.picks],
+        )
     except Exception as exc:
         logger.error(
             "Pick broadcast failed phone={} race_key={}: {}",
@@ -149,7 +174,13 @@ async def _broadcast_to_subscriber(
             weekend.race_key,
             exc,
         )
-        return BroadcastResult(phone=phone, success=False, personalized=False, error=str(exc))
+        return BroadcastResult(
+            phone=phone,
+            success=False,
+            personalized=False,
+            recommended_drivers=[],
+            error=str(exc),
+        )
 
 
 def _format_message(

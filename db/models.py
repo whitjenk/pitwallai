@@ -6,6 +6,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
+from pydantic import BaseModel, Field
 from sqlalchemy import (
     Boolean,
     DateTime,
@@ -43,6 +44,19 @@ class Subscriber(Base):
     )
 
 
+class OpponentProfile(BaseModel):
+    """User-estimated league opponent profile persisted as JSON."""
+
+    nickname: str
+    estimated_budget: float | None = None
+    known_drivers: list[str] = Field(default_factory=list)
+    chip_wildcard_used: bool = False
+    chip_limitless_used: bool = False
+    chip_megadrivers_used: bool = False
+    tendency: str | None = None
+    last_updated: datetime
+
+
 class FantasyTeam(Base):
     """
     Progressive fantasy team profile linked to a subscriber.
@@ -68,6 +82,12 @@ class FantasyTeam(Base):
     remaining_budget: Mapped[float | None] = mapped_column(Float, nullable=True)
     transfers_available: Mapped[int] = mapped_column(Integer, nullable=False, default=-1)
     chips_used: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    league_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    league_position: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    league_total_races: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    league_strategy: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    opponent_profiles: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
+    league_mode_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -88,6 +108,29 @@ class TeamOnboardingState(Base):
     )
     step: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     awaiting_confirm: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class LeagueOnboardingState(Base):
+    """Persisted LEAGUE command conversation state."""
+
+    __tablename__ = "league_onboarding_state"
+
+    phone: Mapped[str] = mapped_column(
+        String(20),
+        ForeignKey("subscribers.phone", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    step: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    awaiting_confirm: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    update_mode: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    pending_nickname: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    draft_opponents: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -239,8 +282,29 @@ class PickRow(Base):
     predicted_points_delta: Mapped[float | None] = mapped_column(Float, nullable=True)
     transfer_out: Mapped[str | None] = mapped_column(String(8), nullable=True)
     transfer_in: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    is_contrarian: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    ownership_tier: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    league_strategy_applied: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    opponent_conflict: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     actual_points_delta: Mapped[float | None] = mapped_column(Float, nullable=True)
     was_correct: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+
+class PickOwnershipRow(Base):
+    """Aggregate recommendation ownership proxy for a race."""
+
+    __tablename__ = "pick_ownership"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    race_key: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    driver_code: Mapped[str] = mapped_column(String(8), nullable=False, index=True)
+    pitwallai_ownership_pct: Mapped[float] = mapped_column(Float, nullable=False)
+    recommendation_count: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

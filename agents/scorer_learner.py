@@ -83,13 +83,30 @@ async def _update_signal_quality(
             anomaly_hits += 1
     anomaly_rate = anomaly_hits / anomaly_total if anomaly_total else 0.5
 
+    contrarian_rows = [p for p in picks if bool(getattr(p, "is_contrarian", False))]
+    contrarian_total = len(contrarian_rows)
+    contrarian_hits = sum(1 for p in contrarian_rows if (p.actual_points_delta or 0.0) > 0.0)
+    contrarian_rate = contrarian_hits / contrarian_total if contrarian_total else 0.5
+
+    non_conflict_rows = [p for p in picks if getattr(p, "opponent_conflict", None) is False]
+    non_conflict_total = len(non_conflict_rows)
+    non_conflict_hits = sum(1 for p in non_conflict_rows if (p.actual_points_delta or 0.0) > 0.0)
+    non_conflict_rate = non_conflict_hits / non_conflict_total if non_conflict_total else 0.5
+
     entries: dict[str, SignalQualityEntry] = {}
     for signal_type, rate in (
         ("practice_sentiment", sentiment_rate),
         ("anomaly_teammate_gap", anomaly_rate),
+        ("contrarian_low_ownership", contrarian_rate),
+        ("opponent_conflict_avoidance", non_conflict_rate),
     ):
         await upsert_signal_quality_row(circuit_key, signal_type, rate)
         mult = 1.3 if rate > 0.7 else (0.5 if rate < 0.4 else 1.0)
+        if signal_type == "contrarian_low_ownership":
+            if rate > 0.65:
+                mult = 1.4
+            elif rate < 0.35:
+                mult = 0.7
         mult = max(0.1, min(2.0, mult))
         logger.bind(circuit=circuit_key, signal=signal_type, rate=rate, weight=mult).info(
             "Signal weight adjustment"

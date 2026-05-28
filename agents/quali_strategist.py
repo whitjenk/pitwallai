@@ -23,6 +23,7 @@ from intelligence.pick_generator import (
     _aggregate_signals,
     build_qualifying_rows,
 )
+from intelligence.ownership import get_ownership_data
 from intelligence.repository import append_picks, get_fantasy_team, list_active_subscribers
 from intelligence.schemas import PracticeSignal, QualifyingRow
 from openf1.client import OpenF1Client
@@ -45,6 +46,7 @@ class _ScoredCombo:
     confidence: float
     reasoning: str
     personalized: bool
+    raw_expected_delta: float | None = None
 
 
 def _signal_weights(ctx: RaceContext) -> dict[str, float]:
@@ -55,6 +57,30 @@ def _signal_weights(ctx: RaceContext) -> dict[str, float]:
     for key, entry in ctx.signal_quality.entries.items():
         weights[key] = entry.weight_multiplier
     return weights
+
+
+def _league_strategy(team: FantasyTeam) -> str:
+    raw = (team.league_strategy or "").strip().upper()
+    return raw if raw in {"SAFE", "ATTACK", "BALANCED"} else "BALANCED"
+
+
+def _ownership_multiplier(tier: str, strategy: str, ownership_quality: float = 1.0) -> float:
+    tier_u = tier.upper()
+    if strategy == "ATTACK":
+        base = {"HIGH": 0.7, "MEDIUM": 1.0, "LOW": 1.4, "UNKNOWN": 1.0}.get(tier_u, 1.0)
+    elif strategy == "SAFE":
+        base = {"HIGH": 1.2, "MEDIUM": 1.0, "LOW": 0.7, "UNKNOWN": 1.0}.get(tier_u, 1.0)
+    else:
+        base = {"HIGH": 0.9, "MEDIUM": 1.0, "LOW": 1.15, "UNKNOWN": 1.0}.get(tier_u, 1.0)
+    return max(0.1, min(2.0, base * ownership_quality))
+
+
+def _opponent_holds(team: FantasyTeam, driver_code: str) -> tuple[bool, str | None]:
+    for raw in team.opponent_profiles or []:
+        known = [str(x).upper() for x in (raw.get("known_drivers") or [])]
+        if driver_code.upper() in known:
+            return True, str(raw.get("nickname") or "").strip() or None
+    return False, None
 
 
 def _weight_for(weights: dict[str, float], signal_type: str) -> float:
@@ -185,7 +211,7 @@ def _enumerate_single_transfers(
                 transfer_in=in_code,
             )
             combos.append(
-                _ScoredCombo([pick], delta, conf, reasoning, True),
+                _ScoredCombo([pick], delta, conf, reasoning, True, raw_expected_delta=delta),
             )
     return combos
 
@@ -252,7 +278,7 @@ def _enumerate_double_transfers(
     return combos
 
 
-def generate_quali_picks(
+async def generate_quali_picks(
     ctx: RaceContext,
     *,
     user_team: FantasyTeam | None,
@@ -271,8 +297,64 @@ def generate_quali_picks(
     if user_team and user_team.remaining_budget is not None:
         combos = _enumerate_single_transfers(user_team, ctx, grid, signal_map, weights)
         combos.extend(_enumerate_double_transfers(user_team, ctx, grid, signal_map, weights))
-        combos.sort(key=lambda c: (c.expected_delta, c.confidence), reverse=True)
-        top = combos[:3]
+        raw_ranked = sorted(combos, key=lambda c: (c.expected_delta, c.confidence), reverse=True)
+        top = raw_ranked[:3]
+        league_mode = bool(user_team.league_mode_enabled)
+        strategy = _league_strategy(user_team)
+        if league_mode and top:
+            ownership = await get_ownership_data(ctx.race_weekend.race_key)
+            if not any((v.combined_ownership_pct is not None) for v in ownership.values()):
+                ownership = {}
+            ownership_quality = 1.0
+            if ctx.signal_quality and "contrarian_low_ownership" in ctx.signal_quality.entries:
+                ownership_quality = ctx.signal_quality.entries["contrarian_low_ownership"].weight_multiplier
+
+            adjusted: list[_ScoredCombo] = []
+            for combo in combos:
+                p0 = combo.picks[0]
+                own = ownership.get(p0.transfer_in or p0.driver_code)
+                tier = own.ownership_tier if own else "UNKNOWN"
+                mult = _ownership_multiplier(tier, strategy, ownership_quality=ownership_quality)
+                opp_conflict, opp_nick = _opponent_holds(user_team, p0.transfer_in or p0.driver_code)
+                if opp_conflict:
+                    mult *= 0.8 if strategy == "ATTACK" else (1.1 if strategy == "SAFE" else 1.0)
+                new_delta = round(combo.expected_delta * mult, 1)
+                conflict_note = ""
+                raw_best = raw_ranked[0].picks[0] if raw_ranked else None
+                if raw_best and raw_best.transfer_in != (p0.transfer_in or p0.driver_code):
+                    conflict_note = (
+                        f" Highest raw expected pts: {raw_best.transfer_in or raw_best.driver_code}. "
+                        f"Best league play: {p0.transfer_in or p0.driver_code} "
+                        f"(low ownership, {strategy} mode). You decide."
+                    )
+                reason = combo.reasoning
+                if opp_conflict:
+                    reason += f" {opp_nick or 'Opponent'} likely holds {p0.transfer_in or p0.driver_code}."
+                reason += conflict_note
+                pick = p0.model_copy(
+                    update={
+                        "predicted_points_delta": new_delta,
+                        "ownership_tier": tier,
+                        "league_strategy_applied": strategy,
+                        "opponent_conflict": opp_conflict,
+                        "is_contrarian": bool(tier == "LOW" and p0.confidence > 60),
+                        "reasoning": reason[:500],
+                    }
+                )
+                adjusted.append(
+                    _ScoredCombo(
+                        picks=[pick],
+                        expected_delta=new_delta,
+                        confidence=combo.confidence,
+                        reasoning=reason,
+                        personalized=True,
+                        raw_expected_delta=combo.expected_delta,
+                    )
+                )
+            if adjusted and any((c.picks[0].ownership_tier != "UNKNOWN") for c in adjusted):
+                adjusted.sort(key=lambda c: (c.expected_delta, c.confidence), reverse=True)
+                top = adjusted[:3]
+
         picks: list[PickRecommendation] = []
         for rank, combo in enumerate(top, start=1):
             p = combo.picks[0]
@@ -342,7 +424,7 @@ async def run_quali_strategist(
             continue
         try:
             team = await get_fantasy_team(sub.phone)
-            output = generate_quali_picks(new_ctx, user_team=team, generated_by=generated_by)
+            output = await generate_quali_picks(new_ctx, user_team=team, generated_by=generated_by)
             await append_picks(
                 race_key,
                 output,

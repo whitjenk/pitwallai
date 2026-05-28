@@ -60,6 +60,10 @@ class PickRecommendation(BaseModel):
     predicted_points_delta: float | None = None
     transfer_out: str | None = None
     transfer_in: str | None = None
+    is_contrarian: bool | None = None
+    ownership_tier: str | None = None
+    league_strategy_applied: str | None = None
+    opponent_conflict: bool | None = None
 
 
 class PickOutput(BaseModel):

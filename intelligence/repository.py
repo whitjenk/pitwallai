@@ -13,8 +13,10 @@ from sqlalchemy.exc import IntegrityError
 
 from db.models import (
     FantasyTeam,
+    LeagueOnboardingState,
     LiveAlertDelivery,
     PickRow,
+    PickOwnershipRow,
     ProcessedInboundMessage,
     PracticeSignalRow,
     RaceEventRow,
@@ -203,6 +205,46 @@ async def set_onboarding_state(
         return row
 
 
+async def get_league_onboarding_state(phone: str) -> LeagueOnboardingState | None:
+    """Load LEAGUE onboarding state."""
+    async with get_session() as session:
+        return await session.get(LeagueOnboardingState, phone)
+
+
+async def set_league_onboarding_state(
+    phone: str,
+    *,
+    step: int,
+    awaiting_confirm: bool = False,
+    update_mode: bool = False,
+    pending_nickname: str | None = None,
+    draft_opponents: list[dict[str, Any]] | None = None,
+) -> LeagueOnboardingState:
+    """Create or update LEAGUE onboarding state."""
+    async with get_session() as session:
+        row = await session.get(LeagueOnboardingState, phone)
+        if row is None:
+            row = LeagueOnboardingState(
+                phone=phone,
+                step=step,
+                awaiting_confirm=awaiting_confirm,
+                update_mode=update_mode,
+                pending_nickname=pending_nickname,
+                draft_opponents=list(draft_opponents or []),
+            )
+            session.add(row)
+        else:
+            row.step = step
+            row.awaiting_confirm = awaiting_confirm
+            row.update_mode = update_mode
+            row.pending_nickname = pending_nickname
+            if draft_opponents is not None:
+                row.draft_opponents = list(draft_opponents)
+            row.updated_at = datetime.now(tz=UTC)
+        await session.flush()
+        return row
+
+
 async def list_active_subscribers() -> list[Subscriber]:
     """Return all active WhatsApp subscribers."""
     async with get_session() as session:
@@ -314,6 +356,10 @@ async def append_picks(
                     predicted_points_delta=pick.predicted_points_delta,
                     transfer_out=pick.transfer_out,
                     transfer_in=pick.transfer_in,
+                    is_contrarian=pick.is_contrarian,
+                    ownership_tier=pick.ownership_tier,
+                    league_strategy_applied=pick.league_strategy_applied,
+                    opponent_conflict=pick.opponent_conflict,
                 )
             )
             ids.append(row_id)
@@ -572,3 +618,37 @@ async def record_live_alert_delivery(race_key: str, phone: str) -> None:
             )
     except ValueError:
         _FALLBACK_ALERT_LOG[race_key][phone].append(now)
+
+
+async def save_pick_ownership(
+    race_key: str,
+    ownership_rows: list[dict[str, Any]],
+) -> None:
+    """Persist aggregate ownership proxy rows for a race."""
+    if not ownership_rows:
+        return
+    async with get_session() as session:
+        for row in ownership_rows:
+            session.add(
+                PickOwnershipRow(
+                    race_key=race_key,
+                    driver_code=row["driver_code"],
+                    pitwallai_ownership_pct=float(row["pitwallai_ownership_pct"]),
+                    recommendation_count=int(row["recommendation_count"]),
+                )
+            )
+
+
+async def load_latest_pick_ownership(race_key: str) -> dict[str, PickOwnershipRow]:
+    """Latest per-driver ownership rows for a race key."""
+    async with get_session() as session:
+        result = await session.execute(
+            select(PickOwnershipRow).where(PickOwnershipRow.race_key == race_key)
+        )
+        rows = list(result.scalars().all())
+    latest: dict[str, PickOwnershipRow] = {}
+    for row in rows:
+        prior = latest.get(row.driver_code)
+        if prior is None or prior.created_at <= row.created_at:
+            latest[row.driver_code] = row
+    return latest

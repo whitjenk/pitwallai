@@ -7,7 +7,12 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from loguru import logger
 from db.models import Subscriber
 from db.session import get_session
-from intelligence.repository import get_onboarding_state, update_subscriber_preferences
+from intelligence.repository import (
+    get_league_onboarding_state,
+    get_onboarding_state,
+    update_subscriber_preferences,
+)
+from whatsapp.league_flow import handle_league_command
 from whatsapp.sender import send_message
 from whatsapp.team_flow import handle_team_command
 
@@ -118,7 +123,7 @@ async def _handle_unsubscribe(phone: str) -> str:
 def _handle_help() -> str:
     """Return command list."""
     return _truncate(
-        "SUBSCRIBE · UNSUBSCRIBE · TEAM · LIVE ON/OFF · "
+        "SUBSCRIBE · UNSUBSCRIBE · TEAM · LEAGUE · LEAGUE UPDATE · LIVE ON/OFF · "
         "CADENCE FULL/RACEDAY · HELP · SETTINGS"
     )
 
@@ -165,8 +170,12 @@ async def handle_inbound_text(phone: str, text: str, raw_text: str) -> None:
 
     try:
         onboarding = await get_onboarding_state(phone)
+        league_state = await get_league_onboarding_state(phone)
         in_team_flow = onboarding is not None and (
             onboarding.awaiting_confirm or onboarding.step > 0
+        )
+        in_league_flow = league_state is not None and (
+            league_state.awaiting_confirm or league_state.step > 0 or league_state.update_mode
         )
 
         if phone in _pending_timezone and text not in {
@@ -179,8 +188,12 @@ async def handle_inbound_text(phone: str, text: str, raw_text: str) -> None:
             reply = await _complete_subscribe(phone, raw_text)
         elif in_team_flow and text != "TEAM":
             reply = await handle_team_command(phone, text, raw_text)
+        elif in_league_flow and text not in {"LEAGUE", "LEAGUE UPDATE"}:
+            reply = await handle_league_command(phone, text, raw_text)
         elif text == "TEAM":
             reply = await handle_team_command(phone, text, raw_text)
+        elif text in {"LEAGUE", "LEAGUE UPDATE"}:
+            reply = await handle_league_command(phone, text, raw_text)
         elif text == "SUBSCRIBE":
             reply = await _handle_subscribe(phone)
         elif text == "UNSUBSCRIBE":

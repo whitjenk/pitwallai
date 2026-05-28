@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+import re
 from zoneinfo import ZoneInfo
 
 from intelligence.schemas import PickOutput, PickRecommendation
 from scheduler.calendar import RaceWeekend
 
-PERSONALIZED_MAX_CHARS = 400
+PERSONALIZED_MAX_CHARS = 500
 GENERIC_MAX_CHARS = 350
 RECAP_MAX_CHARS = 300
 PRACTICE_SUMMARY_MAX_CHARS = 300
@@ -54,6 +55,16 @@ def _short_reason(pick: PickRecommendation, max_len: int = 72) -> str:
     if not reason:
         reason = pick.headline
     return _truncate(reason, max_len)
+
+
+def _opponent_label_from_reason(reasoning: str) -> str | None:
+    m = re.search(r"([A-Za-z0-9 _-]{2,40}) likely holds", reasoning)
+    if not m:
+        return None
+    nick = m.group(1).strip()
+    if nick.lower() == "opponent":
+        return None
+    return nick
 
 
 def format_personalized_picks(
@@ -105,6 +116,23 @@ def format_personalized_picks(
                 f"2️⃣ Alt: {alt_out} → {alt_in} (+{alt_pts} pts · {int(alt.confidence)}%)",
             ]
         )
+
+    strategy = (best.league_strategy_applied or "").upper()
+    if strategy in {"SAFE", "ATTACK", "BALANCED"}:
+        lines.extend(["", f"⚔️ {strategy} play:"])
+        if strategy == "ATTACK" and best.is_contrarian:
+            lines.append(
+                f"🎲 Contrarian: {in_d} — {int(best.confidence)}% conf, "
+                f"{(best.ownership_tier or 'UNKNOWN').lower()} ownership. Upside if rivals play safe."
+            )
+        elif strategy == "SAFE" and (best.ownership_tier or "") == "HIGH":
+            lines.append(f"🛡️ Consensus: {in_d} — moves with the league.")
+        if best.opponent_conflict:
+            opp = _opponent_label_from_reason(best.reasoning)
+            if opp:
+                lines.append(f"⚠️ {opp} likely holds {in_d} — consider differentiating.")
+            else:
+                lines.append(f"⚠️ Opponent likely holds {in_d} — consider differentiating.")
 
     lines.extend(["", f"📊 {_ACCURACY_URL} · Reply HELP for commands"])
     message = "\n".join(lines)

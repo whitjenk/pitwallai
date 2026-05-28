@@ -13,6 +13,8 @@ from fantasy.rules import (
     MAX_TRANSFERS_WITH_BANK,
     budget_remaining_m,
     team_value_m,
+    validate_constructor_codes,
+    validate_driver_codes,
     validate_team_under_budget,
 )
 from intelligence.repository import (
@@ -61,10 +63,10 @@ def _validate_team(team: FantasyTeam) -> str | None:
     """Return error message if squad violates official F1 Fantasy rules."""
     drivers = _team_drivers(team)
     constructors = _team_constructors(team)
-    if len(drivers) != DRIVERS_PER_TEAM:
-        return f"Need exactly {DRIVERS_PER_TEAM} drivers."
-    if len(constructors) != CONSTRUCTORS_PER_TEAM:
-        return f"Need exactly {CONSTRUCTORS_PER_TEAM} constructors."
+    if err := validate_driver_codes(drivers):
+        return err
+    if err := validate_constructor_codes(constructors):
+        return err
     if not validate_team_under_budget(drivers, constructors):
         total = team_value_m(drivers, constructors)
         return f"Squad ${total:.1f}M exceeds ${BUDGET_CAP_M:.0f}M cap."
@@ -200,6 +202,8 @@ async def handle_team_command(phone: str, text: str, raw_text: str) -> str:
                 f"Need exactly {DRIVERS_PER_TEAM} driver codes, comma-separated "
                 "(e.g. NOR, VER, LEC, ALB, HAM)."
             )
+        if err := validate_driver_codes(drivers):
+            return _truncate(err)
         await upsert_fantasy_team_fields(
             phone,
             driver_1=drivers[0],
@@ -215,6 +219,8 @@ async def handle_team_command(phone: str, text: str, raw_text: str) -> str:
         constructors = _parse_constructors(raw_text)
         if constructors is None:
             return _truncate("Need 2 constructor codes, comma-separated (e.g. MCL, RBR).")
+        if err := validate_constructor_codes(list(constructors)):
+            return _truncate(err)
         await upsert_fantasy_team_fields(
             phone,
             constructor_1=constructors[0],

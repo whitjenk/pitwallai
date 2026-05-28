@@ -121,7 +121,8 @@ Copy `.env.example` to `.env`.
 | Decode | `PITWALL_DECODE_BACKEND` | `rules`, `hybrid`, `llm` |
 | LLM | `PITWALL_LLM_PROVIDER`, `PITWALL_LLM_MODEL`, `PITWALL_LLM_USE_VERTEX`, `GOOGLE_CLOUD_PROJECT` | Vertex Gemini default |
 | Budget | `PITWALL_LLM_BUDGET_ACK`, `PITWALL_LLM_MAX_*` | Spend guardrails |
-| WhatsApp | `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WEBHOOK_VERIFY_TOKEN` | Meta Cloud API |
+| WhatsApp | `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WEBHOOK_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET` | Meta Cloud API |
+| Picks API | `PITWALL_PICKS_API_KEY` | Protects `/api/picks` (required for `?phone=` personalized access) |
 | Security | `ENCRYPTION_KEY` | Fernet for BYOK keys at rest |
 | Database | `DATABASE_URL` | Postgres (Railway injects in prod) |
 
@@ -153,7 +154,7 @@ Settings load via `whatsapp/settings.py` (`WhatsAppSettings`, pydantic-settings)
 **Webhook** (registered on `main:app`):
 
 - `GET /webhook` — Meta verify (`hub.mode`, `hub.verify_token`, `hub.challenge`)
-- `POST /webhook` — returns 200 immediately; processes inbound messages in background
+- `POST /webhook` — returns 200 immediately; processes inbound messages in background. Requires `WHATSAPP_APP_SECRET` and valid `X-Hub-Signature-256` (HMAC-SHA256 of raw body). Set `PITWALL_WEBHOOK_SKIP_SIGNATURE=1` for local dev only. Inbound `message_id` values are deduplicated for 24h.
 
 **Commands** (`whatsapp/commands.py`):
 
@@ -195,6 +196,8 @@ Endpoints (included on the main FastAPI app):
 | `GET` | `/api/picks/status` | Scheduler config and last run metadata |
 
 Query parameters: `phone` (personalized PATH A), `circuit_key`, `year`, `refresh`.
+
+**Auth:** Set `PITWALL_PICKS_API_KEY` and pass `X-PitWall-API-Key: <key>` (or `Authorization: Bearer <key>`) on every `/api/picks` request when the key is configured. Personalized picks (`?phone=`) are rejected with 503 unless the server key is set.
 
 The pipeline (`intelligence/picks_pipeline.py`) runs FP1/FP2 practice analysis → qualifying/weather fetch → pick generation → append-only `picks` audit log.
 

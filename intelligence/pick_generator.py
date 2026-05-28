@@ -18,8 +18,10 @@ from intelligence.schemas import (
 )
 from fantasy.rules import (
     DRIVER_PRICES_M,
+    driver_points_qualifying,
     driver_points_race,
     driver_price_m,
+    free_transfer_allowance,
     max_affordable_transfers,
     transfer_penalty_points,
 )
@@ -154,11 +156,16 @@ def _enumerate_transfers(
         return []
 
     budget = team.remaining_budget
-    free_transfers = max_affordable_transfers(
+    limitless = bool((team.chips_used or {}).get("limitless"))
+    transfer_cap = max_affordable_transfers(
         team.transfers_available,
-        limitless_chip=bool((team.chips_used or {}).get("limitless")),
+        limitless_chip=limitless,
     )
-    if free_transfers <= 0:
+    free_allowance = free_transfer_allowance(
+        team.transfers_available,
+        limitless_chip=limitless,
+    )
+    if transfer_cap <= 0:
         return []
 
     options: list[_TransferOption] = []
@@ -177,9 +184,9 @@ def _enumerate_transfers(
             in_pos = grid.get(in_code)
             if out_pos is not None and in_pos is not None:
                 expected = float(
-                    driver_points_race(in_pos)
-                    - driver_points_race(out_pos)
-                    + transfer_penalty_points(1, free_transfers)
+                    driver_points_qualifying(in_pos)
+                    - driver_points_qualifying(out_pos)
+                    + transfer_penalty_points(1, free_allowance)
                 )
             else:
                 expected = round((in_score - out_score) * 0.15, 1)

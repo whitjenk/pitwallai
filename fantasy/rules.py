@@ -271,10 +271,53 @@ def max_affordable_transfers(transfers_available: int, *, limitless_chip: bool =
     return min(max(0, transfers_available), MAX_TRANSFERS_WITH_BANK)
 
 
+def free_transfer_allowance(transfers_available: int, *, limitless_chip: bool = False) -> int:
+    """
+    Free transfers before -10 pt penalties apply (0–3, or uncapped with Limitless).
+
+    Separate from max_affordable_transfers(), which caps combinatorial search depth.
+    """
+    if limitless_chip or transfers_available >= TRANSFERS_LIMITLESS_SENTINEL:
+        return DRIVERS_PER_TEAM
+    return min(max(0, transfers_available), MAX_TRANSFERS_WITH_BANK)
+
+
+def validate_driver_codes(driver_codes: list[str]) -> str | None:
+    """
+    Validate a five-driver squad for onboarding.
+
+    Returns:
+        Error message, or None when valid.
+    """
+    codes = [c.strip().upper() for c in driver_codes]
+    if len(codes) != DRIVERS_PER_TEAM:
+        return f"Need exactly {DRIVERS_PER_TEAM} drivers."
+    if len(set(codes)) != len(codes):
+        return "Driver codes must be unique."
+    unknown = [c for c in codes if c not in DRIVER_PRICES_M]
+    if unknown:
+        return f"Unknown driver code(s): {', '.join(unknown)}."
+    return None
+
+
+def validate_constructor_codes(constructor_codes: list[str]) -> str | None:
+    """Validate two constructor codes. Returns error message or None."""
+    codes = [c.strip().upper() for c in constructor_codes]
+    if len(codes) != CONSTRUCTORS_PER_TEAM:
+        return f"Need exactly {CONSTRUCTORS_PER_TEAM} constructors."
+    if len(set(codes)) != len(codes):
+        return "Constructor codes must be unique."
+    unknown = [c for c in codes if c not in CONSTRUCTOR_PRICES_M]
+    if unknown:
+        return f"Unknown constructor code(s): {', '.join(unknown)}."
+    return None
+
+
 def normalize_chip_name(raw: str) -> str | None:
     """Map user/DB chip label to canonical 2026 chip id."""
     key = raw.strip().lower().replace(" ", "_").replace("-", "_")
     return _CHIP_ALIASES.get(key)
+
 
 def chip_available(chips_used: dict[str, bool] | dict, chip: str) -> bool:
     """True if chip has not been used this season."""

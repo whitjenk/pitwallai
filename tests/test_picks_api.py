@@ -26,6 +26,7 @@ def picks_app() -> TestClient:
         interval_seconds=1800,
         race_year=2026,
         circuit_key_override="monaco",
+        api_key="",
     )
     app.state.picks_scheduler = MagicMock()
     app.state.picks_scheduler.run_once = AsyncMock(return_value=None)
@@ -111,3 +112,8 @@ def test_get_picks_returns_cached(picks_app: TestClient) -> None:
     body = response.json()
     assert body["cached"] is True
     assert body["output"]["picks"][0]["driver_code"] == "NOR"
+
+
+def test_personalized_picks_requires_api_key(picks_app: TestClient) -> None:
+    response = picks_app.get("/api/picks", params={"phone": "+15551234567"})
+    assert response.status_code == 503

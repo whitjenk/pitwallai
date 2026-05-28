@@ -12,8 +12,8 @@ from db.models import FantasyTeam
 from fantasy.rules import (
     DRIVER_PRICES_M,
     driver_points_qualifying,
-    driver_points_race,
     driver_price_m,
+    free_transfer_allowance,
     max_affordable_transfers,
     transfer_penalty_points,
 )
@@ -144,9 +144,10 @@ def _enumerate_single_transfers(
 ) -> list[_ScoredCombo]:
     roster = [c for c in (team.driver_1, team.driver_2, team.driver_3, team.driver_4, team.driver_5) if c]
     budget = team.remaining_budget or 0.0
-    free_transfers = max_affordable_transfers(
+    limitless = bool((team.chips_used or {}).get("limitless"))
+    free_allowance = free_transfer_allowance(
         team.transfers_available,
-        limitless_chip=bool((team.chips_used or {}).get("limitless")),
+        limitless_chip=limitless,
     )
     pool = set(DRIVER_PRICES_M) - set(roster)
     combos: list[_ScoredCombo] = []
@@ -162,9 +163,9 @@ def _enumerate_single_transfers(
             out_pos, in_pos = grid.get(out_code), grid.get(in_code)
             if out_pos is not None and in_pos is not None:
                 delta = float(
-                    driver_points_race(in_pos)
-                    - driver_points_race(out_pos)
-                    + transfer_penalty_points(1, free_transfers)
+                    driver_points_qualifying(in_pos)
+                    - driver_points_qualifying(out_pos)
+                    + transfer_penalty_points(1, free_allowance)
                 )
             else:
                 delta = round(in_score - out_score, 1)
@@ -196,11 +197,16 @@ def _enumerate_double_transfers(
     signals: dict[str, PracticeSignal],
     weights: dict[str, float],
 ) -> list[_ScoredCombo]:
-    free_transfers = max_affordable_transfers(
+    limitless = bool((team.chips_used or {}).get("limitless"))
+    transfer_cap = max_affordable_transfers(
         team.transfers_available,
-        limitless_chip=bool((team.chips_used or {}).get("limitless")),
+        limitless_chip=limitless,
     )
-    if free_transfers < 2:
+    free_allowance = free_transfer_allowance(
+        team.transfers_available,
+        limitless_chip=limitless,
+    )
+    if transfer_cap < 2:
         return []
     roster = [c for c in (team.driver_1, team.driver_2, team.driver_3, team.driver_4, team.driver_5) if c]
     budget = team.remaining_budget or 0.0
@@ -220,12 +226,12 @@ def _enumerate_double_transfers(
                 out_s, r_out = _score_driver(out_c, ctx, grid, signals, weights)
                 out_pos, in_pos = grid.get(out_c), grid.get(in_c)
                 if out_pos is not None and in_pos is not None:
-                    delta += driver_points_race(in_pos) - driver_points_race(out_pos)
+                    delta += driver_points_qualifying(in_pos) - driver_points_qualifying(out_pos)
                 else:
                     delta += in_s - out_s
                 reasons.append(f"{out_c}→{in_c}: {r_in}")
             delta = round(
-                float(delta) + transfer_penalty_points(2, free_transfers),
+                float(delta) + transfer_penalty_points(2, free_allowance),
                 1,
             )
             conf = min(90.0, max(40.0, 50.0 + delta))

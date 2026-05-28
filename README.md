@@ -2,6 +2,8 @@
 
 > The most useful thing an F1 fantasy fan has on race weekend.
 
+> **Independent fan project.** PitWallAI is not affiliated with, endorsed by, or connected to Formula 1, F1 Fantasy, ESPN, or any F1 team or constructor. All recommendations are informational only and intended for use within the F1 Fantasy game. Nothing here constitutes financial, betting, or investment advice.
+
 PitWallAI is an open-source multi-agent intelligence system that delivers personalized F1 fantasy picks to your WhatsApp — budget-aware, circuit-adjusted, and powered by signals no pundit has access to.
 
 *[Screenshot placeholder: WhatsApp message showing race picks]*
@@ -143,6 +145,10 @@ Fantasy scoring and prices in this repo are simplified approximations of publish
 Live timing and session data may be sourced from [OpenF1](https://openf1.org/) and other public APIs; see their terms for attribution and use.
 
 WhatsApp is a trademark of Meta Platforms, Inc. Subscribers opt in via **SUBSCRIBE** and can opt out with **UNSUBSCRIBE**. Phone numbers and team data are stored to deliver picks; do not deploy without a privacy policy appropriate for your jurisdiction.
+
+## Legal
+
+PitWallAI is an independent fan project not affiliated with Formula 1, F1 Fantasy, ESPN, or any F1 constructor. All picks are informational only. See [DISCLAIMER.md](DISCLAIMER.md) for full terms.
 
 ## License
 

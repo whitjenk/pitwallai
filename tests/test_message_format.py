@@ -8,7 +8,12 @@ from intelligence.schemas import PickOutput, PickRecommendation
 from scheduler.calendar import get_race_weekend
 from whatsapp.message_format import (
     GENERIC_MAX_CHARS,
+    GENERIC_MAX_CHARS_CORE,
+    GENERIC_MAX_CHARS_TOTAL,
     PERSONALIZED_MAX_CHARS,
+    PERSONALIZED_MAX_CHARS_CORE,
+    PERSONALIZED_MAX_CHARS_TOTAL,
+    PICK_BROADCAST_FOOTER,
     RECAP_MAX_CHARS,
     SEASON_RECAP_MAX_CHARS,
     format_generic_picks,
@@ -47,7 +52,12 @@ def test_personalized_includes_constructor_pit_tendency_when_sampled() -> None:
     assert "Historical pit trend (FER)" in msg
     assert "pace-competitive" in msg
     assert "Monaco" in msg
-    assert len(msg) <= PERSONALIZED_MAX_CHARS
+    assert PICK_BROADCAST_FOOTER in msg
+    assert "buy now" not in msg.lower()
+    assert len(msg) <= PERSONALIZED_MAX_CHARS_TOTAL
+    core, _, footer = msg.partition(f"\n\n{PICK_BROADCAST_FOOTER}")
+    assert len(core) <= PERSONALIZED_MAX_CHARS_CORE
+    assert footer == ""
 
 
 def test_personalized_omits_pit_tendency_without_min_samples() -> None:
@@ -111,7 +121,8 @@ def test_personalized_under_400_chars() -> None:
         generated_by="rules",
     )
     msg = format_personalized_picks(weekend, output, timezone="Europe/London")
-    assert len(msg) <= PERSONALIZED_MAX_CHARS
+    assert PICK_BROADCAST_FOOTER in msg
+    assert len(msg) <= PERSONALIZED_MAX_CHARS_TOTAL
 
 
 def test_generic_under_350_chars() -> None:
@@ -134,7 +145,8 @@ def test_generic_under_350_chars() -> None:
         generated_by="rules",
     )
     msg = format_generic_picks(weekend, output, timezone="America/New_York")
-    assert len(msg) <= GENERIC_MAX_CHARS
+    assert PICK_BROADCAST_FOOTER in msg
+    assert len(msg) <= GENERIC_MAX_CHARS_TOTAL
 
 
 def test_recap_under_300_chars() -> None:
@@ -172,7 +184,38 @@ def test_long_reasoning_truncated_not_bloated() -> None:
         generated_by="rules",
     )
     msg = format_generic_picks(weekend, output, timezone="UTC")
-    assert len(msg) <= GENERIC_MAX_CHARS
+    assert PICK_BROADCAST_FOOTER in msg
+    assert len(msg) <= GENERIC_MAX_CHARS_TOTAL
+
+
+def test_personalized_price_line_uses_in_game_transfer_language() -> None:
+    weekend = get_race_weekend("2026_monaco")
+    assert weekend is not None
+    output = PickOutput(
+        picks=[
+            PickRecommendation(
+                rank=1,
+                headline="Swap STR → LEC. +9 expected pts.",
+                confidence=74.0,
+                reasoning="Leclerc P4.",
+                driver_code="LEC",
+                predicted_points_delta=9.0,
+                transfer_out="STR",
+                transfer_in="LEC",
+                price_confidence=0.8,
+                price_direction="UP",
+                price_magnitude=0.3,
+                price_timing_note="LEC rising",
+            ),
+        ],
+        personalized=True,
+        circuit_note="Monaco",
+        confidence_note="OK",
+        generated_by="quali_strategist",
+    )
+    msg = format_personalized_picks(weekend, output, timezone="Europe/London")
+    assert "In-game price predicted" in msg
+    assert "transfer in before price rises in-game" in msg
 
 
 def test_season_recap_shareable_message_limit() -> None:

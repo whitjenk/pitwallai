@@ -1,0 +1,23 @@
+# PitWallAI user-facing language audit (buy/sell / financial phrasing)
+# Living document — update when adding new outbound copy.
+# Generated: 2026-05-27
+
+[whatsapp/message_format.py:147] "📈 Price likely +${X}M next race — buy now"
+→ in-game price predicted +$[X]M next race — transfer in before price rises in-game
+
+[whatsapp/message_format.py:149] "📉 Price likely -${X}M next race — sell now"
+→ in-game price predicted -$[X]M next race — transfer out before price drops in-game
+
+[intelligence/price_predictor.py:236] "Price likely {direction} from momentum ..."
+→ in-game price predicted {UP/DOWN} from momentum ... (internal reasoning; not direct WhatsApp)
+
+[LICENSE:8] "sublicense, and/or sell" (software license — no change)
+
+[intelligence/ownership.py:27] "RUSSELL" contains "sell" substring — false positive, no change
+
+# Phrases not found in repo (no hits at audit time):
+#   "buy before price rises"
+#   "selling now saves budget"
+
+# Manual review flags (add # LEGAL_REVIEW in source when introducing new copy):
+# Any user-facing string with standalone "buy" or "sell" without "in-game" or "transfer" context.

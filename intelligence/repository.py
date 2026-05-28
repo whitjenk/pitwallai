@@ -885,3 +885,24 @@ async def load_constructor_strategy(circuit_key: str) -> dict[str, dict[str, Any
         }
         for row in rows
     }
+
+
+async def erase_subscriber_data(phone: str) -> bool:
+    """
+    Remove all subscriber-linked rows after explicit DELETE request.
+
+    # HARD DELETE PERMITTED: explicit user data erasure request
+    # This is the only hard delete in the codebase.
+    # All other deletes are soft (active=False).
+    """
+    async with get_session() as session:
+        await session.execute(delete(PickRow).where(PickRow.phone == phone))
+        await session.execute(delete(LiveAlertDelivery).where(LiveAlertDelivery.phone == phone))
+        await session.execute(
+            delete(UserReportedPriceChange).where(UserReportedPriceChange.reporter_phone == phone),
+        )
+        row = await session.get(Subscriber, phone)
+        if row is None:
+            return False
+        await session.delete(row)
+    return True

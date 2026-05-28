@@ -10,16 +10,18 @@ from db.models import Subscriber
 from db.session import get_session
 from intelligence.repository import (
     add_user_reported_price_change,
+    erase_subscriber_data,
     get_league_onboarding_state,
     get_onboarding_state,
     get_price_prediction_map,
     update_subscriber_preferences,
 )
+from whatsapp.sender import mask_phone
 from intelligence.season_recap import build_season_recap
 from scheduler.calendar import CALENDAR_2026, get_next_race_weekend
 from whatsapp.league_flow import handle_league_command
 from whatsapp.message_format import format_season_recap_message
-from whatsapp.sender import send_message
+from whatsapp.sender import send_message as _send_message
 from whatsapp.team_flow import handle_team_command
 
 _SETTINGS_URL = "https://pitwallai.app/settings"
@@ -27,6 +29,20 @@ _SEASON_SHARE_BASE_URL = "https://pitwallai.app"
 
 # Phones awaiting timezone after SUBSCRIBE (in-memory; single-instance OK for MVP).
 _pending_timezone: set[str] = set()
+
+_SUBSCRIBE_DATA_NOTE = (
+    "📋 Data note: PitWallAI stores your phone number and "
+    "timezone to send picks. No data is sold or shared. "
+    "Text DELETE anytime to remove your data."
+)
+
+_SUBSCRIBE_CONFIRM = (
+    "✅ Subscribed to PitWallAI 🏁\n\n"
+    "Picks arrive Saturday before lock. Text HELP for commands.\n\n"
+    "⚠️ Independent fan tool. Not affiliated with F1 Fantasy, "
+    "ESPN, or Formula 1. All picks are informational only — "
+    "never financial or gaming advice. You decide."
+)
 
 
 def _truncate(msg: str, limit: int = 160) -> str:
@@ -72,7 +88,7 @@ async def _handle_subscribe(phone: str) -> str:
     return _truncate("PitWallAI: reply with your IANA timezone (e.g. Europe/London or America/New_York).")
 
 
-async def _complete_subscribe(phone: str, timezone: str) -> str:
+async def _complete_subscribe(phone: str, timezone: str) -> list[str]:
     """
     Store subscriber after timezone is provided.
 
@@ -81,16 +97,17 @@ async def _complete_subscribe(phone: str, timezone: str) -> str:
         timezone: IANA timezone string.
 
     Returns:
-        Outbound confirmation text.
+        Outbound messages (data note on first subscribe, then confirmation).
     """
     if not _is_valid_iana_timezone(timezone):
-        return _truncate("Unknown timezone. Use IANA format, e.g. Europe/London.")
+        return [_truncate("Unknown timezone. Use IANA format, e.g. Europe/London.")]
 
     _pending_timezone.discard(phone)
     tz_clean = timezone.strip()
 
     async with get_session() as session:
         row = await session.get(Subscriber, phone)
+        is_first_subscribe = row is None
         if row is None:
             row = Subscriber(phone=phone, timezone=tz_clean, preferred_provider="gemini", active=True)
             session.add(row)
@@ -99,11 +116,12 @@ async def _complete_subscribe(phone: str, timezone: str) -> str:
             row.active = True
             row.preferred_provider = row.preferred_provider or "gemini"
 
-    logger.bind(phone=phone, timezone=tz_clean).info("Subscriber activated")
-    return _truncate(
-        f"Subscribed ({tz_clean}). Text LIVE ON for race alerts. "
-        "Text CADENCE RACEDAY for picks only. HELP for commands."
-    )
+    logger.bind(phone=mask_phone(phone), timezone=tz_clean).info("Subscriber activated")
+    outbound: list[str] = []
+    if is_first_subscribe:
+        outbound.append(_truncate(_SUBSCRIBE_DATA_NOTE))
+    outbound.append(_SUBSCRIBE_CONFIRM)
+    return outbound
 
 
 async def _handle_unsubscribe(phone: str) -> str:
@@ -127,11 +145,25 @@ async def _handle_unsubscribe(phone: str) -> str:
     return _truncate("Unsubscribed. You won't receive alerts. Send SUBSCRIBE to rejoin.")
 
 
+async def _handle_delete(phone: str) -> str:
+    """Erase subscriber data after explicit DELETE request."""
+    deleted = await erase_subscriber_data(phone)
+    _pending_timezone.discard(phone)
+    if deleted:
+        logger.bind(phone=mask_phone(phone)).info("Subscriber data erased (DELETE command)")
+    else:
+        logger.bind(phone=mask_phone(phone)).info("DELETE command: no subscriber row found")
+    return _truncate(
+        "✅ All your data has been deleted. Sorry to see you go. "
+        "Text SUBSCRIBE anytime to rejoin."
+    )
+
+
 def _handle_help() -> str:
     """Return command list."""
     return _truncate(
-        "SUBSCRIBE · UNSUBSCRIBE · TEAM · LEAGUE · LEAGUE UPDATE · PRICE · WHY · SEASON · "
-        "SHARE · LIVE ON/OFF · CADENCE FULL/RACEDAY · HELP · SETTINGS"
+        "SUBSCRIBE · UNSUBSCRIBE · DELETE · TEAM · LEAGUE · LEAGUE UPDATE · PRICE · WHY · "
+        "SEASON · SHARE · LIVE ON/OFF · CADENCE FULL/RACEDAY · HELP · SETTINGS"
     )
 
 
@@ -277,7 +309,7 @@ async def handle_inbound_text(phone: str, text: str, raw_text: str) -> None:
         text: Uppercased message body for command matching.
         raw_text: Original message body (for timezone capture).
     """
-    reply: str
+    reply: str | list[str]
 
     try:
         onboarding = await get_onboarding_state(phone)
@@ -317,6 +349,8 @@ async def handle_inbound_text(phone: str, text: str, raw_text: str) -> None:
             reply = await _handle_subscribe(phone)
         elif text == "UNSUBSCRIBE":
             reply = await _handle_unsubscribe(phone)
+        elif text == "DELETE":
+            reply = await _handle_delete(phone)
         elif text == "HELP":
             reply = _handle_help()
         elif text == "SETTINGS":
@@ -339,6 +373,8 @@ async def handle_inbound_text(phone: str, text: str, raw_text: str) -> None:
         reply = _truncate("Something went wrong. Send HELP or try later.")
 
     try:
-        await send_message(phone, reply)
+        messages = reply if isinstance(reply, list) else [reply]
+        for message in messages:
+            await _send_message(phone, message)
     except Exception as exc:
-        logger.error("Failed to send WhatsApp reply phone={}: {}", phone, exc)
+        logger.error("Failed to send WhatsApp reply phone={}: {}", mask_phone(phone), exc)

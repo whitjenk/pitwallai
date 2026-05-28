@@ -10,13 +10,16 @@ from loguru import logger
 from agents.base import AgentRunDependencies
 from intelligence.drivers import driver_code_for
 from intelligence.repository import (
+    get_price_prediction_map,
     get_picks_for_race,
+    get_user_reported_price_changes,
     list_subscribers_for_race_picks,
     get_all_picks_for_race,
     load_practice_signals_by_circuit,
     update_pick_result,
     upsert_season_accuracy,
     upsert_signal_quality_row,
+    update_price_prediction_actuals,
 )
 from intelligence.scorer import _fetch_final_positions, _points_for_position
 from openf1.client import OpenF1Client
@@ -30,6 +33,30 @@ from scheduler.calendar import get_next_race_weekend, get_race_weekend, profile_
 from circuits.profiles import get_circuit_profile
 from whatsapp.message_format import format_recap_message
 from whatsapp.sender import mask_phone, send_message
+
+
+async def get_actual_price_changes(race_key: str) -> dict[str, float]:
+    """
+    Resolve actual price changes from crowdsourced reports.
+
+    Confirms a driver when >=3 reports are within 0.1M of each other.
+    """
+    reports = await get_user_reported_price_changes(race_key)
+    by_driver: dict[str, list[float]] = defaultdict(list)
+    for r in reports:
+        by_driver[r.driver_code].append(float(r.reported_change))
+    confirmed: dict[str, float] = {}
+    for code, vals in by_driver.items():
+        vals = sorted(vals)
+        if len(vals) < 3:
+            continue
+        for i in range(0, len(vals) - 2):
+            window = vals[i : i + 3]
+            if max(window) - min(window) <= 0.1:
+                confirmed[code] = round(sum(window) / len(window), 2)
+                logger.info("Price change confirmed by {} reporters for {}", len(vals), code)
+                break
+    return confirmed
 
 def _score_personalized_pick(pick, positions: dict[str, int]) -> tuple[float, bool]:
     in_code = pick.transfer_in or pick.driver_code
@@ -212,6 +239,15 @@ async def run_scorer_and_learner(
     )
 
     signal_quality = await _update_signal_quality(ctx, picks, positions)
+    actual_price_changes = await get_actual_price_changes(race_key)
+    if actual_price_changes:
+        updated = await update_price_prediction_actuals(race_key=race_key, actuals=actual_price_changes)
+        pred_map = await get_price_prediction_map(race_key)
+        scored = [p for p in pred_map.values() if p.was_correct is not None]
+        if scored:
+            hit_rate = sum(1 for p in scored if p.was_correct) / len(scored)
+            await upsert_signal_quality_row(ctx.race_weekend.circuit_key, "price_direction_prediction", hit_rate)
+            logger.info("Price prediction scored race_key={} updated={} hit_rate={:.2f}", race_key, updated, hit_rate)
     new_ctx = evolve_race_context(ctx, signal_quality=signal_quality)
 
     await _broadcast_recap(new_ctx, overall, signal_quality.quality_note)

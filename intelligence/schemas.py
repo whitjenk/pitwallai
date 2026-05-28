@@ -5,7 +5,7 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field
 
 from circuits.profiles import CircuitProfile
-from db.models import FantasyTeam
+from db.models import FantasyTeam, PricePrediction
 
 
 class PracticeSignal(BaseModel):
@@ -64,6 +64,10 @@ class PickRecommendation(BaseModel):
     ownership_tier: str | None = None
     league_strategy_applied: str | None = None
     opponent_conflict: bool | None = None
+    price_direction: str | None = None
+    price_magnitude: float | None = None
+    price_confidence: float | None = None
+    price_timing_note: str | None = None
 
 
 class PickOutput(BaseModel):
@@ -97,5 +101,6 @@ class PickGeneratorInput(BaseModel):
     qualifying_result: list[QualifyingRow]
     weather_forecast: WeatherForecast | None
     user_team: FantasyTeam | None = None
+    price_predictions: dict[str, PricePrediction] | None = None
     race_key: str
     generated_by: str = "rules"

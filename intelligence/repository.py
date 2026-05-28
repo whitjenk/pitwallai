@@ -12,11 +12,13 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 
 from db.models import (
+    DriverPrice,
     FantasyTeam,
     LeagueOnboardingState,
     LiveAlertDelivery,
     PickRow,
     PickOwnershipRow,
+    PricePrediction,
     ProcessedInboundMessage,
     PracticeSignalRow,
     RaceEventRow,
@@ -25,6 +27,7 @@ from db.models import (
     SignalQualityRow,
     Subscriber,
     TeamOnboardingState,
+    UserReportedPriceChange,
 )
 from orchestrator.race_context import RaceEvent, SignalQuality, SignalQualityEntry
 from db.session import get_session
@@ -652,3 +655,162 @@ async def load_latest_pick_ownership(race_key: str) -> dict[str, PickOwnershipRo
         if prior is None or prior.created_at <= row.created_at:
             latest[row.driver_code] = row
     return latest
+
+
+async def save_driver_price_rows(rows: list[dict[str, Any]]) -> int:
+    """Insert immutable driver price rows; duplicates are skipped."""
+    created = 0
+    if not rows:
+        return created
+    async with get_session() as session:
+        existing_rows = await session.execute(select(DriverPrice.driver_code, DriverPrice.race_key))
+        existing = {(str(d), str(r)) for d, r in existing_rows.all()}
+        for row in rows:
+            key = (str(row["driver_code"]), str(row["race_key"]))
+            if key in existing:
+                continue
+            session.add(
+                DriverPrice(
+                    driver_code=row["driver_code"],
+                    race_key=row["race_key"],
+                    price=float(row["price"]),
+                    price_change=(None if row.get("price_change") is None else float(row["price_change"])),
+                    fantasy_points_scored=(
+                        None if row.get("fantasy_points_scored") is None else float(row["fantasy_points_scored"])
+                    ),
+                    ownership_pct=(None if row.get("ownership_pct") is None else float(row["ownership_pct"])),
+                )
+            )
+            existing.add(key)
+            created += 1
+    return created
+
+
+async def is_driver_price_history_empty() -> bool:
+    """True when price history has no rows."""
+    async with get_session() as session:
+        count = int((await session.execute(select(func.count()).select_from(DriverPrice))).scalar_one())
+        return count == 0
+
+
+async def get_price_history(driver_code: str, last_n_races: int = 10) -> list[DriverPrice]:
+    """Last N prices for a driver, returned chronologically ascending."""
+    async with get_session() as session:
+        result = await session.execute(
+            select(DriverPrice)
+            .where(DriverPrice.driver_code == driver_code.upper())
+            .order_by(DriverPrice.created_at.desc())
+            .limit(max(1, last_n_races))
+        )
+        rows = list(result.scalars().all())
+    return list(reversed(rows))
+
+
+async def get_all_current_prices() -> dict[str, float]:
+    """Most recent known price for each driver."""
+    async with get_session() as session:
+        result = await session.execute(select(DriverPrice).order_by(DriverPrice.driver_code, DriverPrice.created_at.desc()))
+        rows = list(result.scalars().all())
+    latest: dict[str, float] = {}
+    for row in rows:
+        if row.driver_code not in latest:
+            latest[row.driver_code] = float(row.price)
+    return latest
+
+
+async def upsert_price_predictions(rows: list[dict[str, Any]]) -> int:
+    """Upsert one-race-ahead price predictions."""
+    created = 0
+    async with get_session() as session:
+        for row in rows:
+            existing = (
+                await session.execute(
+                    select(PricePrediction).where(
+                        PricePrediction.driver_code == row["driver_code"],
+                        PricePrediction.race_key == row["race_key"],
+                    )
+                )
+            ).scalars().first()
+            if existing is None:
+                session.add(
+                    PricePrediction(
+                        driver_code=row["driver_code"],
+                        race_key=row["race_key"],
+                        predicted_direction=row["predicted_direction"],
+                        predicted_magnitude=float(row["predicted_magnitude"]),
+                        confidence=float(row["confidence"]),
+                        reasoning=row["reasoning"],
+                        signal_breakdown=dict(row["signal_breakdown"]),
+                    )
+                )
+                created += 1
+            else:
+                existing.predicted_direction = row["predicted_direction"]
+                existing.predicted_magnitude = float(row["predicted_magnitude"])
+                existing.confidence = float(row["confidence"])
+                existing.reasoning = row["reasoning"]
+                existing.signal_breakdown = dict(row["signal_breakdown"])
+    return created
+
+
+async def get_price_prediction_map(race_key: str) -> dict[str, PricePrediction]:
+    """Latest predictions for a target race keyed by driver code."""
+    async with get_session() as session:
+        result = await session.execute(select(PricePrediction).where(PricePrediction.race_key == race_key))
+        rows = list(result.scalars().all())
+    return {row.driver_code: row for row in rows}
+
+
+async def add_user_reported_price_change(
+    *,
+    driver_code: str,
+    race_key: str,
+    reported_change: float,
+    reporter_phone: str,
+) -> None:
+    """Store one crowdsourced price-change report."""
+    async with get_session() as session:
+        session.add(
+            UserReportedPriceChange(
+                driver_code=driver_code.upper(),
+                race_key=race_key,
+                reported_change=float(reported_change),
+                reporter_phone=reporter_phone,
+            )
+        )
+
+
+async def get_user_reported_price_changes(race_key: str) -> list[UserReportedPriceChange]:
+    """All user-reported price changes for a race key."""
+    async with get_session() as session:
+        result = await session.execute(
+            select(UserReportedPriceChange).where(UserReportedPriceChange.race_key == race_key)
+        )
+        return list(result.scalars().all())
+
+
+async def update_price_prediction_actuals(
+    *,
+    race_key: str,
+    actuals: dict[str, float],
+) -> int:
+    """Update predictions with actual post-race changes."""
+    updated = 0
+    async with get_session() as session:
+        result = await session.execute(select(PricePrediction).where(PricePrediction.race_key == race_key))
+        rows = list(result.scalars().all())
+        for row in rows:
+            if row.driver_code not in actuals:
+                continue
+            actual_mag = float(actuals[row.driver_code])
+            if actual_mag > 0.05:
+                actual_dir = "UP"
+            elif actual_mag < -0.05:
+                actual_dir = "DOWN"
+            else:
+                actual_dir = "STABLE"
+            row.actual_magnitude = actual_mag
+            row.actual_direction = actual_dir
+            row.was_correct = (row.predicted_direction == actual_dir)
+            updated += 1
+    return updated

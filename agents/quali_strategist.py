@@ -24,7 +24,13 @@ from intelligence.pick_generator import (
     build_qualifying_rows,
 )
 from intelligence.ownership import get_ownership_data
-from intelligence.repository import append_picks, get_fantasy_team, list_active_subscribers
+from intelligence.price_predictor import predict_price_changes
+from intelligence.repository import (
+    append_picks,
+    get_fantasy_team,
+    get_price_prediction_map,
+    list_active_subscribers,
+)
 from intelligence.schemas import PracticeSignal, QualifyingRow
 from openf1.client import OpenF1Client
 from orchestrator.race_context import (
@@ -290,6 +296,7 @@ async def generate_quali_picks(
         for session_sigs in ctx.practice_signals.values():
             flat_signals.extend(session_sigs)
     signal_map = _aggregate_signals(flat_signals)
+    price_predictions = await get_price_prediction_map(ctx.race_weekend.race_key)
     grid = {q.driver_code: q.grid_position for q in (ctx.qualifying_result or [])}
     weights = _signal_weights(ctx)
     circuit = ctx.circuit_profile
@@ -362,8 +369,39 @@ async def generate_quali_picks(
                 p.model_copy(update={"rank": rank, "reasoning": combo.reasoning[:500]}),
             )
         if picks:
+            has_practice = bool(flat_signals)
+            patched: list[PickRecommendation] = []
+            for p in picks:
+                pred_in = price_predictions.get(p.transfer_in or p.driver_code)
+                pred_out = price_predictions.get(p.transfer_out or "")
+                note_parts: list[str] = []
+                if (
+                    has_practice
+                    and pred_in
+                    and pred_in.predicted_direction == "UP"
+                    and pred_in.confidence > 0.6
+                ):
+                    note_parts.append(f"{p.transfer_in or p.driver_code} rising")
+                if (
+                    has_practice
+                    and pred_out
+                    and pred_out.predicted_direction == "DOWN"
+                    and pred_out.confidence > 0.6
+                    and p.transfer_out
+                ):
+                    note_parts.append(f"{p.transfer_out} falling")
+                patched.append(
+                    p.model_copy(
+                        update={
+                            "price_direction": (pred_in.predicted_direction if pred_in else None),
+                            "price_magnitude": (float(pred_in.predicted_magnitude) if pred_in else None),
+                            "price_confidence": (float(pred_in.confidence) if pred_in else None),
+                            "price_timing_note": (" · ".join(note_parts)[:60] if note_parts else None),
+                        }
+                    )
+                )
             return PickOutput(
-                picks=picks,
+                picks=patched,
                 personalized=True,
                 circuit_note=f"{circuit.display_name}: lock approaching.",
                 confidence_note="Signals merged from practice, quali, and championship context.",
@@ -388,6 +426,21 @@ async def generate_quali_picks(
                 confidence=round(conf, 1),
                 reasoning=reason[:500],
                 driver_code=code,
+                price_direction=(price_predictions.get(code).predicted_direction if code in price_predictions else None),
+                price_magnitude=(
+                    float(price_predictions[code].predicted_magnitude) if code in price_predictions else None
+                ),
+                price_confidence=(float(price_predictions[code].confidence) if code in price_predictions else None),
+                price_timing_note=(
+                    f"{code} rising"
+                    if (
+                        flat_signals
+                        and code in price_predictions
+                        and price_predictions[code].predicted_direction == "UP"
+                        and price_predictions[code].confidence > 0.6
+                    )
+                    else None
+                ),
             )
         )
     return PickOutput(
@@ -417,6 +470,7 @@ async def run_quali_strategist(
 
     subs = await list_active_subscribers()
     race_key = new_ctx.race_weekend.race_key
+    await predict_price_changes(race_key, new_ctx.circuit_profile.openf1_circuit_name)
 
     for sub in subs:
         cadence = sub.cadence_preference

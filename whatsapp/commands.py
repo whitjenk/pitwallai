@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from loguru import logger
 from db.models import Subscriber
 from db.session import get_session
 from intelligence.repository import (
+    add_user_reported_price_change,
     get_league_onboarding_state,
     get_onboarding_state,
+    get_price_prediction_map,
     update_subscriber_preferences,
 )
+from scheduler.calendar import CALENDAR_2026, get_next_race_weekend
 from whatsapp.league_flow import handle_league_command
 from whatsapp.sender import send_message
 from whatsapp.team_flow import handle_team_command
@@ -123,7 +127,7 @@ async def _handle_unsubscribe(phone: str) -> str:
 def _handle_help() -> str:
     """Return command list."""
     return _truncate(
-        "SUBSCRIBE · UNSUBSCRIBE · TEAM · LEAGUE · LEAGUE UPDATE · LIVE ON/OFF · "
+        "SUBSCRIBE · UNSUBSCRIBE · TEAM · LEAGUE · LEAGUE UPDATE · PRICE · WHY · LIVE ON/OFF · "
         "CADENCE FULL/RACEDAY · HELP · SETTINGS"
     )
 
@@ -153,6 +157,66 @@ async def _handle_cadence(phone: str, *, mode: str) -> str:
             "✅ Full weekend mode. Practice summary, quali picks, live alerts, post-race recap."
         )
     return _truncate("✅ Race day only. Saturday picks and live alerts (if LIVE ON).")
+
+
+def _last_race_key() -> str | None:
+    now = datetime.now(tz=UTC)
+    completed = [w for w in CALENDAR_2026 if w.race_utc <= now]
+    if not completed:
+        return None
+    return max(completed, key=lambda w: w.race_utc).race_key
+
+
+def _next_race_key() -> str | None:
+    nxt = get_next_race_weekend(after=datetime.now(tz=UTC))
+    return nxt.race_key if nxt else None
+
+
+async def _handle_price_report(phone: str, raw_text: str) -> str:
+    parts = raw_text.strip().split()
+    if len(parts) != 3:
+        return _truncate("Use: PRICE NOR +0.2")
+    _, code, delta_raw = parts
+    code = code.strip().upper()
+    try:
+        delta = float(delta_raw)
+    except ValueError:
+        return _truncate("Use numeric change like +0.2 or -0.1")
+    race_key = _last_race_key()
+    if race_key is None:
+        return _truncate("No completed race found yet for price reports.")
+    await add_user_reported_price_change(
+        driver_code=code,
+        race_key=race_key,
+        reported_change=delta,
+        reporter_phone=phone,
+    )
+    return _truncate("Thanks! Helps improve predictions.")
+
+
+async def _handle_why(raw_text: str) -> str:
+    parts = raw_text.strip().split()
+    if len(parts) != 2:
+        return _truncate("Use: WHY NOR")
+    _, code = parts
+    code = code.strip().upper()
+    race_key = _next_race_key()
+    if race_key is None:
+        return _truncate("No upcoming race found.")
+    preds = await get_price_prediction_map(race_key)
+    pred = preds.get(code)
+    if pred is None:
+        return _truncate(f"No prediction yet for {code}.")
+    bd = pred.signal_breakdown or {}
+    lines = [
+        f"{code}: likely {pred.predicted_direction} (${pred.predicted_magnitude:.1f}M), conf {pred.confidence:.2f}",
+    ]
+    for key in ("momentum", "value_ratio", "circuit_hist", "practice_align", "ownership_pressure"):
+        seg = bd.get(key) or {}
+        if not seg:
+            continue
+        lines.append(f"{key}: {seg.get('score', 0):+.2f} × {seg.get('weight', 0):.2f}")
+    return _truncate(" | ".join(lines), limit=300)
 
 
 async def handle_inbound_text(phone: str, text: str, raw_text: str) -> None:
@@ -194,6 +258,10 @@ async def handle_inbound_text(phone: str, text: str, raw_text: str) -> None:
             reply = await handle_team_command(phone, text, raw_text)
         elif text in {"LEAGUE", "LEAGUE UPDATE"}:
             reply = await handle_league_command(phone, text, raw_text)
+        elif text.startswith("PRICE "):
+            reply = await _handle_price_report(phone, raw_text)
+        elif text.startswith("WHY "):
+            reply = await _handle_why(raw_text)
         elif text == "SUBSCRIBE":
             reply = await _handle_subscribe(phone)
         elif text == "UNSUBSCRIBE":

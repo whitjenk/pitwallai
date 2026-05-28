@@ -15,6 +15,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -305,6 +306,67 @@ class PickOwnershipRow(Base):
     driver_code: Mapped[str] = mapped_column(String(8), nullable=False, index=True)
     pitwallai_ownership_pct: Mapped[float] = mapped_column(Float, nullable=False)
     recommendation_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+
+class DriverPrice(Base):
+    """Immutable per-race driver price history."""
+
+    __tablename__ = "driver_prices"
+    __table_args__ = (UniqueConstraint("driver_code", "race_key", name="uq_driver_price_driver_race"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    driver_code: Mapped[str] = mapped_column(String(8), nullable=False, index=True)
+    race_key: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    price: Mapped[float] = mapped_column(Float, nullable=False)
+    price_change: Mapped[float | None] = mapped_column(Float, nullable=True)
+    fantasy_points_scored: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ownership_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+
+class PricePrediction(Base):
+    """One-race-ahead price direction prediction."""
+
+    __tablename__ = "price_predictions"
+    __table_args__ = (UniqueConstraint("driver_code", "race_key", name="uq_price_prediction_driver_race"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    driver_code: Mapped[str] = mapped_column(String(8), nullable=False, index=True)
+    race_key: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    predicted_direction: Mapped[str] = mapped_column(String(16), nullable=False)
+    predicted_magnitude: Mapped[float] = mapped_column(Float, nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    reasoning: Mapped[str] = mapped_column(Text, nullable=False)
+    signal_breakdown: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    actual_direction: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    actual_magnitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    was_correct: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+
+class UserReportedPriceChange(Base):
+    """Crowdsourced post-race price change reports from subscribers."""
+
+    __tablename__ = "user_reported_price_changes"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    driver_code: Mapped[str] = mapped_column(String(8), nullable=False, index=True)
+    race_key: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    reported_change: Mapped[float] = mapped_column(Float, nullable=False)
+    reporter_phone: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

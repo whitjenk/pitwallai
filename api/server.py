@@ -147,12 +147,14 @@ def create_app(
         app.state.last_picks_result = None
 
         from db.session import init_db
+        from intelligence.price_history import seed_price_history
         from intelligence.picks_config import PicksSettings
         from intelligence.picks_scheduler import PicksScheduler
         from scheduler.runtime import start_race_scheduler, stop_race_scheduler
         from whatsapp.settings import get_whatsapp_settings
 
         await init_db()
+        await seed_price_history()
         picks_settings = PicksSettings.from_env(mode=mode)
         app.state.picks_settings = picks_settings
         app.state.picks_scheduler = PicksScheduler(app, picks_settings)

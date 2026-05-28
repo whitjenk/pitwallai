@@ -104,6 +104,13 @@ def format_personalized_picks(
         money_line,
         f"📻 {_short_reason(best)}",
     ]
+    if best.price_confidence is not None and best.price_confidence > 0.6 and best.price_timing_note:
+        if "rising" in best.price_timing_note and "falling" in best.price_timing_note:
+            lines.append(f"📈 {best.price_timing_note} — good time to swap")
+        elif best.price_direction == "UP":
+            lines.append(f"📈 Price likely +${(best.price_magnitude or 0.0):.1f}M next race — buy now")
+        elif best.price_direction == "DOWN":
+            lines.append(f"📉 Price likely -${(best.price_magnitude or 0.0):.1f}M next race — sell now")
 
     if len(picks) > 1:
         alt = picks[1]

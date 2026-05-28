@@ -133,6 +133,52 @@ def _circuit_note(circuit: CircuitProfile) -> str:
     )[:240]
 
 
+def _price_metadata(
+    *,
+    code_in: str,
+    code_out: str | None,
+    in_team: set[str],
+    price_predictions,
+    has_practice_data: bool,
+) -> dict[str, str | float | None]:
+    pred_map = price_predictions or {}
+    pred = pred_map.get(code_in)
+    if pred is None and (code_out is None or pred_map.get(code_out) is None):
+        return {
+            "price_direction": None,
+            "price_magnitude": None,
+            "price_confidence": None,
+            "price_timing_note": None,
+        }
+    note_parts: list[str] = []
+    if (
+        has_practice_data
+        and pred is not None
+        and pred.predicted_direction == "UP"
+        and float(pred.confidence) > 0.6
+        and code_in not in in_team
+    ):
+        note_parts.append(f"{code_in} rising")
+    pred_out = pred_map.get(code_out) if code_out else None
+    if (
+        has_practice_data
+        and pred_out is not None
+        and pred_out.predicted_direction == "DOWN"
+        and float(pred_out.confidence) > 0.6
+        and code_out in in_team
+    ):
+        note_parts.append(f"{code_out} falling")
+    note = None
+    if note_parts:
+        note = " · ".join(note_parts)
+    return {
+        "price_direction": (pred.predicted_direction if pred else None),
+        "price_magnitude": (float(pred.predicted_magnitude) if pred else None),
+        "price_confidence": (float(pred.confidence) if pred else None),
+        "price_timing_note": (note[:60] if note else None),
+    }
+
+
 def _enumerate_transfers(
     team: FantasyTeam,
     *,
@@ -276,6 +322,8 @@ def _path_personalized(
         grid=grid,
     )
     picks: list[PickRecommendation] = []
+    team_drivers = {d for d in (ctx.user_team.driver_1, ctx.user_team.driver_2, ctx.user_team.driver_3, ctx.user_team.driver_4, ctx.user_team.driver_5) if d}
+    has_practice_data = bool(ctx.practice_signals)
     for rank, opt in enumerate(options[:3], start=1):
         saved = opt.budget_saved
         save_str = f"Saves ${abs(saved):.1f}M." if saved >= 0 else f"Costs ${abs(saved):.1f}M."
@@ -296,6 +344,13 @@ def _path_personalized(
                 predicted_points_delta=opt.expected_delta,
                 transfer_out=opt.out_code,
                 transfer_in=opt.in_code,
+                **_price_metadata(
+                    code_in=opt.in_code,
+                    code_out=opt.out_code,
+                    in_team=team_drivers,
+                    price_predictions=ctx.price_predictions,
+                    has_practice_data=has_practice_data,
+                ),
             )
         )
     if not picks:
@@ -341,6 +396,13 @@ def _path_generic(
                 reasoning=reasoning,
                 driver_code=code,
                 predicted_points_delta=None,
+                **_price_metadata(
+                    code_in=code,
+                    code_out=None,
+                    in_team=set(),
+                    price_predictions=ctx.price_predictions,
+                    has_practice_data=bool(ctx.practice_signals),
+                ),
             )
         )
     note = _confidence_note(ctx.practice_signals, ctx.weather_forecast)

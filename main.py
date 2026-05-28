@@ -11,13 +11,22 @@ import uvicorn
 from loguru import logger
 
 from api.server import create_app
+from db.session import init_db
 from pitwallai.agents.radio_intercept.config import DecodeBackend, PitWallSettings
+from whatsapp.webhook import router as whatsapp_router
 
 # ASGI entry for Railway / `uvicorn main:app` (see railway.toml)
 app = create_app(
     mode=os.environ.get("PITWALL_MODE", "rehearsal"),
     rehearsal_speed=float(os.environ.get("PITWALL_REHEARSAL_SPEED", "3.0")),
 )
+app.include_router(whatsapp_router)
+
+
+@app.on_event("startup")
+async def _whatsapp_startup() -> None:
+    """Ensure subscriber tables exist when DATABASE_URL is configured."""
+    await init_db()
 
 
 def parse_args() -> argparse.Namespace:

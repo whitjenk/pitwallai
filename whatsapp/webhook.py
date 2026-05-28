@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import secrets
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Query, Request, Response, status
@@ -13,6 +14,7 @@ from whatsapp.payload import extract_text_messages
 from whatsapp.settings import get_whatsapp_settings
 from whatsapp.webhook_verify import (
     is_duplicate_message,
+    mark_message_processed,
     verify_meta_signature,
     webhook_skip_signature,
 )
@@ -32,7 +34,12 @@ async def webhook_verify(
     Returns hub.challenge as plaintext when verify_token matches WEBHOOK_VERIFY_TOKEN.
     """
     settings = get_whatsapp_settings()
-    if hub_mode == "subscribe" and hub_verify_token == settings.webhook_verify_token:
+    expected = settings.webhook_verify_token
+    if (
+        hub_mode == "subscribe"
+        and expected
+        and secrets.compare_digest(hub_verify_token, expected)
+    ):
         logger.info("WhatsApp webhook verified")
         return Response(content=hub_challenge, media_type="text/plain")
     logger.warning("WhatsApp webhook verification failed")
@@ -55,7 +62,15 @@ async def _process_payload(payload: dict[str, Any]) -> None:
             message.message_id,
             message.phone[:6] + "…" if len(message.phone) > 6 else message.phone,
         )
-        await handle_inbound_text(message.phone, message.text, message.raw_text)
+        try:
+            await handle_inbound_text(message.phone, message.text, message.raw_text)
+        except Exception:
+            logger.exception(
+                "Inbound WhatsApp handler failed message_id={}",
+                message.message_id,
+            )
+            raise
+        mark_message_processed(message.message_id)
 
 
 @router.post("/webhook")

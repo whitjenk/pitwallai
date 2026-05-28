@@ -7,6 +7,7 @@ import hmac
 
 from whatsapp.webhook_verify import (
     is_duplicate_message,
+    mark_message_processed,
     verify_meta_signature,
 )
 
@@ -31,6 +32,9 @@ def test_verify_meta_signature_rejects_missing_header() -> None:
     assert not verify_meta_signature(b"{}", None, "secret")
 
 
-def test_is_duplicate_message() -> None:
-    assert is_duplicate_message("wamid.test-dedup-1") is False
-    assert is_duplicate_message("wamid.test-dedup-1") is True
+def test_message_dedup_after_success_only() -> None:
+    msg_id = "wamid.test-dedup-after-success"
+    assert is_duplicate_message(msg_id) is False
+    assert is_duplicate_message(msg_id) is False
+    mark_message_processed(msg_id)
+    assert is_duplicate_message(msg_id) is True

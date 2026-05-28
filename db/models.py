@@ -66,7 +66,7 @@ class FantasyTeam(Base):
     constructor_1: Mapped[str | None] = mapped_column(String(8), nullable=True)
     constructor_2: Mapped[str | None] = mapped_column(String(8), nullable=True)
     remaining_budget: Mapped[float | None] = mapped_column(Float, nullable=True)
-    transfers_available: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
+    transfers_available: Mapped[int] = mapped_column(Integer, nullable=False, default=-1)
     chips_used: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

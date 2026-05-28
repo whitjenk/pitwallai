@@ -117,3 +117,13 @@ def test_get_picks_returns_cached(picks_app: TestClient) -> None:
 def test_personalized_picks_requires_api_key(picks_app: TestClient) -> None:
     response = picks_app.get("/api/picks", params={"phone": "+15551234567"})
     assert response.status_code == 503
+
+
+def test_refresh_picks_requires_api_key(picks_app: TestClient) -> None:
+    response = picks_app.get("/api/picks", params={"refresh": "true"})
+    assert response.status_code == 503
+
+
+def test_generate_picks_requires_api_key(picks_app: TestClient) -> None:
+    response = picks_app.post("/api/picks/generate")
+    assert response.status_code == 503

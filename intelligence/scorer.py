@@ -280,8 +280,10 @@ async def _build_recap_for_subscriber(
             swap_note = f"Best swap netted +{int(best.actual_points_delta)} pts"
     elif personalized_rows and correct == 0:
         best = personalized_rows[0]
-        if best.actual_points_delta is not None and best.actual_points_delta > 0:
-            swap_note = f"Suggested swap would have gained {int(best.actual_points_delta)} pts"
+        if best.actual_points_delta is not None and best.actual_points_delta < 0:
+            swap_note = (
+                f"Suggested swap would have lost {int(abs(best.actual_points_delta))} pts"
+            )
 
     nudge = team is None or team.remaining_budget is None
 

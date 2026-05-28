@@ -67,7 +67,7 @@ def _prune_seen_ids(now: float) -> None:
 
 def is_duplicate_message(message_id: str) -> bool:
     """
-    Return True if this Meta message_id was already processed.
+    Return True if this Meta message_id was already processed successfully.
 
     Args:
         message_id: Meta message id from the webhook payload.
@@ -79,7 +79,13 @@ def is_duplicate_message(message_id: str) -> bool:
         return False
     now = time.monotonic()
     _prune_seen_ids(now)
-    if message_id in _SEEN_MESSAGE_IDS:
-        return True
+    return message_id in _SEEN_MESSAGE_IDS
+
+
+def mark_message_processed(message_id: str) -> None:
+    """Record a successfully handled inbound message (enables safe Meta retries)."""
+    if not message_id.strip():
+        return
+    now = time.monotonic()
+    _prune_seen_ids(now)
     _SEEN_MESSAGE_IDS[message_id] = now + _DEDUP_TTL_SECONDS
-    return False

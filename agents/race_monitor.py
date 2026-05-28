@@ -29,6 +29,7 @@ _MAX_ALERTS_PER_HOUR = 3
 # race_key -> phone -> list of alert timestamps
 _alert_log: dict[str, dict[str, list[datetime]]] = defaultdict(lambda: defaultdict(list))
 _seen_messages: dict[str, set[str]] = defaultdict(set)
+_seen_pit_stops: dict[str, set[str]] = defaultdict(set)
 _monitor_tasks: dict[str, asyncio.Task[None]] = {}
 
 
@@ -121,7 +122,6 @@ async def _poll_loop(
     race_key = ctx.race_weekend.race_key
     client = deps.openf1_client
     last_rain: bool | None = None
-    leader_pitted = False
 
     logger.bind(race_key=race_key, session_key=session_key).info("Agent 4 race monitor started")
 
@@ -179,30 +179,30 @@ async def _poll_loop(
 
             pits = await client.get_pit_stops(session_key)
             for pit in pits:
-                pos_samples = await client.get_positions(session_key)
-                leaders = [p for p in pos_samples if p.position is not None and p.position <= 5]
-                if leaders and not leader_pitted:
-                    leader_pitted = True
-                    code = driver_code_for(pit.driver_number)
-                    await _broadcast_alert(
-                        race_key,
-                        f"⚡ {code} just pitted. Pit window activity observed lap {pit.lap_number or '?'}.",
-                        affected_driver=code,
-                    )
-                    subs = await list_live_alert_subscribers()
-                    for sub in subs:
-                        team = await get_fantasy_team(sub.phone)
-                        if team is None:
-                            continue
-                        drivers = await _subscriber_drivers(sub.phone)
-                        if code in drivers and _can_alert(race_key, sub.phone):
-                            note = _chip_note(team, code)
-                            if note:
-                                await send_message(
-                                    sub.phone,
-                                    _format_alert(f"⚡ {code} just pitted.{note}"),
-                                )
-                                _record_alert(race_key, sub.phone)
+                pit_key = f"{pit.driver_number}:{pit.lap_number}"
+                if pit_key in _seen_pit_stops[race_key]:
+                    continue
+                _seen_pit_stops[race_key].add(pit_key)
+                code = driver_code_for(pit.driver_number)
+                await _broadcast_alert(
+                    race_key,
+                    f"⚡ {code} just pitted. Pit window activity observed lap {pit.lap_number or '?'}.",
+                    affected_driver=code,
+                )
+                subs = await list_live_alert_subscribers()
+                for sub in subs:
+                    team = await get_fantasy_team(sub.phone)
+                    if team is None:
+                        continue
+                    drivers = await _subscriber_drivers(sub.phone)
+                    if code in drivers and _can_alert(race_key, sub.phone):
+                        note = _chip_note(team, code)
+                        if note:
+                            await send_message(
+                                sub.phone,
+                                _format_alert(f"⚡ {code} just pitted.{note}"),
+                            )
+                            _record_alert(race_key, sub.phone)
 
             if await _race_complete(client, session_key):
                 complete = RaceEvent(

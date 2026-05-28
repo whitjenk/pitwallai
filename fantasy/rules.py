@@ -30,6 +30,9 @@ PENALTY_EXTRA_TRANSFER_PTS = 10
 CHIP_LIMITLESS = "limitless"
 TRANSFERS_LIMITLESS_SENTINEL = 99
 
+# Onboarding default — user has not entered free transfers yet
+TRANSFERS_UNSET = -1
+
 # ── Chips (2026) — one use each per season, max one chip per race weekend ─────
 CHIP_NAMES_2026: tuple[str, ...] = (
     "3x_boost",
@@ -255,6 +258,11 @@ def transfer_penalty_points(transfers_used: int, free_allowance: int) -> int:
     return -PENALTY_EXTRA_TRANSFER_PTS * extra
 
 
+def transfers_configured(transfers_available: int) -> bool:
+    """True when the user has completed the transfers onboarding step."""
+    return transfers_available >= 0
+
+
 def max_affordable_transfers(transfers_available: int, *, limitless_chip: bool = False) -> int:
     """
     Maximum transfers to enumerate for pick generation.
@@ -266,9 +274,11 @@ def max_affordable_transfers(transfers_available: int, *, limitless_chip: bool =
     Returns:
         Cap on transfer count for combinatorics.
     """
-    if limitless_chip or transfers_available >= TRANSFERS_LIMITLESS_SENTINEL:
+    if not transfers_configured(transfers_available):
+        return 0
+    if limitless_chip:
         return DRIVERS_PER_TEAM
-    return min(max(0, transfers_available), MAX_TRANSFERS_WITH_BANK)
+    return min(transfers_available, MAX_TRANSFERS_WITH_BANK)
 
 
 def free_transfer_allowance(transfers_available: int, *, limitless_chip: bool = False) -> int:
@@ -277,9 +287,11 @@ def free_transfer_allowance(transfers_available: int, *, limitless_chip: bool = 
 
     Separate from max_affordable_transfers(), which caps combinatorial search depth.
     """
-    if limitless_chip or transfers_available >= TRANSFERS_LIMITLESS_SENTINEL:
+    if not transfers_configured(transfers_available):
+        return 0
+    if limitless_chip:
         return DRIVERS_PER_TEAM
-    return min(max(0, transfers_available), MAX_TRANSFERS_WITH_BANK)
+    return min(transfers_available, MAX_TRANSFERS_WITH_BANK)
 
 
 def validate_driver_codes(driver_codes: list[str]) -> str | None:

@@ -236,8 +236,10 @@ async def _broadcast_recap(
         pers = [p for p in picks if p.personalized and p.phone == sub.phone]
         if pers and correct > 0 and pers[0].actual_points_delta and pers[0].actual_points_delta > 0:
             swap_note = f"Best swap netted +{int(pers[0].actual_points_delta)} pts"
-        elif pers and correct == 0 and pers[0].actual_points_delta and pers[0].actual_points_delta > 0:
-            swap_note = f"Suggested swap would have gained {int(pers[0].actual_points_delta)} pts"
+        elif pers and correct == 0 and pers[0].actual_points_delta and pers[0].actual_points_delta < 0:
+            swap_note = (
+                f"Suggested swap would have lost {int(abs(pers[0].actual_points_delta))} pts"
+            )
 
         msg = format_recap_message(
             circuit_name=ctx.race_weekend.display_name,

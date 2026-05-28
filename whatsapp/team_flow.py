@@ -13,6 +13,7 @@ from fantasy.rules import (
     MAX_TRANSFERS_WITH_BANK,
     budget_remaining_m,
     team_value_m,
+    transfers_configured,
     validate_constructor_codes,
     validate_driver_codes,
     validate_team_under_budget,
@@ -50,7 +51,11 @@ def _team_summary(team: FantasyTeam) -> str:
         if team.remaining_budget is not None
         else "—"
     )
-    transfers = str(team.transfers_available)
+    transfers = (
+        str(team.transfers_available)
+        if transfers_configured(team.transfers_available)
+        else "—"
+    )
     squad_val = team_value_m(_team_drivers(team), _team_constructors(team))
     return (
         f"Squad ${squad_val:.1f}M/{BUDGET_CAP_M:.0f}M cap | {remaining} | "
@@ -77,7 +82,9 @@ def _validate_team(team: FantasyTeam) -> str | None:
                 f"Budget mismatch: squad leaves ${expected:.1f}M, "
                 f"you entered ${team.remaining_budget:.1f}M."
             )
-    if team.transfers_available < 0 or team.transfers_available > MAX_TRANSFERS_WITH_BANK:
+    if not transfers_configured(team.transfers_available):
+        return f"Set free transfers (0–{MAX_TRANSFERS_WITH_BANK})."
+    if team.transfers_available > MAX_TRANSFERS_WITH_BANK:
         return f"Transfers must be 0–{MAX_TRANSFERS_WITH_BANK} ({FREE_TRANSFERS_PER_RACE} free, +1 bankable)."
     return None
 
@@ -90,7 +97,7 @@ def _next_missing_step(team: FantasyTeam) -> int:
         return 2
     if not team.constructor_1 or not team.constructor_2:
         return 3
-    if team.transfers_available is None:
+    if not transfers_configured(team.transfers_available):
         return 4
     return 0
 

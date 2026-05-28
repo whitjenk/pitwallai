@@ -17,6 +17,7 @@ from fantasy.rules import (
     free_transfer_allowance,
     team_value_m,
     transfer_penalty_points,
+    transfers_configured,
     validate_constructor_codes,
     validate_driver_codes,
     validate_team_under_budget,
@@ -64,7 +65,11 @@ def test_quali_points_not_race_scale() -> None:
 
 def test_free_transfer_allowance() -> None:
     assert free_transfer_allowance(2) == 2
-    assert free_transfer_allowance(99, limitless_chip=False) == 5
+    assert free_transfer_allowance(99, limitless_chip=False) == MAX_TRANSFERS_WITH_BANK
+    assert free_transfer_allowance(2, limitless_chip=True) == 5
+    assert free_transfer_allowance(-1) == 0
+    assert not transfers_configured(-1)
+    assert transfers_configured(0)
 
 
 def test_min_price_floor() -> None:

@@ -12,6 +12,7 @@ from loguru import logger
 from db.models import PickRow, Subscriber
 from intelligence.drivers import driver_code_for
 from intelligence.repository import (
+    get_all_picks_for_race,
     get_fantasy_team,
     get_picks_for_race,
     list_subscribers_for_race_picks,
@@ -22,19 +23,7 @@ from scheduler.calendar import get_next_race_weekend, get_race_weekend
 from whatsapp.message_format import format_recap_message
 from whatsapp.sender import mask_phone, send_message
 
-# F1 race points by finishing position (P1–P10)
-_RACE_POINTS: dict[int, float] = {
-    1: 25.0,
-    2: 18.0,
-    3: 15.0,
-    4: 12.0,
-    5: 10.0,
-    6: 8.0,
-    7: 6.0,
-    8: 4.0,
-    9: 2.0,
-    10: 1.0,
-}
+from fantasy.rules import driver_points_race as _official_race_points
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,9 +39,10 @@ class SeasonStats:
 
 
 def _points_for_position(position: int | None) -> float:
-    if position is None or position < 1:
-        return 0.0
-    return _RACE_POINTS.get(position, 0.0)
+    """Official F1 Fantasy Grand Prix points (P1–P10, DNF/NC = -20)."""
+    if position is None:
+        return float(_official_race_points(None, classified=False))
+    return float(_official_race_points(position, classified=position <= 20))
 
 
 async def _fetch_final_positions(client: OpenF1Client, session_key: int) -> dict[str, int]:
@@ -133,7 +123,7 @@ async def score_race(race_key: str) -> SeasonStats:
         raise ValueError(f"Race session not found for {weekend.display_name}")
 
     positions = await _fetch_final_positions(client, race_sk)
-    picks = await get_picks_for_race(race_key)
+    picks = await get_all_picks_for_race(race_key)
 
     from intelligence.repository import update_pick_result
 

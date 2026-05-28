@@ -123,7 +123,9 @@ async def _load_championship(client: OpenF1Client) -> dict[str, ChampionshipRow]
         if row.position is None:
             continue
         code = driver_code_for(row.driver_number)
-        pts = max(0.0, 26.0 - float(row.position) * 2.0)
+        from fantasy.rules import driver_points_race
+
+        pts = float(driver_points_race(row.position, classified=row.position <= 20))
         points_table[code] = points_table.get(code, 0.0) + pts
 
     sorted_drivers = sorted(points_table.items(), key=lambda x: x[1], reverse=True)

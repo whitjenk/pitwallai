@@ -16,29 +16,14 @@ from intelligence.schemas import (
     QualifyingRow,
     WeatherForecast,
 )
+from fantasy.rules import (
+    DRIVER_PRICES_M,
+    driver_points_race,
+    driver_price_m,
+    max_affordable_transfers,
+    transfer_penalty_points,
+)
 from openf1.client import OpenF1Client
-
-# Approximate F1 Fantasy prices (USD millions) — update per season.
-_DRIVER_PRICE_M: dict[str, float] = {
-    "VER": 30.0,
-    "NOR": 28.5,
-    "LEC": 27.0,
-    "PIA": 26.0,
-    "SAI": 24.0,
-    "HAM": 23.0,
-    "RUS": 22.0,
-    "PER": 20.0,
-    "ALO": 18.0,
-    "ALB": 16.0,
-    "GAS": 14.0,
-    "OCO": 13.0,
-    "STR": 12.0,
-    "TSU": 11.0,
-    "HUL": 10.0,
-    "MAG": 9.5,
-    "BOT": 9.0,
-    "ZHOU": 8.5,
-}
 
 _ANOMALY_CONFIDENCE_PENALTY = 12.0
 
@@ -169,23 +154,36 @@ def _enumerate_transfers(
         return []
 
     budget = team.remaining_budget
-    transfers = team.transfers_available
-    if transfers <= 0:
+    free_transfers = max_affordable_transfers(
+        team.transfers_available,
+        limitless_chip=bool((team.chips_used or {}).get("limitless")),
+    )
+    if free_transfers <= 0:
         return []
 
     options: list[_TransferOption] = []
-    pool = set(_DRIVER_PRICE_M.keys()) - set(roster)
+    pool = set(DRIVER_PRICES_M.keys()) - set(roster)
 
     for out_code in roster:
-        out_price = _DRIVER_PRICE_M.get(out_code, 15.0)
+        out_price = driver_price_m(out_code)
         for in_code in pool:
-            in_price = _DRIVER_PRICE_M.get(in_code, 15.0)
+            in_price = driver_price_m(in_code)
             delta_cost = in_price - out_price
             if delta_cost > budget:
                 continue
             out_score = _driver_score(out_code, circuit=circuit, signals=signals, grid=grid)
             in_score = _driver_score(in_code, circuit=circuit, signals=signals, grid=grid)
-            expected = round((in_score - out_score) * 0.15, 1)
+            out_pos = grid.get(out_code)
+            in_pos = grid.get(in_code)
+            if out_pos is not None and in_pos is not None:
+                expected = float(
+                    driver_points_race(in_pos)
+                    - driver_points_race(out_pos)
+                    + transfer_penalty_points(1, free_transfers)
+                )
+            else:
+                expected = round((in_score - out_score) * 0.15, 1)
+            expected = round(expected, 1)
             in_sig = signals.get(in_code)
             out_sig = signals.get(out_code)
             conf = min(95.0, max(35.0, 55.0 + expected * 2.0))
@@ -234,7 +232,7 @@ async def _historical_points_hint(
     results = await client.get_session_results(sk)
     for row in results:
         if driver_code_for(row.driver_number) == driver_code and row.position is not None:
-            return max(0.0, 26.0 - float(row.position) * 1.2)
+            return float(driver_points_race(row.position))
     return 0.0
 
 
@@ -311,7 +309,7 @@ def _path_generic(
     grid: dict[str, int],
 ) -> PickOutput:
     scored: list[tuple[str, float]] = []
-    for code in _DRIVER_PRICE_M:
+    for code in DRIVER_PRICES_M:
         scored.append(
             (
                 code,

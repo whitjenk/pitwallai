@@ -9,10 +9,17 @@ from loguru import logger
 
 from agents.base import AgentRunDependencies
 from db.models import FantasyTeam
+from fantasy.rules import (
+    DRIVER_PRICES_M,
+    driver_points_qualifying,
+    driver_points_race,
+    driver_price_m,
+    max_affordable_transfers,
+    transfer_penalty_points,
+)
 from intelligence.pick_generator import (
     PickOutput,
     PickRecommendation,
-    _DRIVER_PRICE_M,
     _aggregate_signals,
     build_qualifying_rows,
 )
@@ -103,7 +110,10 @@ def _score_driver(
     intel = ctx.circuit_intel or {}
     hist = intel.get("avg_positions_gained_top5", circuit.positions_gained_ceiling)
     base += min(float(hist), circuit.positions_gained_ceiling) * 1.5
-    base += _qualifying_bonus(grid.get(code), circuit.overtaking_difficulty)
+    grid_pos = grid.get(code)
+    if grid_pos is not None:
+        base += float(driver_points_qualifying(grid_pos))
+    base += _qualifying_bonus(grid_pos, circuit.overtaking_difficulty)
     base += _practice_modifier(sig, weights)
     if champ:
         base += champ.championship_pressure * 3.0
@@ -134,18 +144,30 @@ def _enumerate_single_transfers(
 ) -> list[_ScoredCombo]:
     roster = [c for c in (team.driver_1, team.driver_2, team.driver_3, team.driver_4, team.driver_5) if c]
     budget = team.remaining_budget or 0.0
-    pool = set(_DRIVER_PRICE_M) - set(roster)
+    free_transfers = max_affordable_transfers(
+        team.transfers_available,
+        limitless_chip=bool((team.chips_used or {}).get("limitless")),
+    )
+    pool = set(DRIVER_PRICES_M) - set(roster)
     combos: list[_ScoredCombo] = []
 
     for out_code in roster:
-        out_price = _DRIVER_PRICE_M.get(out_code, 15.0)
+        out_price = driver_price_m(out_code)
         for in_code in pool:
-            in_price = _DRIVER_PRICE_M.get(in_code, 15.0)
+            in_price = driver_price_m(in_code)
             if in_price - out_price > budget:
                 continue
             in_score, in_reason = _score_driver(in_code, ctx, grid, signals, weights)
             out_score, out_reason = _score_driver(out_code, ctx, grid, signals, weights)
-            delta = round(in_score - out_score, 1)
+            out_pos, in_pos = grid.get(out_code), grid.get(in_code)
+            if out_pos is not None and in_pos is not None:
+                delta = float(
+                    driver_points_race(in_pos)
+                    - driver_points_race(out_pos)
+                    + transfer_penalty_points(1, free_transfers)
+                )
+            else:
+                delta = round(in_score - out_score, 1)
             conf = min(95.0, max(35.0, 55.0 + delta))
             sig = signals.get(in_code)
             if sig and len(sig.anomaly_flags) >= 2:
@@ -174,18 +196,20 @@ def _enumerate_double_transfers(
     signals: dict[str, PracticeSignal],
     weights: dict[str, float],
 ) -> list[_ScoredCombo]:
-    if team.transfers_available < 2:
+    free_transfers = max_affordable_transfers(
+        team.transfers_available,
+        limitless_chip=bool((team.chips_used or {}).get("limitless")),
+    )
+    if free_transfers < 2:
         return []
     roster = [c for c in (team.driver_1, team.driver_2, team.driver_3, team.driver_4, team.driver_5) if c]
     budget = team.remaining_budget or 0.0
-    pool = list(set(_DRIVER_PRICE_M) - set(roster))
+    pool = list(set(DRIVER_PRICES_M) - set(roster))
     combos: list[_ScoredCombo] = []
 
     for out_pair in combinations(roster, 2):
         for in_pair in combinations(pool, 2):
-            cost = sum(_DRIVER_PRICE_M.get(c, 15.0) for c in in_pair) - sum(
-                _DRIVER_PRICE_M.get(c, 15.0) for c in out_pair
-            )
+            cost = sum(driver_price_m(c) for c in in_pair) - sum(driver_price_m(c) for c in out_pair)
             if cost > budget:
                 continue
             delta = 0.0
@@ -194,9 +218,16 @@ def _enumerate_double_transfers(
             for out_c, in_c in zip(out_pair, in_pair, strict=True):
                 in_s, r_in = _score_driver(in_c, ctx, grid, signals, weights)
                 out_s, r_out = _score_driver(out_c, ctx, grid, signals, weights)
-                delta += in_s - out_s
+                out_pos, in_pos = grid.get(out_c), grid.get(in_c)
+                if out_pos is not None and in_pos is not None:
+                    delta += driver_points_race(in_pos) - driver_points_race(out_pos)
+                else:
+                    delta += in_s - out_s
                 reasons.append(f"{out_c}→{in_c}: {r_in}")
-            delta = round(delta, 1)
+            delta = round(
+                float(delta) + transfer_penalty_points(2, free_transfers),
+                1,
+            )
             conf = min(90.0, max(40.0, 50.0 + delta))
             reasoning = " | ".join(reasons)
             picks.append(
@@ -252,7 +283,7 @@ def generate_quali_picks(
             )
 
     scored: list[tuple[str, float, str]] = []
-    for code in _DRIVER_PRICE_M:
+    for code in DRIVER_PRICES_M:
         score, reason = _score_driver(code, ctx, grid, signal_map, weights)
         scored.append((code, score, reason))
     scored.sort(key=lambda x: x[1], reverse=True)

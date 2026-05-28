@@ -73,11 +73,12 @@ async def _subscriber_drivers(phone: str) -> set[str]:
 
 
 def _chip_note(team: FantasyTeam, driver_code: str) -> str:
-    chips = team.chips_used or {}
-    available = [name for name in ("wildcard", "limitless", "3x_boost") if name not in chips]
+    from fantasy.rules import CHIP_NAMES_2026, chip_available
+
+    available = [c for c in CHIP_NAMES_2026 if chip_available(team.chips_used or {}, c)]
     if not available:
         return ""
-    return f" Pit window open if considering {available[0]}."
+    return f" Pit window open if considering {available[0]} chip."
 
 
 async def _broadcast_alert(

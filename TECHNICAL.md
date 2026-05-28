@@ -212,6 +212,8 @@ Active weekend detection uses OpenF1 Race sessions nearest to “now”, unless 
 
 **Calendar** — `scheduler/calendar.py` hard-codes 22 confirmed 2026 rounds (Bahrain/Jeddah cancelled). All times UTC; `fantasy_lock_utc` = race − 1hr. `race_key` format: `2026_monaco`.
 
+**F1 Fantasy rules** — `fantasy/rules.py` centralizes official game logic ([game rules](https://fantasy.formula1.com/en/game-rules)): $100M cap (5 drivers + 2 constructors), $3M price floor, 2 free transfers/week (bank +1 → max 3), −10 pts per extra transfer, race points 25–1 (P1–P10), DNF/NC −20 (sprint −10), and six 2026 chips. Pick generation, quali strategist, post-race scoring, and `TEAM` onboarding import from here. Asset prices are approximate placeholders until synced from in-game values.
+
 **APScheduler** — `scheduler/jobs.py` + `scheduler/runtime.py`:
 
 | Job | Trigger | Action |

@@ -252,6 +252,17 @@ async def run_scorer_and_learner(
             logger.info("Price prediction scored race_key={} updated={} hit_rate={:.2f}", race_key, updated, hit_rate)
     new_ctx = evolve_race_context(ctx, signal_quality=signal_quality)
 
+    from intelligence.budget_tracker import track_team_value
+    from sharing.share_cards import generate_share_card
+
+    phones = {p.phone for p in picks if p.phone}
+    for phone in phones:
+        try:
+            await generate_share_card(phone, race_key)
+            await track_team_value(phone, race_key)
+        except Exception as exc:
+            logger.error("post-score share/value failed phone={}: {}", phone[:6], exc)
+
     await _broadcast_recap(
         new_ctx,
         overall,

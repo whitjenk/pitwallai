@@ -12,6 +12,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 
 from db.models import (
+    ChipPlanStore,
     ConstructorStrategyRow,
     DriverPrice,
     FantasyTeam,
@@ -25,10 +26,13 @@ from db.models import (
     RaceEventRow,
     RaceMonitorState,
     SeasonAccuracy,
+    ShareCard,
     SignalQualityRow,
     Subscriber,
     TeamOnboardingState,
+    TeamValueSnapshot,
     UserReportedPriceChange,
+    WeekendNotificationSent,
 )
 from orchestrator.race_context import RaceEvent, SignalQuality, SignalQualityEntry
 from db.session import get_session
@@ -334,6 +338,7 @@ async def append_picks(
     *,
     phone: str | None,
     circuit_key: str,
+    pick_status: str = "sent",
 ) -> list[uuid.UUID]:
     """
     Append pick rows to the audit log (never delete).
@@ -364,10 +369,188 @@ async def append_picks(
                     ownership_tier=pick.ownership_tier,
                     league_strategy_applied=pick.league_strategy_applied,
                     opponent_conflict=pick.opponent_conflict,
+                    pick_status=pick_status,
                 )
             )
             ids.append(row_id)
     return ids
+
+
+async def get_draft_picks_for_race(phone: str, race_key: str) -> list[PickRow]:
+    """Thursday draft recommendations (not yet broadcast)."""
+    async with get_session() as session:
+        result = await session.execute(
+            select(PickRow)
+            .where(
+                PickRow.race_key == race_key,
+                PickRow.phone == phone,
+                PickRow.pick_status == "draft",
+            )
+            .order_by(PickRow.pick_rank)
+        )
+        return list(result.scalars().all())
+
+
+async def mark_picks_sent_for_race(phone: str, race_key: str) -> None:
+    """Promote draft picks to sent when Saturday broadcast fires."""
+    async with get_session() as session:
+        result = await session.execute(
+            select(PickRow).where(
+                PickRow.race_key == race_key,
+                PickRow.phone == phone,
+                PickRow.pick_status == "draft",
+            )
+        )
+        for row in result.scalars().all():
+            row.pick_status = "sent"
+
+
+async def get_subscriber(phone: str) -> Subscriber | None:
+    async with get_session() as session:
+        return await session.get(Subscriber, phone)
+
+
+async def set_subscriber_share_private(phone: str, *, private: bool) -> None:
+    async with get_session() as session:
+        row = await session.get(Subscriber, phone)
+        if row:
+            row.share_cards_private = private
+
+
+async def increment_subscriber_races_received(phone: str) -> None:
+    async with get_session() as session:
+        row = await session.get(Subscriber, phone)
+        if row:
+            row.races_received = int(row.races_received or 0) + 1
+
+
+async def get_share_card_by_token(share_token: str) -> ShareCard | None:
+    async with get_session() as session:
+        return await session.get(ShareCard, share_token)
+
+
+async def get_share_card_for_race(phone: str, race_key: str) -> ShareCard | None:
+    """Latest share card for a subscriber/race (post-scorer)."""
+    async with get_session() as session:
+        result = await session.execute(
+            select(ShareCard)
+            .where(ShareCard.phone == phone, ShareCard.race_key == race_key)
+            .order_by(ShareCard.created_at.desc())
+        )
+        return result.scalars().first()
+
+
+async def get_latest_team_value_snapshot(phone: str) -> TeamValueSnapshot | None:
+    """Most recent team value snapshot for budget-aware picks."""
+    async with get_session() as session:
+        result = await session.execute(
+            select(TeamValueSnapshot)
+            .where(TeamValueSnapshot.phone == phone)
+            .order_by(TeamValueSnapshot.updated_at.desc())
+        )
+        return result.scalars().first()
+
+
+async def load_season_accuracy_row(season: int) -> SeasonAccuracy | None:
+    async with get_session() as session:
+        return await session.get(SeasonAccuracy, season)
+
+
+async def load_season_hit_rate_for_phone(phone: str, *, season: int) -> float:
+    prefix = f"{season}_"
+    async with get_session() as session:
+        result = await session.execute(
+            select(PickRow).where(
+                PickRow.phone == phone,
+                PickRow.race_key.like(f"{prefix}%"),
+                PickRow.personalized.is_(True),
+                PickRow.was_correct.is_not(None),
+            )
+        )
+        rows = list(result.scalars().all())
+    if not rows:
+        return 0.0
+    return round(100.0 * sum(1 for r in rows if r.was_correct) / len(rows), 1)
+
+
+async def notification_already_sent(
+    race_key: str,
+    phone: str,
+    notification_type: str,
+) -> bool:
+    async with get_session() as session:
+        result = await session.execute(
+            select(WeekendNotificationSent).where(
+                WeekendNotificationSent.race_key == race_key,
+                WeekendNotificationSent.phone == phone,
+                WeekendNotificationSent.notification_type == notification_type,
+            )
+        )
+        return result.scalars().first() is not None
+
+
+async def record_notification_sent(
+    race_key: str,
+    phone: str,
+    notification_type: str,
+) -> None:
+    async with get_session() as session:
+        session.add(
+            WeekendNotificationSent(
+                race_key=race_key,
+                phone=phone,
+                notification_type=notification_type,
+            )
+        )
+
+
+async def save_chip_plan(phone: str, share_token: str, plan_json: dict[str, Any]) -> None:
+    async with get_session() as session:
+        session.add(
+            ChipPlanStore(
+                share_token=share_token,
+                phone=phone,
+                plan_json=plan_json,
+            )
+        )
+
+
+async def get_chip_plan_by_token(share_token: str) -> ChipPlanStore | None:
+    async with get_session() as session:
+        return await session.get(ChipPlanStore, share_token)
+
+
+async def upsert_team_value_snapshot(
+    *,
+    phone: str,
+    race_key: str,
+    team_value: float,
+    value_delta: float,
+    effective_budget: float,
+) -> None:
+    async with get_session() as session:
+        result = await session.execute(
+            select(TeamValueSnapshot).where(
+                TeamValueSnapshot.phone == phone,
+                TeamValueSnapshot.race_key == race_key,
+            )
+        )
+        row = result.scalar_one_or_none()
+        if row is None:
+            session.add(
+                TeamValueSnapshot(
+                    phone=phone,
+                    race_key=race_key,
+                    team_value=team_value,
+                    value_delta=value_delta,
+                    effective_budget=effective_budget,
+                )
+            )
+        else:
+            row.team_value = team_value
+            row.value_delta = value_delta
+            row.effective_budget = effective_budget
+            row.updated_at = datetime.now(tz=UTC)
 
 
 async def update_pick_result(

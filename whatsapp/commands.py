@@ -14,6 +14,7 @@ from intelligence.repository import (
     get_league_onboarding_state,
     get_onboarding_state,
     get_price_prediction_map,
+    set_subscriber_share_private,
     update_subscriber_preferences,
 )
 from whatsapp.sender import mask_phone
@@ -162,9 +163,21 @@ async def _handle_delete(phone: str) -> str:
 def _handle_help() -> str:
     """Return command list."""
     return _truncate(
-        "SUBSCRIBE · UNSUBSCRIBE · DELETE · TEAM · LEAGUE · LEAGUE UPDATE · PRICE · WHY · "
-        "SEASON · SHARE · LIVE ON/OFF · CADENCE FULL/RACEDAY · HELP · SETTINGS"
+        "SUBSCRIBE · UNSUBSCRIBE · DELETE · TEAM · LEAGUE · PICKS · CHIPS · TRANSFERS · "
+        "BUDGET · PRIVATE · PRICE · WHY · SEASON · SHARE · LIVE ON/OFF · CADENCE · HELP",
+        300,
     )
+
+
+def _app_deps():
+    """FastAPI app + settings when scheduler context is registered."""
+    try:
+        from scheduler.jobs import _require_ctx
+
+        app = _require_ctx().app
+        return app, app.state.settings
+    except RuntimeError:
+        return None, None
 
 
 def _handle_settings() -> str:
@@ -363,6 +376,41 @@ async def handle_inbound_text(phone: str, text: str, raw_text: str) -> None:
             reply = await _handle_cadence(phone, mode="FULL")
         elif text in {"CADENCE RACEDAY", "CADENCE RACE_DAY_ONLY"}:
             reply = await _handle_cadence(phone, mode="RACE_DAY_ONLY")
+        elif text == "PICKS":
+            from whatsapp.phase7 import send_picks_on_demand
+
+            app, settings = _app_deps()
+            if app is None:
+                reply = _truncate("PICKS unavailable — service starting up.")
+            else:
+                from openf1.client import OpenF1Client
+
+                reply = await send_picks_on_demand(
+                    phone,
+                    client=OpenF1Client(),
+                    app=app,
+                    settings=settings,
+                )
+        elif text == "CHIPS":
+            from whatsapp.phase7 import send_chips_summary
+
+            reply = await send_chips_summary(phone)
+        elif text.startswith("CHIPS "):
+            from whatsapp.phase7 import send_chip_detail
+
+            chip = raw_text.strip().split(maxsplit=1)[1] if len(raw_text.split()) > 1 else ""
+            reply = await send_chip_detail(phone, chip)
+        elif text == "TRANSFERS":
+            from whatsapp.phase7 import send_transfers_status
+
+            reply = await send_transfers_status(phone)
+        elif text == "BUDGET":
+            from whatsapp.phase7 import send_budget_status
+
+            reply = await send_budget_status(phone)
+        elif text == "PRIVATE":
+            await set_subscriber_share_private(phone, private=True)
+            reply = _truncate("Share cards set to private. Future recaps won't be public links.")
         else:
             reply = _truncate("Unknown command. Send HELP for options.")
     except ValueError as exc:

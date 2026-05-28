@@ -43,11 +43,6 @@ def _strategist():
     return LeadStrategist.from_fastapi(_require_ctx().app)
 
 
-async def job_thursday_context(race_key: str) -> None:
-    """Agent 1 — context builder."""
-    await _strategist().run_context_builder(race_key)
-
-
 async def job_practice_analysis(race_key: str) -> None:
     """Agent 2 — practice analyst."""
     await _strategist().run_practice_analyst(race_key)
@@ -68,11 +63,52 @@ async def job_post_race_scorer(race_key: str) -> None:
     await _strategist().run_scorer_and_learner(race_key)
 
 
+async def job_thursday_context(race_key: str) -> None:
+    """Agent 1 — context build; sprint weekends use sprint playbook broadcast."""
+    weekend = get_race_weekend(race_key)
+    if weekend is not None and weekend.is_sprint:
+        from whatsapp.phase7 import broadcast_sprint_playbook
+
+        await broadcast_sprint_playbook(race_key)
+    else:
+        await _strategist().run_context_builder(race_key)
+    from whatsapp.phase7 import broadcast_banked_transfer_warnings
+
+    await broadcast_banked_transfer_warnings(race_key)
+
+
+async def job_friday_delta(race_key: str) -> None:
+    """FP2 delta broadcast (skipped on sprint weekends)."""
+    from whatsapp.phase7 import broadcast_friday_delta
+
+    ctx = _require_ctx()
+    await broadcast_friday_delta(
+        race_key,
+        app=ctx.app,
+        settings=ctx.app.state.settings,
+    )
+
+
+async def job_post_race_counterfactual(race_key: str) -> None:
+    """Post-race counterfactual recap per subscriber."""
+    from whatsapp.phase7 import broadcast_counterfactual_recaps
+
+    await broadcast_counterfactual_recaps(race_key)
+
+
+async def job_community_aggregate(race_key: str) -> None:
+    """Community aggregate stats broadcast."""
+    from whatsapp.phase7 import broadcast_community_aggregate
+
+    await broadcast_community_aggregate(race_key)
+
+
 def _job_times(weekend: RaceWeekend) -> list[tuple[str, datetime, Any]]:
     """Compute UTC run times for all weekend jobs."""
     return [
         ("thursday_context", weekend.race_utc - timedelta(hours=72), job_thursday_context),
         ("practice_analysis", weekend.fp2_utc + timedelta(minutes=90), job_practice_analysis),
+        ("friday_delta", weekend.fp2_utc + timedelta(minutes=90), job_friday_delta),
         (
             "quali_broadcast",
             weekend.fantasy_lock_utc - timedelta(hours=3),
@@ -80,6 +116,8 @@ def _job_times(weekend: RaceWeekend) -> list[tuple[str, datetime, Any]]:
         ),
         ("race_monitor_start", weekend.race_utc - timedelta(minutes=5), job_race_monitor_start),
         ("post_race_scorer", weekend.race_utc + timedelta(hours=3), job_post_race_scorer),
+        ("post_race_counterfactual", weekend.race_utc + timedelta(hours=4), job_post_race_counterfactual),
+        ("community_aggregate", weekend.race_utc + timedelta(hours=5), job_community_aggregate),
     ]
 
 

@@ -175,6 +175,9 @@ async def handle_team_command(phone: str, text: str, raw_text: str) -> str:
             await set_onboarding_state(phone, step=0, awaiting_confirm=False)
             team = await get_fantasy_team(phone)
             assert team is not None
+            from onboarding.rehearsal import maybe_start_rehearsal
+
+            await maybe_start_rehearsal(phone)
             return _truncate(f"✅ Team saved. {_team_summary(team)}")
         if upper in {"NO", "N"}:
             await set_onboarding_state(phone, step=1, awaiting_confirm=False)

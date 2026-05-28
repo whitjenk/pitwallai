@@ -87,6 +87,9 @@ class LeadStrategist:
             budget_s=AGENT1_BUDGET_S,
         )
         self._commit(result)
+        from intelligence.thursday_drafts import generate_thursday_draft_picks
+
+        await generate_thursday_draft_picks(race_key, self._deps)
 
     async def run_practice_analyst(self, race_key: str) -> None:
         """Agent 2 — post-FP2 practice analysis."""

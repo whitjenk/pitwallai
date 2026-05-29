@@ -8,17 +8,17 @@ import pytest
 
 from intelligence.cache_health import check_signal_cache_health
 from intelligence.repository import load_practice_signals_by_circuit
-from intelligence.schemas import PracticeSignal
 from intelligence.signal_cache import get_practice_signals, get_radio_signals
+from tests.fixtures_signal_cache import make_practice, make_practice_with_radio, make_radio
 
 
 @pytest.mark.asyncio
 async def test_cache_health_ready_when_half_have_signals() -> None:
     async def fake_practice(race_key: str, code: str):
-        return object() if code in {"NOR", "LEC", "PIA", "VER", "HAM"} else None
+        return make_practice(driver_code=code) if code in {"NOR", "LEC", "PIA", "VER", "HAM"} else None
 
     async def fake_radio(race_key: str, code: str):
-        return "snippet" if code in {"NOR", "LEC", "PIA"} else None
+        return make_radio("snippet") if code in {"NOR", "LEC", "PIA"} else make_radio(None)
 
     with (
         patch("intelligence.practice_cache.get_practice_signals", fake_practice),
@@ -36,27 +36,20 @@ async def test_cache_health_ready_when_half_have_signals() -> None:
 @pytest.mark.asyncio
 async def test_load_practice_by_circuit_dedupes_fp2() -> None:
     rows = [
-        PracticeSignal(
+        make_practice(
             driver_number=1,
-            driver_code="NOR",
             session="FP1",
             setup_sentiment=0.0,
-            tire_confidence=0.5,
-            mechanical_flags=[],
             pace_satisfaction=0.5,
-            anomaly_flags=[],
             raw_evidence=["old"],
         ),
-        PracticeSignal(
+        make_practice_with_radio(
             driver_number=1,
-            driver_code="NOR",
             session="FP2",
             setup_sentiment=0.2,
             tire_confidence=0.6,
-            mechanical_flags=[],
             pace_satisfaction=0.6,
-            anomaly_flags=[],
-            raw_evidence=["radio: latest"],
+            snippet="latest",
         ),
     ]
 

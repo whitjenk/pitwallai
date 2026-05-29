@@ -125,9 +125,62 @@ def no_data_body(season: int) -> str:
   {_cta_block()}"""
 
 
-def render_html(stats, *, season: int) -> str:
+def calibration_body(calibration) -> str:
+    """Render the per-band calibration block.
+
+    The brand-defining "we publish how often our HIGH calls actually hit"
+    panel. Hidden when there's no scored data yet (caller passes None).
+    """
+    if not calibration:
+        return ""
+    rows = ""
+    for band in calibration:
+        if band.sample_size == 0:
+            continue
+        actual = f"{band.hit_rate * 100:.0f}%"
+        target = f"{band.target_hit_rate * 100:.0f}%"
+        drift_pp = band.drift * 100
+        if abs(drift_pp) <= 5:
+            badge_class, badge_text = "drift-ok", "calibrated"
+        elif drift_pp > 0:
+            badge_class, badge_text = "drift-up", f"+{drift_pp:.0f}pp"
+        else:
+            badge_class, badge_text = "drift-down", f"{drift_pp:.0f}pp"
+        rows += f"""
+      <tr>
+        <td><span class="band band-{band.band.value.lower()}">{band.band.value}</span></td>
+        <td>{actual}</td>
+        <td>{target}</td>
+        <td><span class="cal-badge {badge_class}">{badge_text}</span></td>
+        <td>{band.sample_size}</td>
+      </tr>"""
+    if not rows:
+        return ""
+    return f"""
+  <h2 class="section-h">Calibration · {len(calibration)} bands</h2>
+  <p class="section-sub">
+    When PitWallAI says HIGH, it should hit at ≥70%. Here's what it actually did.
+    Drift past ±5pp triggers a recalibration check.
+  </p>
+  <table class="cal-table">
+    <thead>
+      <tr>
+        <th>Band</th>
+        <th>Hit rate</th>
+        <th>Target</th>
+        <th>Status</th>
+        <th>N</th>
+      </tr>
+    </thead>
+    <tbody>{rows}
+    </tbody>
+  </table>"""
+
+
+def render_html(stats, *, season: int, calibration=None) -> str:
     updated = datetime.now(tz=UTC).strftime("%d %b %Y, %H:%M UTC")
     body = no_data_body(season) if not stats or stats.races_scored == 0 else results_body(stats)
+    cal_block = calibration_body(calibration)
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -263,11 +316,49 @@ def render_html(stats, *, season: int) -> str:
       margin-top: 16px;
       line-height: 1.6;
     }}
+    .section-h {{
+      font-size: 18px;
+      font-weight: 800;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      margin-top: 48px;
+      margin-bottom: 8px;
+    }}
+    .section-sub {{
+      font-size: 13px;
+      color: var(--muted);
+      margin-bottom: 16px;
+      line-height: 1.5;
+    }}
+    .cal-table th {{ font-size: 10px; }}
+    .cal-table td {{ font-size: 13px; padding: 10px 6px; }}
+    .band {{
+      display: inline-block;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 1.5px;
+      padding: 3px 8px;
+      border-radius: 3px;
+    }}
+    .band-high {{ background: var(--red); color: var(--white); }}
+    .band-med  {{ background: var(--amber); color: var(--black); }}
+    .band-low  {{ background: var(--mid); color: var(--white); border: 1px solid var(--border); }}
+    .cal-badge {{
+      display: inline-block;
+      font-size: 10px;
+      letter-spacing: 1px;
+      padding: 3px 7px;
+      border-radius: 3px;
+    }}
+    .drift-ok   {{ background: var(--teal); color: var(--black); }}
+    .drift-up   {{ background: var(--mid); color: var(--teal); border: 1px solid var(--teal); }}
+    .drift-down {{ background: var(--mid); color: var(--amber); border: 1px solid var(--amber); }}
   </style>
 </head>
 <body>
   <div class="brand">Pit<span>Wall</span>AI</div>
   {body}
+  {cal_block}
   <div class="updated">Last updated: {updated}</div>
   <div class="disclaimer">
     PitWallAI is an independent fan project not affiliated with Formula 1,
@@ -278,11 +369,35 @@ def render_html(stats, *, season: int) -> str:
 </html>"""
 
 
+async def _load_calibration(season: int):
+    """Return calibration report list, or None when no scored picks exist yet."""
+    from intelligence.eval.calibration import calibration_report
+    from intelligence.repository import get_session
+    from db.models import PickRow
+    from sqlalchemy import select
+
+    async with get_session() as session:
+        result = await session.execute(
+            select(PickRow).where(
+                PickRow.race_key.like(f"{season}_%"),
+                PickRow.was_correct.is_not(None),
+            )
+        )
+        picks = list(result.scalars().all())
+    if not picks:
+        return None
+    return calibration_report(picks)
+
+
 async def generate(output_path: Path, season: int) -> None:
     from db.scorer import get_season_accuracy
 
     stats = await get_season_accuracy(season=season)
-    page = render_html(stats, season=season)
+    try:
+        calibration = await _load_calibration(season)
+    except Exception:
+        calibration = None
+    page = render_html(stats, season=season, calibration=calibration)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(page, encoding="utf-8")
     print(f"Generated: {output_path} ({len(page)} bytes)")

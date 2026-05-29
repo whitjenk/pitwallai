@@ -60,7 +60,7 @@ def _missing_followup(missing: list[str]) -> str:
     parts = [labels[f] for f in missing if f in labels]
     if not parts:
         return ""
-    return "I couldn't read everything — reply with " + "; ".join(parts) + "."
+    return "A couple of fields were blurry on my end — quick reply with " + "; ".join(parts) + "."
 
 
 async def _handle_team_screenshot(
@@ -71,15 +71,15 @@ async def _handle_team_screenshot(
 
     if result.status == "error":
         await send_message(phone, truncate(
-            "Sorry — I couldn't read that screenshot. "
-            "Try a clearer shot of your F1 Fantasy team screen, or text your 5 driver codes."
+            "Hmm — my vision step hiccuped on that one. "
+            "Mind resending the screenshot? Or text your 5 driver codes if you'd rather."
         ))
         return
 
     if result.status == "rejected" or result.team is None:
         await send_message(phone, truncate(
-            "That doesn't look like an F1 Fantasy team screen. "
-            "Open the F1 Fantasy app → My Team → screenshot that screen."
+            "That screen looks different than I expected. "
+            "I'm looking for the *My Team* page in F1 Fantasy — the one with your 5 drivers + 2 constructors."
         ))
         return
 
@@ -130,7 +130,8 @@ async def _handle_standings_screenshot(
     if result.status != "ok" or result.standings is None:
         clear_pending_screenshot(phone)
         await send_message(phone, truncate(
-            "Couldn't read those standings. No worries — try again from your league page next week."
+            "I couldn't quite make those standings out — no problem. "
+            "I'll ask again after the next race when the screen's fresh."
         ))
         return
 
@@ -170,7 +171,7 @@ async def handle_inbound_image(phone: str, media_id: str, mime_type: str) -> Non
     except Exception as exc:
         logger.exception("download_media failed phone={}: {}", mask_phone(phone), exc)
         await send_message(phone, truncate(
-            "Couldn't download that image. Try again in a moment."
+            "My connection to WhatsApp media slipped — could you resend that image?"
         ))
         return
 

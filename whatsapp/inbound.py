@@ -252,6 +252,10 @@ async def handle_inbound_text(phone: str, text: str, raw_text: str) -> None:
             reply = await handle_team_command(phone, text, raw_text)
         elif text in {"LEAGUE", "LEAGUE UPDATE"}:
             reply = await handle_league_command(phone, text, raw_text)
+        elif text.startswith("UPDATE "):
+            from whatsapp.commands.update import handle_update
+
+            reply = await handle_update(phone, raw_text)
         elif text.startswith("PRICE "):
             reply = await _handle_price_report(phone, raw_text)
         elif text.startswith("WHY "):

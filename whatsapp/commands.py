@@ -231,10 +231,46 @@ async def _handle_price_report(phone: str, raw_text: str) -> str:
     return _truncate("Thanks! Helps improve predictions.")
 
 
+async def _handle_why_constructor(code: str) -> str:
+    from circuits.profiles import get_circuit_profile
+    from intelligence.repository import load_constructor_strategy_profile
+    from scheduler.calendar import get_race_weekend, profile_circuit_key
+
+    code = code.strip().upper()
+    race_key = _next_race_key()
+    if race_key is None:
+        return _truncate("No upcoming race found.")
+    weekend = get_race_weekend(race_key)
+    if weekend is None:
+        return _truncate("No upcoming race found.")
+    circuit_key = profile_circuit_key(weekend.circuit_key)
+    circuit = get_circuit_profile(circuit_key)
+    circuit_label = circuit.display_name if circuit else circuit_key.replace("_", " ").title()
+    profile = await load_constructor_strategy_profile(code, circuit_key)
+    if profile is None:
+        return _truncate(f"No strategy data for {code} at {circuit_label} yet.")
+    early = int(round(profile.early_box_rate * 100))
+    undercut = profile.undercut_attempt_rate
+    undercut_pct = int(round(undercut * 100)) if undercut is not None else "n/a"
+    sc_pct = int(round(profile.safety_car_opportunist * 100))
+    n = profile.sample_size
+    msg = (
+        f"🏭 {code} at {circuit_label}\n"
+        f"Early box: {early}% ({n} races) · Undercut: {undercut_pct}% · SC: {sc_pct}%\n"
+        f"Fantasy: {profile.fantasy_tendency}\n"
+        f"Quality: {profile.data_quality} · {n} races"
+    )
+    if profile.data_quality == "LOW":
+        msg += "\n⚠️ Limited data — treat with caution."
+    return _truncate(msg, limit=280)
+
+
 async def _handle_why(raw_text: str) -> str:
     parts = raw_text.strip().split()
+    if len(parts) >= 3 and parts[1].upper() == "CONSTRUCTOR":
+        return await _handle_why_constructor(parts[2])
     if len(parts) != 2:
-        return _truncate("Use: WHY NOR")
+        return _truncate("Use: WHY NOR or WHY CONSTRUCTOR FER")
     _, code = parts
     code = code.strip().upper()
     race_key = _next_race_key()

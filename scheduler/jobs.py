@@ -93,9 +93,16 @@ async def job_post_race_counterfactual(race_key: str) -> None:
 
 
 async def job_community_aggregate(race_key: str) -> None:
-    """Community aggregate stats broadcast."""
-    from whatsapp.phase7 import broadcast_community_aggregate
+    """Community aggregate stats broadcast (race + 5h, after counterfactual)."""
+    from intelligence.repository import list_active_subscribers
+    from whatsapp.community_aggregate import broadcast_community_aggregate
 
+    if len(await list_active_subscribers()) <= 10:
+        logger.info(
+            "community_aggregate skipped race_key={}: active subscribers <= 10",
+            race_key,
+        )
+        return
     await broadcast_community_aggregate(race_key)
 
 

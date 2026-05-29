@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -17,6 +18,7 @@ from intelligence.pick_generator import (
 from intelligence.price_predictor import predict_price_changes
 from intelligence.repository import get_price_prediction_map
 from intelligence.practice_analyst import analyze_practice_weekend
+from intelligence.explanation_attach import attach_explanations_from_db
 from intelligence.repository import get_fantasy_team
 from intelligence.schemas import PickGeneratorInput, PickOutput
 from openf1.client import OpenF1Client
@@ -128,6 +130,20 @@ async def run_picks_pipeline(
         output = await generate_and_log_picks(generator_input, phone=phone)
     else:
         output = generate_picks(generator_input)
+
+    by_session: dict[str, list] = defaultdict(list)
+    for sig in practice_signals:
+        by_session[sig.session].append(sig)
+    quali_grid = {row.driver_code: row.grid_position for row in qualifying}
+    output = await attach_explanations_from_db(
+        output,
+        circuit_key=active.circuit_key,
+        race_key=active.race_key,
+        circuit=circuit,
+        practice_signals=dict(by_session),
+        quali_grid=quali_grid,
+        settings=settings,
+    )
 
     return PicksRunResult(
         output=output,

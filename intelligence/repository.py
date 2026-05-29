@@ -13,6 +13,7 @@ from sqlalchemy.exc import IntegrityError
 
 from db.models import (
     ChipPlanStore,
+    ConstructorStrategyProfile,
     ConstructorStrategyRow,
     DriverPrice,
     FantasyTeam,
@@ -1045,6 +1046,122 @@ async def upsert_constructor_strategy_rows(
                 existing.hedge_rate = float(row["hedge_rate"])
             updated += 1
     return updated
+
+
+def _profile_row_to_data(row: ConstructorStrategyProfile) -> Any:
+    from intelligence.constructor_strategy import ConstructorStrategyProfileData
+
+    return ConstructorStrategyProfileData(
+        constructor_code=row.constructor_code,
+        circuit_key=row.circuit_key,
+        sample_size=row.sample_size,
+        early_box_rate=row.early_box_rate,
+        undercut_attempt_rate=row.undercut_attempt_rate,
+        overcut_rate=row.overcut_rate,
+        avg_pit_window_open_lap=row.avg_pit_window_open_lap,
+        double_stack_rate=row.double_stack_rate,
+        safety_car_opportunist=row.safety_car_opportunist,
+        championship_pressure_modifier=row.championship_pressure_modifier,
+        fantasy_tendency=row.fantasy_tendency,
+        data_quality=row.data_quality,
+        source_race_keys=list(row.source_race_keys or []),
+    )
+
+
+async def count_constructor_strategy_profiles() -> int:
+    """Count rows in constructor_strategy_profiles (seeder gate)."""
+    try:
+        async with get_session() as session:
+            result = await session.execute(
+                select(func.count()).select_from(ConstructorStrategyProfile)
+            )
+            return int(result.scalar_one() or 0)
+    except ValueError:
+        return 0
+
+
+async def load_constructor_strategy_profile(
+    constructor_code: str,
+    circuit_key: str,
+) -> Any | None:
+    """Load one persisted constructor strategy profile."""
+    try:
+        async with get_session() as session:
+            result = await session.execute(
+                select(ConstructorStrategyProfile).where(
+                    ConstructorStrategyProfile.constructor_code == constructor_code,
+                    ConstructorStrategyProfile.circuit_key == circuit_key,
+                )
+            )
+            row = result.scalars().first()
+        return _profile_row_to_data(row) if row else None
+    except ValueError:
+        return None
+
+
+async def load_constructor_strategy_profiles(
+    circuit_key: str,
+) -> dict[str, Any]:
+    """Load all constructor profiles for a circuit keyed by constructor_code."""
+    try:
+        async with get_session() as session:
+            result = await session.execute(
+                select(ConstructorStrategyProfile).where(
+                    ConstructorStrategyProfile.circuit_key == circuit_key
+                )
+            )
+            rows = list(result.scalars().all())
+        return {row.constructor_code: _profile_row_to_data(row) for row in rows}
+    except ValueError:
+        return {}
+
+
+async def upsert_constructor_strategy_profile(profile: Any) -> None:
+    """Upsert calculated ConstructorStrategyProfileData to Postgres."""
+    try:
+        async with get_session() as session:
+            result = await session.execute(
+                select(ConstructorStrategyProfile).where(
+                    ConstructorStrategyProfile.constructor_code == profile.constructor_code,
+                    ConstructorStrategyProfile.circuit_key == profile.circuit_key,
+                )
+            )
+            existing = result.scalars().first()
+            undercut = profile.undercut_attempt_rate
+            if existing is None:
+                session.add(
+                    ConstructorStrategyProfile(
+                        constructor_code=profile.constructor_code,
+                        circuit_key=profile.circuit_key,
+                        sample_size=profile.sample_size,
+                        early_box_rate=profile.early_box_rate,
+                        undercut_attempt_rate=undercut,
+                        overcut_rate=profile.overcut_rate,
+                        avg_pit_window_open_lap=profile.avg_pit_window_open_lap,
+                        double_stack_rate=profile.double_stack_rate,
+                        safety_car_opportunist=profile.safety_car_opportunist,
+                        championship_pressure_modifier=profile.championship_pressure_modifier,
+                        fantasy_tendency=profile.fantasy_tendency[:120],
+                        data_quality=profile.data_quality,
+                        source_race_keys=list(profile.source_race_keys),
+                        last_updated=datetime.now(tz=UTC),
+                    )
+                )
+            else:
+                existing.sample_size = profile.sample_size
+                existing.early_box_rate = profile.early_box_rate
+                existing.undercut_attempt_rate = undercut
+                existing.overcut_rate = profile.overcut_rate
+                existing.avg_pit_window_open_lap = profile.avg_pit_window_open_lap
+                existing.double_stack_rate = profile.double_stack_rate
+                existing.safety_car_opportunist = profile.safety_car_opportunist
+                existing.championship_pressure_modifier = profile.championship_pressure_modifier
+                existing.fantasy_tendency = profile.fantasy_tendency[:120]
+                existing.data_quality = profile.data_quality
+                existing.source_race_keys = list(profile.source_race_keys)
+                existing.last_updated = datetime.now(tz=UTC)
+    except ValueError:
+        return
 
 
 async def load_constructor_strategy(circuit_key: str) -> dict[str, dict[str, Any]]:

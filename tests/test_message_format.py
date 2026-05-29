@@ -37,10 +37,10 @@ def test_personalized_includes_constructor_pit_tendency_when_sampled() -> None:
                 predicted_points_delta=9.0,
                 transfer_out="STR",
                 transfer_in="LEC",
-                constructor_strategy_note=(
-                    "FER pit tendency (5 races): early 75% in pace-competitive stops (6), "
-                    "cross-team undercut 80% (8 attempts)"
+                constructor_tendency_note=(
+                    "Ferrari boxes early at Monaco — drivers often gain vs grid."
                 ),
+                constructor_data_quality="HIGH",
             ),
         ],
         personalized=True,
@@ -49,8 +49,8 @@ def test_personalized_includes_constructor_pit_tendency_when_sampled() -> None:
         generated_by="quali_strategist",
     )
     msg = format_personalized_picks(weekend, output, timezone="Europe/London")
-    assert "Historical pit trend (FER)" in msg
-    assert "pace-competitive" in msg
+    assert "🏭" in msg
+    assert "Ferrari boxes early" in msg
     assert "Monaco" in msg
     assert PICK_BROADCAST_FOOTER in msg
     assert "buy now" not in msg.lower()
@@ -74,10 +74,8 @@ def test_personalized_omits_pit_tendency_without_min_samples() -> None:
                 predicted_points_delta=9.0,
                 transfer_out="STR",
                 transfer_in="LEC",
-                constructor_strategy_note=(
-                    "FER pit tendency (2 races): early 100% in pace-competitive stops (2), "
-                    "cross-team undercut 50% (1 attempts)"
-                ),
+                constructor_tendency_note="Low sample — should not show.",
+                constructor_data_quality="LOW",
             ),
         ],
         personalized=True,
@@ -86,7 +84,7 @@ def test_personalized_omits_pit_tendency_without_min_samples() -> None:
         generated_by="quali_strategist",
     )
     msg = format_personalized_picks(weekend, output, timezone="Europe/London")
-    assert "Historical pit trend" not in msg
+    assert "🏭" not in msg
 
 
 def test_personalized_under_400_chars() -> None:

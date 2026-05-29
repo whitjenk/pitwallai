@@ -9,6 +9,7 @@ from typing import Any
 from loguru import logger
 
 from db.models import FantasyTeam, Subscriber
+from intelligence.explanation_attach import attach_explanations_from_db
 from intelligence.repository import list_active_subscribers, save_pick_ownership
 from intelligence.schemas import PickOutput
 from intelligence.weekend_picks import generate_picks_for_weekend
@@ -155,6 +156,34 @@ async def _broadcast_to_subscriber(
             refresh_practice=False,
         )
 
+        if settings.explanation_cards_enabled:
+            try:
+                from intelligence.context import get_orchestrator_context
+                from intelligence.pick_generator import build_qualifying_rows
+
+                orch = get_orchestrator_context()
+                circuit = orch.get_circuit(weekend.circuit_key)
+                quali_rows = []
+                if weekend.qualifying_session_key:
+                    quali_rows = await build_qualifying_rows(client, weekend.qualifying_session_key)
+                grid = {q.driver_code: q.grid_position for q in quali_rows}
+                output = await attach_explanations_from_db(
+                    output,
+                    circuit_key=weekend.circuit_key,
+                    race_key=weekend.race_key,
+                    circuit=circuit,
+                    practice_signals=None,
+                    quali_grid=grid,
+                    settings=settings,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "explanation_attach_failed race_key={} phone={}: {}",
+                    weekend.race_key,
+                    mask_phone(phone),
+                    exc,
+                )
+
         message = _format_message(weekend, output, sub, personalized=personalized)
         assert PICK_BROADCAST_FOOTER in message, "Pick broadcast missing mandatory footer"
         await send_message(phone, message)
@@ -198,3 +227,30 @@ def _format_message(
     if personalized:
         return format_personalized_picks(weekend, output, timezone=sub.timezone)
     return format_generic_picks(weekend, output, timezone=sub.timezone)
+
+
+async def send_to_all_active(message: str) -> dict[str, int]:
+    """
+    Broadcast one message to every active subscriber.
+
+    Failures are isolated per phone — one error never blocks others.
+    No retries (aggregate broadcasts are non-critical).
+    """
+    subscribers = await list_active_subscribers()
+    sent = 0
+    failed = 0
+    for sub in subscribers:
+        try:
+            await send_message(sub.phone, message)
+            sent += 1
+        except Exception as exc:
+            failed += 1
+            logger.error(
+                "send_to_all_active failed phone={}: {}",
+                mask_phone(sub.phone),
+                exc,
+            )
+    logger.bind(sent=sent, failed=failed, total=len(subscribers)).info(
+        "send_to_all_active finished"
+    )
+    return {"sent": sent, "failed": failed, "total": len(subscribers)}

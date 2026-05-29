@@ -247,6 +247,11 @@ def create_app(
         )
         await resume_monitors_on_startup(monitor_deps)
 
+        from intelligence.constructor_strategy import seed_constructor_profiles
+
+        asyncio.create_task(seed_constructor_profiles())
+        log.info("Constructor strategy profile seeder scheduled (background)")
+
         log.info("PitWallAI startup complete")
 
     @app.on_event("shutdown")
@@ -411,7 +416,7 @@ def create_app(
         avg_latency = sum(latencies) / len(latencies) if latencies else 0.0
         engine: RehearsalEngine | None = app.state.rehearsal_engine
         progress = engine.get_progress() if engine is not None else {}
-        return {
+        payload: dict[str, Any] = {
             "mode": session.mode,
             "current_lap": session.current_lap or progress.get("current_lap", 0),
             "circuit": session.circuit,
@@ -421,6 +426,23 @@ def create_app(
             "avg_latency_ms": round(avg_latency, 1),
             "rehearsal_progress": progress,
         }
+        cached = getattr(app.state, "last_picks_result", None)
+        if cached is not None:
+            from whatsapp.message_format import format_explanation_card
+
+            previews: list[dict[str, Any]] = []
+            for pick in cached.output.picks[:3]:
+                if pick.explanation is None:
+                    continue
+                previews.append(
+                    {
+                        "driver_code": pick.driver_code,
+                        "card": format_explanation_card(pick.explanation),
+                    }
+                )
+            if previews:
+                payload["pick_explanation_cards"] = previews
+        return payload
 
     @app.post("/api/intel/confirm/{transmission_id}")
     async def confirm_intel(

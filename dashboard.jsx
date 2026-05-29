@@ -199,6 +199,7 @@
       const [utcClock, setUtcClock] = useState(new Date());
       const [evidenceLog, setEvidenceLog] = useState([]);
       const [driverPositions, setDriverPositions] = useState({});
+      const [pickExplanationCards, setPickExplanationCards] = useState([]);
       const wsRef = useRef(null);
 
       useEffect(() => {
@@ -297,6 +298,7 @@
             const data = await res.json();
             setSession((s) => ({ ...s, ...data }));
             if (data.rehearsal_progress) setRehearsalProgress(data.rehearsal_progress);
+            if (data.pick_explanation_cards) setPickExplanationCards(data.pick_explanation_cards);
           } catch (_) {}
         }, 3000);
         return () => clearInterval(poll);
@@ -491,6 +493,20 @@
                   ))}
                 </div>
               </div>
+
+              {pickExplanationCards.length > 0 && (
+                <div className="rounded-lg border p-3" style={{ background: COLORS.surface, borderColor: COLORS.border }}>
+                  <h2 className="text-xs font-semibold tracking-wider mb-2" style={{ color: COLORS.amber }}>PICK EXPLANATION CARDS</h2>
+                  <div className="space-y-3">
+                    {pickExplanationCards.map((item) => (
+                      <div key={item.driver_code} className="text-xs whitespace-pre-wrap font-mono rounded p-2" style={{ background: COLORS.elevated, color: COLORS.text }}>
+                        <span className="font-semibold" style={{ color: TEAM_COLORS[item.driver_code] || COLORS.amber }}>{item.driver_code}</span>
+                        {"\n"}{item.card}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {session.mode === "rehearsal" && (
                 <div className="rounded-lg border p-3" style={{ background: COLORS.surface, borderColor: COLORS.border }}>

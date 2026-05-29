@@ -252,6 +252,34 @@ async def run_scorer_and_learner(
             logger.info("Price prediction scored race_key={} updated={} hit_rate={:.2f}", race_key, updated, hit_rate)
     new_ctx = evolve_race_context(ctx, signal_quality=signal_quality)
 
+    from intelligence.constructor_strategy import (
+        CONSTRUCTOR_CODES,
+        fetch_pit_history,
+        update_constructor_profile,
+    )
+
+    circuit_key = ctx.circuit_profile.circuit_key
+    race_year = ctx.race_weekend.race_utc.year
+    for constructor_code in CONSTRUCTOR_CODES:
+        try:
+            new_events = await fetch_pit_history(
+                circuit_key,
+                constructor_code,
+                years=[race_year],
+            )
+            await update_constructor_profile(
+                constructor_code=constructor_code,
+                circuit_key=circuit_key,
+                new_pit_events=new_events,
+            )
+        except Exception as exc:
+            logger.warning(
+                "constructor profile update failed {} {}: {}",
+                constructor_code,
+                circuit_key,
+                exc,
+            )
+
     from intelligence.budget_tracker import track_team_value
     from sharing.share_cards import generate_share_card
 

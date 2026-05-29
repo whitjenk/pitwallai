@@ -50,6 +50,7 @@ class CalledRaceRecap:
     race_label: str
     moments: tuple[CalledMoment, ...]
     share_token: str
+    data_unavailable: bool = False
 
     @property
     def moment_count(self) -> int:
@@ -76,6 +77,7 @@ def build_called_recap(
     race_key: str,
     race_label: str,
     events: list[RaceEvent],
+    data_unavailable: bool = False,
 ) -> CalledRaceRecap:
     """Filter race events to forwardable moments and build the recap."""
     moments: list[CalledMoment] = []
@@ -98,6 +100,7 @@ def build_called_recap(
         race_label=race_label,
         moments=tuple(moments),
         share_token=str(uuid.uuid4()),
+        data_unavailable=data_unavailable,
     )
 
 
@@ -122,6 +125,15 @@ def _event_label(et: RaceEventType) -> str:
 
 def render_called_recap_whatsapp(recap: CalledRaceRecap, share_url: str | None) -> str:
     """Sunday-night forwardable WhatsApp message."""
+    if recap.data_unavailable and not recap.moments:
+        return (
+            f"📡 *{recap.race_label} — live data unavailable*\n\n"
+            "OpenF1 was unreachable during the race, so PitWallAI couldn't "
+            "log strategic moments. This is *not* a quiet-race verdict — "
+            "we simply don't have receipts for this one.\n\n"
+            "──────────────────\n"
+            "PitWallAI · Not financial advice"
+        )
     if not recap.moments:
         return (
             f"📡 *{recap.race_label} — zero strategic moments*\n\n"
@@ -162,6 +174,7 @@ def recap_to_json(recap: CalledRaceRecap) -> dict[str, Any]:
         "race_key": recap.race_key,
         "race_label": recap.race_label,
         "share_token": recap.share_token,
+        "data_unavailable": recap.data_unavailable,
         "moments": [
             {
                 "event_type": m.event_type.value,
@@ -185,11 +198,16 @@ async def generate_and_persist_called_recap(
     race_label: str,
 ) -> CalledRaceRecap:
     """Sunday-night entry point: pull events from DB, build recap, persist."""
-    from intelligence.repository import list_race_events, save_called_recap
+    from intelligence.repository import get_monitor_state, list_race_events, save_called_recap
 
     events = await list_race_events(race_key)
+    state = await get_monitor_state(race_key)
+    data_unavailable = bool(state and state.data_unavailable)
     recap = build_called_recap(
-        race_key=race_key, race_label=race_label, events=events
+        race_key=race_key,
+        race_label=race_label,
+        events=events,
+        data_unavailable=data_unavailable,
     )
     await save_called_recap(race_key, recap.share_token, recap_to_json(recap))
     return recap
@@ -226,4 +244,5 @@ def recap_from_json(data: dict[str, Any]) -> CalledRaceRecap:
         race_label=data["race_label"],
         moments=moments,
         share_token=data.get("share_token", ""),
+        data_unavailable=bool(data.get("data_unavailable", False)),
     )

@@ -73,13 +73,21 @@ def render_called_recap_share_html(recap: CalledRaceRecap) -> str:
             f"</div>"
         )
     if not rows:
-        rows = (
-            '<div class="empty">'
-            "PitWallAI counts the moments that mattered. "
-            "This weekend, none cleared the bar — a clean processional race "
-            "is a verdict, not an absence."
-            "</div>"
-        )
+        if recap.data_unavailable:
+            rows = (
+                '<div class="empty">'
+                "OpenF1 was unreachable during the race — PitWallAI could not "
+                "log strategic moments. This is not a quiet-race verdict."
+                "</div>"
+            )
+        else:
+            rows = (
+                '<div class="empty">'
+                "PitWallAI counts the moments that mattered. "
+                "This weekend, none cleared the bar — a clean processional race "
+                "is a verdict, not an absence."
+                "</div>"
+            )
 
     median = recap.median_decode_latency_seconds
     median_badge = (

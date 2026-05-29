@@ -33,11 +33,11 @@ Three hours before race lock, you get a WhatsApp message. Not generic advice —
 
 ## Subscribe
 
-Text **SUBSCRIBE** to [number] on WhatsApp.  
+Text **SUBSCRIBE** to the PitWallAI WhatsApp number (set `WHATSAPP_DISPLAY_NUMBER` in production — generate a QR with `python scripts/generate_subscribe_qr.py`).  
 Send a screenshot of your F1 Fantasy **My Team** screen (or text **TEAM**) to set up your squad.  
 Text **HELP** for commands · **UNSUBSCRIBE** to stop messages · **DELETE** to erase your data ([PRIVACY.md](PRIVACY.md)).
 
-*Free. Open source. No app required.*
+*Closed beta — free, open source, no app required. Operator checklist: [BETA_INVITE.md](BETA_INVITE.md).*
 
 ---
 

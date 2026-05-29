@@ -29,6 +29,10 @@ async def _whatsapp_startup() -> None:
     """Ensure DB tables exist and load circuit profiles into orchestrator context."""
     import asyncio
 
+    mode = os.environ.get("PITWALL_MODE", "rehearsal")
+    from pitwallai.launch_validate import assert_live_ready
+
+    assert_live_ready(mode=mode)
     init_orchestrator_context()
     await init_db()
     from pitwallai.feature_flags import constructor_strategy_enabled

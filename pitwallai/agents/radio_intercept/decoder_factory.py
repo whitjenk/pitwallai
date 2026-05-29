@@ -269,6 +269,15 @@ class HybridDecoder:
         if self._llm is None:
             return fallback
 
+        from intelligence.spend_guard import get_spend_guard_cached
+
+        if not get_spend_guard_cached().llm_allowed:
+            logger.bind(
+                driver=message.driver_code,
+                session=message.session_key,
+            ).warning("LLM blocked by global monthly spend cap — using rules decode")
+            return fallback
+
         budget = await self._budget.check(message.session_key)
         if not budget.allowed:
             logger.bind(
@@ -280,6 +289,13 @@ class HybridDecoder:
 
         result = await self._llm.decode(message, deps)
         await self._budget.record(message.session_key)
+        from intelligence.spend_guard import record_spend
+
+        await record_spend(
+            "llm",
+            self._settings.llm_estimated_cost_per_call_usd,
+            detail=message.driver_code,
+        )
         return apply_llm_output_guards(result)
 
     @property

@@ -214,11 +214,31 @@ class RaceMonitorState(Base):
     session_key: Mapped[int] = mapped_column(Integer, nullable=False)
     last_lap: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     running: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    consecutive_poll_failures: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    data_unavailable: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         server_default=func.now(),
         onupdate=func.now(),
+    )
+
+
+class SpendEvent(Base):
+    """Append-only platform spend ledger (LLM, vision, WhatsApp). Monthly rollup."""
+
+    __tablename__ = "spend_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    month_key: Mapped[str] = mapped_column(String(7), nullable=False, index=True)
+    category: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    amount_usd: Mapped[float] = mapped_column(Float, nullable=False)
+    detail: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    recorded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        index=True,
     )
 
 

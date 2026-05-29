@@ -167,6 +167,10 @@ def create_app(
         log = logger.bind(mode=mode)
         log.info("Initializing PitWallAI components")
 
+        from pitwallai.launch_validate import assert_live_ready
+
+        assert_live_ready(mode=mode)
+
         from intelligence.context import init_orchestrator_context
 
         app.state.orchestrator_context = init_orchestrator_context()
@@ -359,7 +363,13 @@ def create_app(
         agent: RadioInterceptAgent = app.state.agent
         key = session_key if session_key is not None else app.state.session.session_key
         snap = await agent.budget_guard.snapshot(key)
-        return agent.budget_guard.to_public_dict(snap)
+        from intelligence.spend_guard import get_spend_guard, to_public_dict
+
+        spend = await get_spend_guard()
+        return {
+            **agent.budget_guard.to_public_dict(snap),
+            "platform_spend": to_public_dict(spend),
+        }
 
     @app.get("/api/season/{token}")
     async def season_recap(token: str) -> dict[str, Any]:

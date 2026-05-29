@@ -104,7 +104,8 @@ PIT_STOP_WORLD_RECORD_S = 1.8  # Published record (McLaren, 2023 Qatar)
 PIT_STOP_FASTEST_BONUS = 5
 PIT_STOP_WORLD_RECORD_BONUS = 15
 
-# Approximate 2026 prices (USD millions) — refresh from in-game values when available
+# Approximate prices (USD millions) — edit fantasy/prices.json each race weekend;
+# set PITWALL_PRICES_VERIFIED=1 after matching in-game values.
 DRIVER_PRICES_M: dict[str, float] = {
     "VER": 30.0,
     "NOR": 28.5,
@@ -119,14 +120,15 @@ DRIVER_PRICES_M: dict[str, float] = {
     "GAS": 14.0,
     "OCO": 13.0,
     "STR": 12.0,
-    "TSU": 11.0,
+    "HAD": 11.0,
     "HUL": 10.0,
-    "MAG": 9.5,
+    "LAW": 9.5,
     "BOT": 9.0,
-    "ZHOU": 8.5,
-    "LAW": 8.0,
-    "SAR": 7.5,
-    "BEA": 7.0,
+    "BEA": 8.5,
+    "BOR": 8.0,
+    "ANT": 7.5,
+    "LIN": 7.0,
+    "COL": 6.5,
 }
 
 CONSTRUCTOR_PRICES_M: dict[str, float] = {
@@ -150,12 +152,16 @@ def _clamp_price(price: float) -> float:
 
 def driver_price_m(code: str) -> float:
     """Return driver price in millions (minimum $3M floor)."""
-    return _clamp_price(DRIVER_PRICES_M.get(code.upper(), 15.0))
+    from fantasy.price_catalog import driver_price_m as _catalog
+
+    return _catalog(code)
 
 
 def constructor_price_m(code: str) -> float:
     """Return constructor price in millions (minimum $3M floor)."""
-    return _clamp_price(CONSTRUCTOR_PRICES_M.get(code.upper(), 10.0))
+    from fantasy.price_catalog import constructor_price_m as _catalog
+
+    return _catalog(code)
 
 
 def team_value_m(

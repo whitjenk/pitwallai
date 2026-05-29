@@ -185,7 +185,13 @@ async def handle_inbound_image(phone: str, media_id: str, mime_type: str) -> Non
             kind,
             budget.reason,
         )
-        await send_message(phone, truncate(_VISION_LIMIT_REPLY))
+        if budget.reason == "monthly_spend_cap":
+            await send_message(phone, truncate(
+                "PitWallAI is in cost-protection mode this month — "
+                "screenshot reading is paused. Text your team codes manually."
+            ))
+        else:
+            await send_message(phone, truncate(_VISION_LIMIT_REPLY))
         return
 
     try:

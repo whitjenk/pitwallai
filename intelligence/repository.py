@@ -578,8 +578,22 @@ async def get_all_picks_for_race(race_key: str) -> list[PickRow]:
         return list(result.scalars().all())
 
 
+def _row_to_practice_signal(r: PracticeSignalRow) -> PracticeSignal:
+    return PracticeSignal(
+        driver_number=r.driver_number,
+        driver_code=r.driver_code,
+        session=r.session_label,
+        setup_sentiment=r.setup_sentiment,
+        tire_confidence=r.tire_confidence,
+        mechanical_flags=list(r.mechanical_flags or []),
+        pace_satisfaction=r.pace_satisfaction,
+        anomaly_flags=list(r.anomaly_flags or []),
+        raw_evidence=list(r.raw_evidence or []),
+    )
+
+
 async def load_practice_signals_by_circuit(circuit_key: str) -> list[PracticeSignal]:
-    """Load latest practice signals for a circuit."""
+    """Load latest practice signals for a circuit (one row per driver, FP2 over FP1)."""
     async with get_session() as session:
         result = await session.execute(
             select(PracticeSignalRow)
@@ -587,20 +601,18 @@ async def load_practice_signals_by_circuit(circuit_key: str) -> list[PracticeSig
             .order_by(PracticeSignalRow.created_at.desc())
         )
         rows = list(result.scalars().all())
-    return [
-        PracticeSignal(
-            driver_number=r.driver_number,
-            driver_code=r.driver_code,
-            session=r.session_label,
-            setup_sentiment=r.setup_sentiment,
-            tire_confidence=r.tire_confidence,
-            mechanical_flags=list(r.mechanical_flags or []),
-            pace_satisfaction=r.pace_satisfaction,
-            anomaly_flags=list(r.anomaly_flags or []),
-            raw_evidence=list(r.raw_evidence or []),
-        )
-        for r in rows
-    ]
+    priority = {"FP2": 2, "FP1": 1}
+    merged: dict[str, PracticeSignal] = {}
+    for r in rows:
+        sig = _row_to_practice_signal(r)
+        code = sig.driver_code.upper()
+        existing = merged.get(code)
+        if existing is None:
+            merged[code] = sig
+            continue
+        if priority.get(sig.session, 0) > priority.get(existing.session, 0):
+            merged[code] = sig
+    return list(merged.values())
 
 
 async def list_live_alert_subscribers() -> list[Subscriber]:

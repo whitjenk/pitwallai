@@ -50,6 +50,18 @@ async def job_practice_analysis(race_key: str) -> None:
 
 async def job_quali_broadcast(race_key: str) -> None:
     """Agent 3 — quali strategist + WhatsApp broadcast."""
+    from fantasy.rules import DRIVER_PRICES_M
+    from intelligence.cache_health import check_signal_cache_health
+    from loguru import logger as log
+
+    driver_codes = sorted(DRIVER_PRICES_M.keys())
+    health = await check_signal_cache_health(race_key, driver_codes)
+    if not health.ready_for_explanations:
+        log.warning(
+            "explanation_cards_may_be_sparse race_key={} ready={}",
+            race_key,
+            health.ready_for_explanations,
+        )
     await _strategist().run_quali_strategist(race_key)
 
 

@@ -20,6 +20,7 @@ from circuits.profiles import CircuitProfile, all_circuit_keys, get_circuit_prof
 from intelligence.drivers import constructor_code_for_driver, driver_code_for
 from openf1.client import OpenF1Client
 from openf1.models import DriverSessionRow, LapRecord, PitStop, PositionSample, RaceControlMessage
+from utils.race_key import make_race_key
 
 # Fantasy / OpenF1 constructor codes used by seeder (2022–2026 grid).
 CONSTRUCTOR_CODES: tuple[str, ...] = (
@@ -224,7 +225,7 @@ async def fetch_pit_history(
         race_laps = [lap.lap_number for lap in laps if lap.lap_number and lap.lap_number > 0]
         race_total = max(race_laps) if race_laps else 58
         sc_laps = _sc_laps(race_control)
-        race_key = f"{year}_{circuit_key}"
+        race_key = make_race_key(year, circuit_key)
 
         final_pos = {
             row.driver_number: int(row.position)

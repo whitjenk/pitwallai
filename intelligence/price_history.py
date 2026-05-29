@@ -187,8 +187,12 @@ async def seed_price_history() -> int:
 
     Returns number of inserted rows.
     """
-    if not await is_driver_price_history_empty():
-        logger.info("Price history already seeded")
+    try:
+        if not await is_driver_price_history_empty():
+            logger.info("Price history already seeded")
+            return 0
+    except ValueError:
+        logger.warning("DATABASE_URL unset — skipping price history seed")
         return 0
 
     rows = await _load_from_reddit_wiki()
@@ -197,7 +201,11 @@ async def seed_price_history() -> int:
     if not rows:
         rows = _generate_fallback_rows()
     rows = await _derive_points_for_2025(rows)
-    created = await save_driver_price_rows(rows)
+    try:
+        created = await save_driver_price_rows(rows)
+    except ValueError:
+        logger.warning("DATABASE_URL unset — price history not persisted")
+        return 0
     logger.info("seed_price_history completed rows={}", created)
     return created
 

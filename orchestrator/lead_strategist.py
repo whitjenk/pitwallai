@@ -110,6 +110,10 @@ class LeadStrategist:
         ctx = self._bootstrap_context(race_key)
         if ctx is None:
             return
+        from intelligence.signal_cache import hydrate_practice_signals_for_context
+
+        ctx = await hydrate_practice_signals_for_context(ctx)
+        self._commit(ctx)
         result = await run_agent(
             run_quali_strategist,
             ctx,

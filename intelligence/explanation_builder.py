@@ -5,6 +5,22 @@ Reads practice signals, quali grid, circuit profile, and pick metadata only —
 no external APIs and no LLM calls at send time.
 """
 
+# SIGNAL CACHE AUDIT — 2026-05-27
+# practice_signals: written by Agent 2 (Practice Analyst) via intelligence/practice_analyst.py
+#   -> save_practice_signals(session_key, circuit.circuit_key, ...) into table practice_signals
+#   (PracticeSignalRow). Trigger: scheduler job_practice_analysis at fp2_utc + 90min (Friday).
+#   Read path: get_practice_signals(race_key, driver) -> circuit_key via get_race_weekend +
+#   profile_circuit_key, then load_practice_signals_by_circuit (NOT race_key on rows).
+#   Gap (fixed): DB load kept oldest row per driver when multiple sessions existed; dedupe
+#   now prefers FP2 and newest created_at. Quali hydrates ctx.practice_signals from DB if
+#   Agent 2 ran in a prior process (lead_strategist.run_quali_strategist).
+# radio_signals: no separate table — FP1/FP2 radio decode stores snippets in
+#   PracticeSignal.raw_evidence (same rows as practice). get_radio_signals() reads that field.
+#   Gap: empty on Saturday if Agent 2 never ran or OpenF1/rehearsal had no radio decode;
+#   Sunday live race monitor does not backfill Saturday explanation cards.
+# race_key: canonical format {year}_{circuit_key} (e.g. 2026_monaco) via utils.race_key.make_race_key;
+#   matches scheduler.calendar RaceWeekend.race_key (not YYYY_RR_slug).
+
 from __future__ import annotations
 
 import re

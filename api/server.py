@@ -236,6 +236,26 @@ def create_app(
             engine.start_background(speed_multiplier=rehearsal_speed)
             log.info("Monaco 2024 rehearsal auto-started")
 
+            from fantasy.rules import DRIVER_PRICES_M
+            from intelligence.cache_health import check_signal_cache_health
+            from intelligence.rehearsal_cache_seed import seed_rehearsal_practice_signals_if_needed
+            from onboarding.monaco_calendar import MONACO_2024_REHEARSAL
+
+            await seed_rehearsal_practice_signals_if_needed()
+            print("\n=== SIGNAL CACHE HEALTH CHECK ===")
+            health = await check_signal_cache_health(
+                race_key=MONACO_2024_REHEARSAL.race_key,
+                driver_codes=sorted(DRIVER_PRICES_M.keys()),
+            )
+            print(f"Practice coverage: {health.practice_hits}/{health.drivers_checked}")
+            print(f"Radio coverage:    {health.radio_hits}/{health.drivers_checked}")
+            print(f"Ready for cards:   {health.ready_for_explanations}")
+            if health.practice_misses:
+                print(f"Missing practice:  {', '.join(health.practice_misses)}")
+            if health.radio_misses:
+                print(f"Missing radio:     {', '.join(health.radio_misses)}")
+            print("=================================\n")
+
         from agents.race_monitor import resume_monitors_on_startup
         from agents.base import AgentRunDependencies
 
@@ -251,6 +271,17 @@ def create_app(
 
         asyncio.create_task(seed_constructor_profiles())
         log.info("Constructor strategy profile seeder scheduled (background)")
+
+        from whatsapp.settings import get_whatsapp_settings
+
+        if (
+            not get_whatsapp_settings().database_url.strip()
+            and pitwall_settings.explanation_cards_enabled
+        ):
+            from intelligence.demo_picks import build_demo_picks_result
+
+            app.state.last_picks_result = build_demo_picks_result()
+            log.info("Loaded demo picks with explanation cards (no DATABASE_URL)")
 
         log.info("PitWallAI startup complete")
 
@@ -381,6 +412,13 @@ def create_app(
         if html is None:
             raise HTTPException(status_code=404, detail="Chip plan not found")
         return HTMLResponse(content=html)
+
+    @app.get("/", include_in_schema=False)
+    async def root_redirect():
+        """Send browsers to the dashboard (avoid blank 404 on /)."""
+        from fastapi.responses import RedirectResponse
+
+        return RedirectResponse(url="/dashboard", status_code=302)
 
     @app.get("/dashboard")
     async def dashboard() -> FileResponse:

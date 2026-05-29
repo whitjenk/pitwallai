@@ -10,6 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
+from utils.race_key import make_race_key
+
 
 @dataclass(frozen=True, slots=True)
 class RaceWeekend:
@@ -49,7 +51,7 @@ def _race(
     qualifying = datetime(saturday.year, saturday.month, saturday.day, 14, 0, tzinfo=UTC)
     fantasy_lock = race - timedelta(hours=1)
     return RaceWeekend(
-        race_key=f"{year}_{circuit_key}",
+        race_key=make_race_key(year, circuit_key),
         circuit_key=circuit_key,
         display_name=display_name,
         fp1_utc=fp1,

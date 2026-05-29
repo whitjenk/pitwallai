@@ -9,8 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.26.2/babel.min.js"></script>
   <style>
     * { box-sizing: border-box; }
     body { margin: 0; font-family: Inter, system-ui, sans-serif; background: #080a0e; color: #e6edf3; }
@@ -30,12 +29,26 @@
   </style>
 </head>
 <body>
-  <div id="root"></div>
+  <div id="root">
+    <p style="padding:2rem;color:#8b949e;font-family:system-ui,sans-serif">
+      Loading PitWallAI dashboard…
+    </p>
+  </div>
+  <script>
+    window.onerror = function (msg, _src, _line, _col, err) {
+      const el = document.getElementById("root");
+      if (el) {
+        el.innerHTML =
+          '<div style="padding:2rem;max-width:40rem;font-family:system-ui,sans-serif">' +
+          '<h1 style="color:#f85149;margin:0 0 1rem">Dashboard failed to load</h1>' +
+          '<p style="color:#8b949e;line-height:1.5">' + (err && err.message ? err.message : msg) + '</p>' +
+          '<p style="color:#8b949e;margin-top:1rem;font-size:0.875rem">Check browser console (F12). ' +
+          'CDN scripts (React, Babel, Tailwind) require network access. Try <a href="/dashboard" style="color:#58a6ff">/dashboard</a>.</p></div>';
+      }
+    };
+  </script>
   <script type="text/babel" data-presets="react">
     const { useState, useEffect, useRef, useMemo, useCallback } = React;
-    const {
-      RadialBarChart, RadialBar, PieChart, Pie, Cell, ResponsiveContainer
-    } = Recharts;
 
     const COLORS = {
       bg: "#080a0e",
@@ -469,17 +482,7 @@
 
               <div className="rounded-lg border p-3" style={{ background: COLORS.surface, borderColor: COLORS.border }}>
                 <h2 className="text-xs font-semibold tracking-wider mb-1" style={{ color: COLORS.muted }}>INTENT DISTRIBUTION</h2>
-                <div style={{ height: 140 }}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie data={intentCounts} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={35} outerRadius={55}>
-                        {intentCounts.map((_, i) => (
-                          <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
-                        ))}
-                      </Pie>
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
+                <IntentBars data={intentCounts} />
               </div>
 
               <div className="rounded-lg border p-3" style={{ background: COLORS.surface, borderColor: COLORS.border }}>
@@ -634,26 +637,65 @@
       );
     }
 
+    function IntentBars({ data }) {
+      const total = data.reduce((sum, row) => sum + row.value, 0) || 1;
+      return (
+        <div className="space-y-1.5 py-1 overflow-y-auto" style={{ height: 140 }}>
+          {data.length === 0 && (
+            <p className="text-xs text-center py-6" style={{ color: COLORS.muted }}>No intents yet</p>
+          )}
+          {data.map((row, i) => (
+            <div key={row.name} className="flex items-center gap-2 text-xs">
+              <span className="font-mono w-28 truncate" style={{ color: COLORS.muted }} title={row.name}>
+                {row.name}
+              </span>
+              <div className="flex-1 h-2 rounded" style={{ background: COLORS.elevated }}>
+                <div
+                  style={{
+                    width: `${Math.round((100 * row.value) / total)}%`,
+                    height: "100%",
+                    background: PIE_COLORS[i % PIE_COLORS.length],
+                    borderRadius: 2,
+                  }}
+                />
+              </div>
+              <span className="font-mono w-5 text-right" style={{ color: COLORS.text }}>{row.value}</span>
+            </div>
+          ))}
+        </div>
+      );
+    }
+
     function LatencyGauge({ value, avg, flash }) {
       const color = value < 800 ? COLORS.green : value < 1200 ? COLORS.amber : COLORS.red;
-      const data = [{ name: "latency", value: Math.min(value, 2000), fill: flash ? COLORS.red : color }];
+      const pct = Math.min(100, Math.round((Math.min(value, 2000) / 2000) * 100));
       return (
-        <div style={{ height: 160 }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <RadialBarChart cx="50%" cy="50%" innerRadius="55%" outerRadius="90%" data={data} startAngle={180} endAngle={0}>
-              <RadialBar background dataKey="value" cornerRadius={6} />
-            </RadialBarChart>
-          </ResponsiveContainer>
-          <div className="text-center -mt-16">
-            <div className="text-2xl font-mono font-bold" style={{ color: flash ? COLORS.red : color }}>{Math.round(value)}ms</div>
-            <div className="text-xs" style={{ color: COLORS.muted }}>10-tx avg: {Math.round(avg)}ms</div>
+        <div className="flex flex-col items-center justify-center" style={{ height: 160 }}>
+          <div className="w-full max-w-[220px] h-2.5 rounded-full overflow-hidden" style={{ background: COLORS.elevated }}>
+            <div
+              style={{
+                width: `${pct}%`,
+                height: "100%",
+                background: flash ? COLORS.red : color,
+                transition: "width 0.3s ease",
+              }}
+            />
+          </div>
+          <div className="text-2xl font-mono font-bold mt-5" style={{ color: flash ? COLORS.red : color }}>
+            {Math.round(value)}ms
+          </div>
+          <div className="text-xs mt-1" style={{ color: COLORS.muted }}>
+            10-tx avg: {Math.round(avg)}ms · target under 800ms
           </div>
         </div>
       );
     }
 
-    const root = ReactDOM.createRoot(document.getElementById("root"));
-    root.render(<App />);
+    const mount = document.getElementById("root");
+    if (!mount) {
+      throw new Error("Missing #root element");
+    }
+    ReactDOM.createRoot(mount).render(<App />);
   </script>
 </body>
 </html>

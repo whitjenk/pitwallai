@@ -76,7 +76,8 @@ async def attach_explanations_from_db(
         profile_key = profile_circuit_key(circuit_key)
         rows = await load_practice_signals_by_circuit(profile_key)
         for sig in rows:
-            practice_by_driver[sig.driver_code.upper()] = sig
+            code = sig.driver_code.upper()
+            practice_by_driver[code] = sig
 
     build_ctx = ExplanationBuildContext(
         race_key=race_key,

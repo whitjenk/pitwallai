@@ -159,7 +159,9 @@ def test_season_share_page_invalid_token_returns_404(picks_app: TestClient) -> N
 
 
 def test_season_share_page_renders_html(picks_app: TestClient) -> None:
-    with patch("api.server.parse_share_token", return_value=("+15551234567", 2026)):
+    with patch.dict("os.environ", {"PITWALL_SEASON_RECAP_ENABLED": "1"}), patch(
+        "api.server.parse_share_token", return_value=("+15551234567", 2026)
+    ):
         with patch(
             "api.server.build_season_recap",
             new=AsyncMock(

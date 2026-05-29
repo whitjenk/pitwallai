@@ -31,9 +31,12 @@ async def _whatsapp_startup() -> None:
 
     init_orchestrator_context()
     await init_db()
-    from intelligence.constructor_strategy import seed_constructor_profiles
+    from pitwallai.feature_flags import constructor_strategy_enabled
 
-    asyncio.create_task(seed_constructor_profiles())
+    if constructor_strategy_enabled():
+        from intelligence.constructor_strategy import seed_constructor_profiles
+
+        asyncio.create_task(seed_constructor_profiles())
 
 
 def parse_args() -> argparse.Namespace:

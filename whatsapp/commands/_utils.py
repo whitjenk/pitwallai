@@ -18,6 +18,15 @@ def conf_bar(pct: float) -> str:
     return "█" * filled + "░" * (10 - filled)
 
 
+def confidence_band(pct: float) -> str:
+    """User-facing confidence band. Internal pct stays numeric; only display rounds."""
+    if pct >= 70.0:
+        return "HIGH"
+    if pct >= 50.0:
+        return "MED"
+    return "LOW"
+
+
 def accuracy_bar(pct: float) -> str:
     return conf_bar(pct)
 

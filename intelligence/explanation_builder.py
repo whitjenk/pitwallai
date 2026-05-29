@@ -170,18 +170,19 @@ def _build_risk_note(
     return "Limited downside at this price point."
 
 
-def _build_league_angle(pick: PickRecommendation) -> str | None:
+def _build_field_angle(pick: PickRecommendation) -> str | None:
+    """Field-level framing only. Not personalized to user's league."""
     tier = (pick.ownership_tier or "UNKNOWN").upper()
     is_contrarian = bool(pick.is_contrarian)
 
     if tier == "HIGH":
-        return "Consensus pick — safe floor, limited upside vs field."
+        return "Field-consensus pick — safe floor, limited upside vs field."
     if tier == "LOW" and is_contrarian:
-        return "Contrarian — upside if rivals play chalk this weekend."
+        return "Contrarian vs field — upside if others play chalk this weekend."
     if tier == "LOW":
-        return "Low ownership — differentiator if confidence holds."
+        return "Low field ownership — differentiator if confidence holds."
     if tier == "MEDIUM":
-        return "Mixed field — differentiator in smaller leagues."
+        return "Split field — moderate differentiator."
     return None
 
 
@@ -212,12 +213,12 @@ def build_explanation(
             return None
 
     primary_signal, source = selected
-    league_angle = _build_league_angle(pick)
+    field_angle = _build_field_angle(pick)
 
     return PickExplanation(
         driver_code=driver_code,
         primary_signal=primary_signal,
         signal_source=source,
         risk_note=_build_risk_note(pick, practice, ctx.circuit, driver_code),
-        league_angle=league_angle,
+        field_angle=field_angle,
     )

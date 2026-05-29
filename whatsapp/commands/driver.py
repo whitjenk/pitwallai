@@ -6,6 +6,7 @@ from intelligence.explanation_builder import build_explanation
 from intelligence.repository import load_latest_pick_for_driver
 from whatsapp.commands._utils import (
     conf_bar,
+    confidence_band,
     driver_price_line,
     explanation_context_for_race,
     is_known_driver_code,
@@ -40,11 +41,12 @@ async def handle_driver(driver_code: str, phone_number: str, race_key: str) -> s
     ctx = await explanation_context_for_race(race_key)
     explanation = build_explanation(pick, ctx)
     bar = conf_bar(pick.confidence)
+    band = confidence_band(pick.confidence)
 
     if explanation is None:
         return (
             f"*{code}*  ·  {price}\n\n"
-            f"Confidence: {int(pick.confidence)}%  {bar}\n\n"
+            f"Confidence: *{band}*  {bar}\n\n"
             "Signal data not yet available for this driver.\n"
             "Check back after FP2.\n\n"
             f"{_FOOTER}"
@@ -53,7 +55,7 @@ async def handle_driver(driver_code: str, phone_number: str, race_key: str) -> s
     card = format_explanation_card(explanation)
     return (
         f"*{code}*  ·  {price}\n\n"
-        f"Confidence: {int(pick.confidence)}%  {bar}\n\n"
+        f"Confidence: *{band}*  {bar}\n\n"
         f"{card}\n\n"
         f"{_FOOTER}"
     )

@@ -25,7 +25,36 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 OUTPUT_PATH = PROJECT_ROOT / "api" / "static" / "results.html"
-WA_NUMBER = os.getenv("WHATSAPP_DISPLAY_NUMBER", "Text us on WhatsApp")
+WA_NUMBER = os.getenv("WHATSAPP_DISPLAY_NUMBER", "")
+
+
+def _wa_me_href(prefill: str = "SUBSCRIBE") -> str:
+    """Build wa.me click-to-chat link; empty when number is unset."""
+    from urllib.parse import quote
+
+    digits = "".join(ch for ch in WA_NUMBER if ch.isdigit())
+    if not digits:
+        return ""
+    return f"https://wa.me/{digits}?text={quote(prefill)}"
+
+
+def _cta_block(label: str = "Get picks on WhatsApp") -> str:
+    """One-tap acquisition: wa.me button opens WhatsApp with SUBSCRIBE pre-typed."""
+    href = _wa_me_href("SUBSCRIBE")
+    pretty_number = _esc(WA_NUMBER) if WA_NUMBER else "WhatsApp"
+    if href:
+        return f"""
+  <div class="cta">
+    <div class="cta-label">{_esc(label)}</div>
+    <a class="cta-btn" href="{_esc(href)}">Chat with PitWallAI →</a>
+    <div class="cta-sub">Tap to open WhatsApp · or text SUBSCRIBE to {pretty_number}</div>
+  </div>"""
+    return f"""
+  <div class="cta">
+    <div class="cta-label">{_esc(label)}</div>
+    <div class="cta-text">Text SUBSCRIBE to {pretty_number}</div>
+    <div class="cta-sub">Free. No app required. Reply HELP for commands.</div>
+  </div>"""
 
 
 def _esc(value: object) -> str:
@@ -83,11 +112,7 @@ def results_body(stats) -> str:
     </tbody>
   </table>
 
-  <div class="cta">
-    <div class="cta-label">Get picks on WhatsApp</div>
-    <div class="cta-text">Text SUBSCRIBE to {_esc(WA_NUMBER)}</div>
-    <div class="cta-sub">Free. No app required. Reply HELP for commands.</div>
-  </div>"""
+  {_cta_block()}"""
 
 
 def no_data_body(season: int) -> str:
@@ -97,11 +122,7 @@ def no_data_body(season: int) -> str:
   <p style="color:var(--muted);font-size:14px;margin-bottom:48px">
     Pick accuracy is published after each race. Check back after Race 1.
   </p>
-  <div class="cta">
-    <div class="cta-label">Get picks on WhatsApp</div>
-    <div class="cta-text">Text SUBSCRIBE to {_esc(WA_NUMBER)}</div>
-    <div class="cta-sub">Free. No app required. Reply HELP for commands.</div>
-  </div>"""
+  {_cta_block()}"""
 
 
 def render_html(stats, *, season: int) -> str:
@@ -217,6 +238,19 @@ def render_html(stats, *, season: int) -> str:
       font-weight: 600;
       margin-bottom: 4px;
     }}
+    .cta-btn {{
+      display: inline-block;
+      background: #25D366;
+      color: #0A0A0A;
+      font-weight: 700;
+      font-size: 15px;
+      letter-spacing: 0.5px;
+      padding: 12px 20px;
+      margin-bottom: 8px;
+      text-decoration: none;
+      border-radius: 4px;
+    }}
+    .cta-btn:hover {{ background: #1ebb59; }}
     .cta-sub {{ font-size: 12px; color: var(--muted); }}
     .updated {{
       font-size: 11px;

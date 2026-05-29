@@ -128,8 +128,8 @@ def format_explanation_card(explanation: PickExplanation) -> str:
         f"{emoji} Signal: {explanation.primary_signal}",
         f"⚠️  Risk: {explanation.risk_note}",
     ]
-    if explanation.league_angle:
-        card_lines.append(f"🎲 League: {explanation.league_angle}")
+    if explanation.field_angle:
+        card_lines.append(f"🎲 Field: {explanation.field_angle}")
     return "\n".join(card_lines)
 
 

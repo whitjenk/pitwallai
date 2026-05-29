@@ -99,6 +99,11 @@ async def job_friday_delta(race_key: str) -> None:
 
 async def job_post_race_counterfactual(race_key: str) -> None:
     """Post-race counterfactual recap per subscriber."""
+    from pitwallai.feature_flags import counterfactual_recap_enabled
+
+    if not counterfactual_recap_enabled():
+        logger.info("counterfactual_recap skipped race_key={}: flag off", race_key)
+        return
     from whatsapp.phase7 import broadcast_counterfactual_recaps
 
     await broadcast_counterfactual_recaps(race_key)
@@ -106,6 +111,11 @@ async def job_post_race_counterfactual(race_key: str) -> None:
 
 async def job_community_aggregate(race_key: str) -> None:
     """Community aggregate stats broadcast (race + 5h, after counterfactual)."""
+    from pitwallai.feature_flags import community_aggregate_enabled
+
+    if not community_aggregate_enabled():
+        logger.info("community_aggregate skipped race_key={}: flag off", race_key)
+        return
     from intelligence.repository import list_active_subscribers
     from whatsapp.community_aggregate import broadcast_community_aggregate
 

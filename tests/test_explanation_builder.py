@@ -14,7 +14,7 @@ from circuits.profiles import get_circuit_profile
 from intelligence.explanation_attach import attach_explanations
 from intelligence.explanation_builder import (
     ExplanationBuildContext,
-    _build_league_angle,
+    _build_field_angle,
     _build_risk_note,
     _select_primary_signal,
     build_explanation,
@@ -115,17 +115,17 @@ def test_returns_none_when_no_signal() -> None:
     assert result is None
 
 
-# ── 6. UNKNOWN ownership omits league_angle ───────────────────────────────────
+# ── 6. UNKNOWN ownership omits field_angle ───────────────────────────────────
 
 
-def test_unknown_ownership_omits_league_angle() -> None:
+def test_unknown_ownership_omits_field_angle() -> None:
     pick = make_pick(ownership_tier="UNKNOWN", is_contrarian=False)
     practice = make_practice_with_radio(summary="Feels planted in sector 2.")
 
     result = build_explanation(pick, _ctx(practice_by_driver={"NOR": practice}))
 
     assert result is not None
-    assert result.league_angle is None
+    assert result.field_angle is None
 
 
 # ── 7. primary_signal capped at 120 chars ─────────────────────────────────────
@@ -168,16 +168,16 @@ def test_build_failure_in_attach_does_not_raise() -> None:
 # ── 9–10. League angle helpers ────────────────────────────────────────────────
 
 
-def test_league_angle_contrarian() -> None:
+def test_field_angle_contrarian() -> None:
     pick = make_pick(ownership_tier="LOW", is_contrarian=True)
-    angle = _build_league_angle(pick)
+    angle = _build_field_angle(pick)
     assert angle is not None
     assert "contrarian" in angle.lower()
 
 
-def test_league_angle_consensus() -> None:
+def test_field_angle_consensus() -> None:
     pick = make_pick(ownership_tier="HIGH", is_contrarian=False)
-    angle = _build_league_angle(pick)
+    angle = _build_field_angle(pick)
     assert angle is not None
     assert "consensus" in angle.lower()
 
@@ -252,7 +252,7 @@ def test_full_card_shape() -> None:
     assert isinstance(result.primary_signal, str)
     assert isinstance(result.signal_source, SignalSource)
     assert isinstance(result.risk_note, str)
-    assert result.league_angle is None or isinstance(result.league_angle, str)
+    assert result.field_angle is None or isinstance(result.field_angle, str)
     assert len(result.primary_signal) > 0
     assert len(result.risk_note) > 0
 
@@ -293,7 +293,7 @@ def test_format_explanation_card_lines() -> None:
             primary_signal="FP2: setup sentiment +0.55.",
             signal_source=SignalSource.PRACTICE,
             risk_note="Limited downside at this price point.",
-            league_angle="Contrarian — upside if rivals play chalk this weekend.",
+            field_angle="Contrarian — upside if rivals play chalk this weekend.",
         )
     )
     lines = card.split("\n")

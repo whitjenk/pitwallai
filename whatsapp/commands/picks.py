@@ -7,6 +7,7 @@ from intelligence.repository import get_picks_for_race
 from scheduler.calendar import get_race_weekend
 from whatsapp.commands._utils import (
     conf_bar,
+    confidence_band,
     driver_price_line,
     explanation_context_for_race,
     pick_row_to_recommendation,
@@ -55,8 +56,9 @@ async def handle_picks(phone_number: str, race_key: str) -> str:
         code = pick.driver_code.upper()
         explanation = build_explanation(pick, ctx)
         bar = conf_bar(pick.confidence)
+        band = confidence_band(pick.confidence)
         lines.append(f"*{code}*  ·  {driver_price_line(code)}")
-        lines.append(f"Confidence: {int(pick.confidence)}%  {bar}")
+        lines.append(f"Confidence: *{band}*  {bar}")
         if explanation:
             lines.append(format_explanation_card(explanation))
         lines.append("")

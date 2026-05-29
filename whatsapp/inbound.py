@@ -16,6 +16,12 @@ from intelligence.repository import (
     update_subscriber_preferences,
 )
 from intelligence.season_recap import build_season_recap
+from pitwallai.feature_flags import (
+    budget_transfers_enabled,
+    chips_enabled,
+    constructor_strategy_enabled,
+    season_recap_enabled,
+)
 from scheduler.calendar import CALENDAR_2026, get_next_race_weekend
 from scheduler.context import get_current_race_key
 from whatsapp.command_router import route
@@ -141,6 +147,8 @@ async def _handle_why_constructor(code: str) -> str:
 async def _handle_why(raw_text: str) -> str:
     parts = raw_text.strip().split()
     if len(parts) >= 3 and parts[1].upper() == "CONSTRUCTOR":
+        if not constructor_strategy_enabled():
+            return truncate("Constructor strategy is off-bet for now. Reply HELP for current commands.")
         return await _handle_why_constructor(parts[2])
     if len(parts) != 2:
         return truncate("Use: WHY NOR or WHY CONSTRUCTOR FER")
@@ -249,9 +257,20 @@ async def handle_inbound_text(phone: str, text: str, raw_text: str) -> None:
         elif text.startswith("WHY "):
             reply = await _handle_why(raw_text)
         elif text == "SEASON":
-            reply = await _handle_season(phone, compact=False)
-        elif text == "SHARE":
-            reply = await _handle_season(phone, compact=True)
+            if not season_recap_enabled():
+                reply = truncate("Season recap isn't live yet. Reply HELP for available commands.")
+            else:
+                reply = await _handle_season(phone, compact=False)
+        elif text.startswith("SHARE "):
+            from whatsapp.commands.share import handle_share
+
+            parts = raw_text.strip().split()
+            code = parts[1] if len(parts) >= 2 else ""
+            reply = await handle_share(
+                driver_code=code,
+                phone_number=phone,
+                race_key=_next_race_key() or _last_race_key() or "",
+            )
         elif text == "SUBSCRIBE":
             reply = await handle_subscribe(phone)
         elif text == "UNSUBSCRIBE":
@@ -268,20 +287,20 @@ async def handle_inbound_text(phone: str, text: str, raw_text: str) -> None:
             reply = await _handle_cadence(phone, mode="FULL")
         elif text in {"CADENCE RACEDAY", "CADENCE RACE_DAY_ONLY"}:
             reply = await _handle_cadence(phone, mode="RACE_DAY_ONLY")
-        elif text == "CHIPS":
+        elif text == "CHIPS" and chips_enabled():
             from whatsapp.phase7 import send_chips_summary
 
             reply = await send_chips_summary(phone)
-        elif text.startswith("CHIPS "):
+        elif text.startswith("CHIPS ") and chips_enabled():
             from whatsapp.phase7 import send_chip_detail
 
             chip = raw_text.strip().split(maxsplit=1)[1] if len(raw_text.split()) > 1 else ""
             reply = await send_chip_detail(phone, chip)
-        elif text == "TRANSFERS":
+        elif text == "TRANSFERS" and budget_transfers_enabled():
             from whatsapp.phase7 import send_transfers_status
 
             reply = await send_transfers_status(phone)
-        elif text == "BUDGET":
+        elif text == "BUDGET" and budget_transfers_enabled():
             from whatsapp.phase7 import send_budget_status
 
             reply = await send_budget_status(phone)

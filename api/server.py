@@ -271,10 +271,15 @@ def create_app(
         )
         await resume_monitors_on_startup(monitor_deps)
 
-        from intelligence.constructor_strategy import seed_constructor_profiles
+        from pitwallai.feature_flags import constructor_strategy_enabled
 
-        asyncio.create_task(seed_constructor_profiles())
-        log.info("Constructor strategy profile seeder scheduled (background)")
+        if constructor_strategy_enabled():
+            from intelligence.constructor_strategy import seed_constructor_profiles
+
+            asyncio.create_task(seed_constructor_profiles())
+            log.info("Constructor strategy profile seeder scheduled (background)")
+        else:
+            log.info("Constructor strategy seeder skipped (flag off)")
 
         from whatsapp.settings import get_whatsapp_settings
 
@@ -350,6 +355,10 @@ def create_app(
     @app.get("/api/season/{token}")
     async def season_recap(token: str) -> dict[str, Any]:
         """Return a public share payload for a season recap token."""
+        from pitwallai.feature_flags import season_recap_enabled
+
+        if not season_recap_enabled():
+            raise HTTPException(status_code=404, detail="Season recap disabled")
         parsed = parse_share_token(token, _season_share_secret())
         if parsed is None:
             raise HTTPException(status_code=404, detail="Invalid season recap token")
@@ -373,6 +382,10 @@ def create_app(
     @app.get("/you/{token}", response_class=HTMLResponse)
     async def season_recap_page(token: str) -> HTMLResponse:
         """Render a public, share-friendly season recap page."""
+        from pitwallai.feature_flags import season_recap_enabled
+
+        if not season_recap_enabled():
+            raise HTTPException(status_code=404, detail="Season recap disabled")
         parsed = parse_share_token(token, _season_share_secret())
         if parsed is None:
             raise HTTPException(status_code=404, detail="Invalid season recap token")
@@ -400,6 +413,10 @@ def create_app(
     @app.get("/recap/{token}", response_class=HTMLResponse)
     async def race_recap_page(token: str) -> HTMLResponse:
         """Public post-race recap share page (token is auth)."""
+        from pitwallai.feature_flags import counterfactual_recap_enabled
+
+        if not counterfactual_recap_enabled():
+            raise HTTPException(status_code=404, detail="Recap disabled")
         from intelligence.recap_page import render_recap_page_for_token
 
         html = await render_recap_page_for_token(token)
@@ -410,6 +427,10 @@ def create_app(
     @app.get("/chips/{token}", response_class=HTMLResponse)
     async def chip_plan_page(token: str) -> HTMLResponse:
         """Public chip plan calendar page."""
+        from pitwallai.feature_flags import chips_enabled
+
+        if not chips_enabled():
+            raise HTTPException(status_code=404, detail="Chips disabled")
         from intelligence.chips_page import render_chips_page_for_token
 
         html = await render_chips_page_for_token(token)

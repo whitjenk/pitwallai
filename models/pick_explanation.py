@@ -37,9 +37,12 @@ class PickExplanation(BaseModel):
     risk_note: str = Field(
         description="One sentence honest downside. Max 100 chars.",
     )
-    league_angle: str | None = Field(
+    field_angle: str | None = Field(
         default=None,
-        description="Ownership framing; None when tier is UNKNOWN.",
+        description=(
+            "Field-level framing (consensus vs contrarian vs differentiator). "
+            "Heuristic only — not user-specific league context. None when tier UNKNOWN."
+        ),
     )
 
     @field_validator("primary_signal")
@@ -58,9 +61,9 @@ class PickExplanation(BaseModel):
             return text[:99] + "…"
         return text
 
-    @field_validator("league_angle")
+    @field_validator("field_angle")
     @classmethod
-    def _cap_league(cls, value: str | None) -> str | None:
+    def _cap_field_angle(cls, value: str | None) -> str | None:
         if value is None or not value.strip():
             return None
         text = value.strip()

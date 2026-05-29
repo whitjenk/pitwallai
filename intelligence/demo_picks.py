@@ -45,7 +45,7 @@ def build_demo_picks_result() -> PicksRunResult:
             ),
             signal_source=SignalSource.PRACTICE,
             risk_note="Street circuit — limited overtaking; history mixed at Monaco.",
-            league_angle="Contrarian — upside if rivals play chalk this weekend.",
+            field_angle="Contrarian vs field — upside if others play chalk this weekend.",
         ),
     )
     return PicksRunResult(

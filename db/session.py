@@ -109,6 +109,17 @@ async def init_db() -> None:
 
     engine = get_engine()
     await upgrade_schema(engine)
+
+    from fantasy.price_catalog import load_price_catalog, overlay_prices_from_db
+
+    load_price_catalog()
+    try:
+        n = await overlay_prices_from_db()
+        if n:
+            logger.info("price_catalog: overlaid {} driver prices from DB", n)
+    except Exception as exc:
+        logger.warning("price_catalog DB overlay skipped: {}", exc)
+
     try:
         from intelligence.spend_guard import refresh_spend_guard_cache
 

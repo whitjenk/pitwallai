@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from circuits.profiles import get_circuit_profile, load_circuit_profiles
 from db.models import FantasyTeam
 from fantasy.rules import driver_points_qualifying
@@ -47,8 +49,11 @@ def test_generic_pick_generator() -> None:
     assert "TEAM" in output.confidence_note
 
 
-def test_personalized_swap_expected_delta_uses_quali_points() -> None:
+def test_personalized_swap_expected_delta_uses_quali_points(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Pre-lock swap scoring must use qualifying points, not race finish scale."""
+    monkeypatch.setenv("PITWALL_PRICES_VERIFIED", "1")
     ctx = init_orchestrator_context()
     monaco = ctx.get_circuit("monaco")
     assert monaco is not None
@@ -69,7 +74,7 @@ def test_personalized_swap_expected_delta_uses_quali_points() -> None:
         QualifyingRow(driver_number=3, driver_code="NOR", grid_position=3, session_key=1),
         QualifyingRow(driver_number=4, driver_code="HAM", grid_position=5, session_key=1),
         QualifyingRow(driver_number=5, driver_code="ALB", grid_position=10, session_key=1),
-        QualifyingRow(driver_number=6, driver_code="SAR", grid_position=8, session_key=1),
+        QualifyingRow(driver_number=6, driver_code="COL", grid_position=8, session_key=1),
     ]
     output = generate_picks(
         PickGeneratorInput(
@@ -84,13 +89,13 @@ def test_personalized_swap_expected_delta_uses_quali_points() -> None:
     )
     assert output.personalized
     assert output.picks
-    sar_swap = next(
-        (p for p in output.picks if p.transfer_in == "SAR" and p.transfer_out == "ALB"),
+    col_swap = next(
+        (p for p in output.picks if p.transfer_in == "COL" and p.transfer_out == "ALB"),
         None,
     )
-    assert sar_swap is not None
-    assert sar_swap.predicted_points_delta is not None
+    assert col_swap is not None
+    assert col_swap.predicted_points_delta is not None
     expected = float(
         driver_points_qualifying(8) - driver_points_qualifying(10)
     )
-    assert sar_swap.predicted_points_delta == expected
+    assert col_swap.predicted_points_delta == expected

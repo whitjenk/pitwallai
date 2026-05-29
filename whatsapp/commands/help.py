@@ -42,6 +42,7 @@ async def handle_help(phone_number: str, race_key: str) -> str:
         "*LIVE ON / LIVE OFF*  → Sunday race alerts on/off\n"
         "*SUBSCRIBE / UNSUBSCRIBE / DELETE*\n"
         "  UNSUBSCRIBE stops messages · DELETE wipes your data\n\n"
+        "⏱ Saturday picks auto-send ~3h before lock · text *PICKS* anytime after TEAM setup\n\n"
         "💡 Send a screenshot of your F1 Fantasy team anytime to update it."
         f"{extras_line}\n\n"
         f"{_FOOTER}"

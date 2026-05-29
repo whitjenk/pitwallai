@@ -25,6 +25,7 @@ from fantasy.rules import (
     max_affordable_transfers,
     transfer_penalty_points,
 )
+from fantasy.price_catalog import prices_trusted
 from openf1.client import OpenF1Client
 
 _ANOMALY_CONFIDENCE_PENALTY = 12.0
@@ -299,7 +300,16 @@ def generate_picks(ctx: PickGeneratorInput) -> PickOutput:
     grid = {q.driver_code: q.grid_position for q in ctx.qualifying_result}
 
     if ctx.user_team and _team_is_actionable(ctx.user_team):
-        return _path_personalized(ctx, signal_map, grid)
+        if prices_trusted():
+            return _path_personalized(ctx, signal_map, grid)
+        out = _path_generic(ctx, signal_map, grid)
+        note = (
+            "Transfer swap suggestions are paused until prices are verified for this race. "
+            "Confirm values in the F1 Fantasy app before acting."
+        )
+        existing = out.confidence_note or ""
+        combined = f"{existing} {note}".strip() if existing else note
+        return out.model_copy(update={"confidence_note": combined})
     return _path_generic(ctx, signal_map, grid)
 
 

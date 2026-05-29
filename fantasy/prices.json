@@ -1,0 +1,41 @@
+{
+  "_comment": "Edit before each race weekend to match in-game F1 Fantasy prices, then set PITWALL_PRICES_VERIFIED=1",
+  "updated_at": "2026-01-01",
+  "drivers": {
+    "VER": 30.0,
+    "NOR": 28.5,
+    "LEC": 27.0,
+    "PIA": 26.0,
+    "SAI": 24.0,
+    "HAM": 23.0,
+    "RUS": 22.0,
+    "PER": 20.0,
+    "ALO": 18.0,
+    "ALB": 16.0,
+    "GAS": 14.0,
+    "OCO": 13.0,
+    "STR": 12.0,
+    "HAD": 11.0,
+    "HUL": 10.0,
+    "LAW": 9.5,
+    "BOT": 9.0,
+    "BEA": 8.5,
+    "BOR": 8.0,
+    "ANT": 7.5,
+    "LIN": 7.0,
+    "COL": 6.5
+  },
+  "constructors": {
+    "RBR": 28.0,
+    "MCL": 27.0,
+    "FER": 26.0,
+    "MER": 24.0,
+    "AM": 18.0,
+    "ALP": 12.0,
+    "WIL": 10.0,
+    "RB": 9.0,
+    "HAA": 8.0,
+    "SAU": 7.5,
+    "CAD": 7.0
+  }
+}

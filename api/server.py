@@ -167,6 +167,10 @@ def create_app(
         log = logger.bind(mode=mode)
         log.info("Initializing PitWallAI components")
 
+        from pitwallai.launch_validate import assert_live_ready
+
+        assert_live_ready(mode=mode)
+
         from intelligence.context import init_orchestrator_context
 
         app.state.orchestrator_context = init_orchestrator_context()

@@ -61,6 +61,11 @@ _SUBSCRIBE_DATA_NOTE = (
     "Text DELETE anytime to remove your data."
 )
 
+_BETA_DISCLAIMER = (
+    "🧪 *Beta:* Independent fan tool — not F1 or F1 Fantasy. "
+    "Picks are informational only; you decide every transfer."
+)
+
 _SUBSCRIBE_CONFIRM = (
     "✅ Subscribed to PitWallAI 🏁\n\n"
     "Picks arrive Saturday before lock. Text HELP for commands.\n\n"
@@ -125,6 +130,7 @@ async def handle_subscribe(phone: str) -> list[str]:
     out: list[str] = []
     if is_first:
         out.append(truncate(_SUBSCRIBE_DATA_NOTE))
+        out.append(truncate(_BETA_DISCLAIMER))
     out.append(_SUBSCRIBE_CONFIRM)
     if needs_manual_timezone(phone):
         await set_pending_timezone(phone)
@@ -159,6 +165,7 @@ async def complete_subscribe(phone: str, timezone: str) -> list[str]:
     outbound: list[str] = []
     if is_first:
         outbound.append(truncate(_SUBSCRIBE_DATA_NOTE))
+        outbound.append(truncate(_BETA_DISCLAIMER))
     outbound.append(_SUBSCRIBE_CONFIRM)
     return outbound
 

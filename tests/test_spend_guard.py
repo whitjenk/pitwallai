@@ -46,18 +46,20 @@ async def test_refresh_updates_cache(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_record_spend_triggers_refresh(monkeypatch) -> None:
+    from contextlib import asynccontextmanager
+
     from intelligence.spend_guard import record_spend
 
     mock_refresh = AsyncMock(return_value=_snapshot_from_spent(0.0))
     monkeypatch.setattr("intelligence.spend_guard.refresh_spend_guard_cache", mock_refresh)
-    with patch("intelligence.spend_guard.get_session") as mock_gs:
-        session = AsyncMock()
-        session.add = lambda _x: None
 
-        @AsyncMock()
-        async def _cm():
-            yield session
+    session = AsyncMock()
+    session.add = lambda _x: None
 
-        mock_gs.return_value = _cm()
-        await record_spend("whatsapp", 0.008)
+    @asynccontextmanager
+    async def _fake_session():
+        yield session
+
+    monkeypatch.setattr("intelligence.spend_guard.get_session", _fake_session)
+    await record_spend("whatsapp", 0.008)
     mock_refresh.assert_awaited_once()

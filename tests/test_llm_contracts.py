@@ -2,11 +2,32 @@
 
 from __future__ import annotations
 
+import importlib
+import importlib.util
 from dataclasses import replace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from pydantic_ai.models import Model
+
+
+def _adapter_importable(class_path: str) -> bool:
+    """True if the provider's Pydantic AI adapter module can be imported.
+
+    Provider adapters (anthropic, google, openai) are optional extras whose
+    importability depends on the installed dependency set. A provider whose
+    adapter can't import is skipped rather than failing CI — the default
+    install ships gemini + openai; claude is a BYOK extra. See
+    requirements.txt for the version coupling.
+    """
+    module_path = class_path.rsplit(".", 1)[0]
+    try:
+        if importlib.util.find_spec(module_path) is None:
+            return False
+        importlib.import_module(module_path)
+    except Exception:
+        return False
+    return True
 
 from pitwallai.agents.radio_intercept.config import PitWallSettings
 from pitwallai.agents.radio_intercept.decoder_factory import (
@@ -43,13 +64,25 @@ def _llm_payload(*, evidence_summary: str | None) -> DecodedTransmission:
     )
 
 
+def _provider_param(provider: str, class_path: str) -> "pytest.ParameterSet":
+    """Parametrize row that skips when the provider adapter can't import."""
+    return pytest.param(
+        provider,
+        class_path,
+        marks=pytest.mark.skipif(
+            not _adapter_importable(class_path),
+            reason=f"{provider} adapter ({class_path.rsplit('.', 1)[0]}) not importable",
+        ),
+    )
+
+
 @pytest.mark.parametrize(
     ("provider", "expected_class_path"),
     [
-        ("gemini", "pydantic_ai.models.google.GoogleModel"),
-        ("claude", "pydantic_ai.models.anthropic.AnthropicModel"),
-        ("openai", "pydantic_ai.models.openai.OpenAIModel"),
-        ("ollama", "pydantic_ai.models.openai.OpenAIModel"),
+        _provider_param("gemini", "pydantic_ai.models.google.GoogleModel"),
+        _provider_param("claude", "pydantic_ai.models.anthropic.AnthropicModel"),
+        _provider_param("openai", "pydantic_ai.models.openai.OpenAIModel"),
+        _provider_param("ollama", "pydantic_ai.models.openai.OpenAIModel"),
     ],
 )
 def test_get_model_returns_expected_class(provider: str, expected_class_path: str) -> None:

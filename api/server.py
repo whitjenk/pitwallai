@@ -340,7 +340,10 @@ def create_app(
             "llm_budget": agent.budget_guard.to_public_dict(budget_snap),
         }
 
-    @app.get("/api/budget")
+    @app.get(
+        "/api/budget",
+        dependencies=[Depends(require_picks_api_key)],
+    )
     async def budget_status(
         session_key: int | None = Query(default=None),
     ) -> dict[str, Any]:
@@ -588,7 +591,10 @@ def create_app(
         session.transmissions[transmission_id] = updated
         return updated
 
-    @app.post("/api/rehearsal/start")
+    @app.post(
+        "/api/rehearsal/start",
+        dependencies=[Depends(require_picks_api_key)],
+    )
     async def rehearsal_start(body: RehearsalStartBody) -> dict[str, Any]:
         """
         Start or restart a rehearsal scenario.
@@ -630,7 +636,10 @@ def create_app(
             ),
         }
 
-    @app.post("/api/rehearsal/stop")
+    @app.post(
+        "/api/rehearsal/stop",
+        dependencies=[Depends(require_picks_api_key)],
+    )
     async def rehearsal_stop() -> dict[str, str]:
         """
         Cancel the active rehearsal run.
@@ -643,7 +652,10 @@ def create_app(
             await engine.stop()
         return {"status": "stopped"}
 
-    @app.get("/api/history")
+    @app.get(
+        "/api/history",
+        dependencies=[Depends(require_picks_api_key)],
+    )
     async def history(
         limit: int = Query(default=50, ge=1, le=500),
         driver_code: str | None = Query(default=None),

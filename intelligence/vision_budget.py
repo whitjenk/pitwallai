@@ -7,11 +7,7 @@ from dataclasses import dataclass
 
 from intelligence.repository import count_vision_calls, record_vision_call
 
-# Cost-tuned defaults. Bet-1 vision usage is screenshot OCR for team
-# onboarding only — most users need one call ever, two if they retry.
-# Previous defaults (5/phone/hour, 5000/day) were 10x over-provisioned;
-# override via PITWALL_VISION_MAX_PER_PHONE_HOUR / _MAX_GLOBAL_DAY env if
-# you genuinely need more headroom (e.g. an onboarding spike day).
+# Override via PITWALL_VISION_MAX_PER_PHONE_HOUR / _MAX_GLOBAL_DAY.
 _DEFAULT_PHONE_HOURLY = 2
 _DEFAULT_GLOBAL_DAILY = 500
 

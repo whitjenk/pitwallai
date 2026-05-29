@@ -3,13 +3,8 @@
 PitWallAI Latency Telemetry
 Measures wall-clock time for each stage of the decode pipeline.
 
-This is *telemetry*, not a contract. Under the current product strategy
-the live-race surface earns its value from shareable call-outs and
-signal-quality feedback into the picks model — not from beating physics.
-The "beat broadcast" bar is ~30 seconds; sub-second decode is bonus,
-not a target. The previous P50<800ms / P95<1200ms thresholds remain
-visible here only as a soft budget for spotting regressions, never as
-a CI gate.
+The P50<800ms / P95<1200ms thresholds shown here are a soft regression
+budget for catching pipeline drift — not a product contract or CI gate.
 
 Usage: python bench.py [--runs N] [--backend rules|hybrid|llm] [--verbose]
 """

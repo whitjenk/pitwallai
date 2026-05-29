@@ -419,9 +419,6 @@ async def _broadcast_recap(
             if len(msg) + len(extra) <= 300:
                 msg = msg + extra
 
-        # Cost cut: bundle the race-wide called-recap into the per-user
-        # recap message for FULL cadence subscribers. Two Sunday messages
-        # become one — halves the WhatsApp service-conversation surface.
         if called_tail and sub.cadence_preference == CadencePreference.FULL.value:
             msg = msg + "\n\n" + called_tail
 
@@ -449,16 +446,12 @@ async def _broadcast_recap(
 
 
 async def _build_called_recap_tail(ctx: RaceContext) -> str | None:
-    """Build the "what we called" tail to bundle into the per-user recap.
+    """Build the "what we called" tail bundled into the per-user recap.
 
     Persists the recap with its share token (so /called/{token} resolves),
     then returns the WhatsApp-formatted text to append to FULL cadence
-    recap messages. Returns None for quiet races (no strategic moments)
-    or on build failure — the season-recap pipeline must never block.
-
-    Cost note: bundling here replaces the previous standalone Sunday
-    called-recap send, halving WhatsApp message volume on the most-used
-    Sunday surface.
+    recap messages. Returns None on build failure so the season-recap
+    pipeline never blocks.
     """
     from intelligence.called_recap import (
         generate_and_persist_called_recap,

@@ -1,15 +1,9 @@
-"""Post-race "what we called" recap — group-chat-shareable evidence.
+"""Post-race "what we called" recap — shareable evidence card.
 
-The brand-defining live-race surface. RaceMonitor decoded N strategic
-moments during the race; this module surfaces them after the flag as a
-forwardable card: each event with the source-signal timestamp + our
-decode timestamp side by side. The fan supplies the broadcast-timing
-memory; we supply the receipts.
-
-Honest framing: we surface our pipeline latency vs. the OpenF1 source
-signal, not vs. TV broadcast. We don't have broadcast ground truth, and
-inventing a "N seconds before Sky" number would be dishonest. The user
-who watched the race already knows when the broadcast caught up.
+RaceMonitor logs strategic moments during the race; this module renders
+them after the flag as a forwardable card with the source-signal
+timestamp and the decode timestamp side by side. Timestamps are vs.
+the OpenF1 source signal, not vs. TV broadcast.
 """
 
 from __future__ import annotations
@@ -127,17 +121,7 @@ def _event_label(et: RaceEventType) -> str:
 
 
 def render_called_recap_whatsapp(recap: CalledRaceRecap, share_url: str | None) -> str:
-    """Sunday-night forwardable WhatsApp message.
-
-    Honest tone — counts and timestamps, not "we beat Sky." Fans supply
-    the broadcast comparison from memory.
-
-    Quiet-race framing is a *verdict*, not an absence: "we count the
-    moments that mattered — this weekend, zero." That reads as confident
-    judgment rather than missing data, which is the framing the product
-    needs to survive a clean Monaco-style processional race without
-    losing credibility.
-    """
+    """Sunday-night forwardable WhatsApp message."""
     if not recap.moments:
         return (
             f"📡 *{recap.race_label} — zero strategic moments*\n\n"

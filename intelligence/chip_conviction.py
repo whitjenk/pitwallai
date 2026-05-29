@@ -1,14 +1,8 @@
 """Per-window confidence band for chip recommendations.
 
-Mirrors the brand muscle in `intelligence/conviction.py`: a chip window
-gets a Low/Medium/High tier plus the reasons that drove it, so the UI
-can say "Medium confidence · weather-sensitive circuit, race is 6+
-weekends out" instead of pretending we have a hard EV number.
-
-These bands are heuristic. Until the scorer has a real points-projection
-distribution behind it, the tier is driven by input quality — signal
-strength, circuit variance, data maturity — not by σ. That matches how
-`conviction.py` already operates and keeps us honest.
+Each chip window gets a Low/Medium/High tier plus the reasons that drove
+it. Bands are heuristic — the tier is driven by input quality (signal
+strength, circuit variance, data maturity), not a numerical distribution.
 """
 
 from __future__ import annotations

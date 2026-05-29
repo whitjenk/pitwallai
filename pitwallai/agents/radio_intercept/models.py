@@ -82,11 +82,8 @@ class JargonEntry(BaseModel):
 class CompetitorIntel(BaseModel):
     """Intelligence extracted about a rival team or driver.
 
-    The old three-state confirmation flow (UNCONFIRMED → ACKNOWLEDGED →
-    ACTED_ON) collapsed to a single ``verified`` boolean — that state
-    machine assumed a user acting on live signals, which the live-race
-    product no longer does. Verified means a human (ops or the dashboard)
-    has confirmed the intel; everything else is unverified.
+    ``verified`` is set by an operator (via the dashboard or the
+    /api/intel/confirm endpoint). Everything else is unverified.
     """
 
     model_config = ConfigDict(frozen=True)

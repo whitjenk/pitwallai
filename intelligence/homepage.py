@@ -1,16 +1,12 @@
 """Public marketing homepage at `/`.
 
-Three honest live numbers above the fold: active subscribers, season
-GP hit rate, races scored. No vs.-the-field comparison until the
-methodology is wired (Phase 2). The page is intentionally one-screen,
-text-first, and screenshottable — designed for the curious player and
-the BD scout, not for the existing subscriber.
+Three live aggregate stats above the fold: active subscribers, season
+GP hit rate, races scored. The page is intentionally one-screen and
+text-first.
 
-Subscriber count is gated behind a reveal threshold (see
-`SUBSCRIBER_REVEAL_THRESHOLD`). Showing "23 subscribers" publicly is
-worse than not showing the raw number — it anchors the brand to a
-volatile early figure and a single unsubscribe events the page. Below
-threshold we show a qualitative "early access" badge instead.
+Subscriber count is gated behind a reveal threshold
+(`PITWALL_SUBSCRIBER_REVEAL_THRESHOLD`). Below threshold the page shows
+a qualitative state instead of a raw number.
 """
 
 from __future__ import annotations
@@ -19,9 +15,6 @@ import os
 from html import escape
 
 
-# Default reveal threshold. Override via PITWALL_SUBSCRIBER_REVEAL_THRESHOLD.
-# 250 picked as the floor where weekly volatility is dominated by trend
-# rather than churn noise.
 _DEFAULT_SUBSCRIBER_REVEAL_THRESHOLD = 250
 
 
@@ -177,9 +170,6 @@ def render_homepage_html(stats: dict[str, int | float]) -> str:
         else "no races scored yet"
     )
 
-    # Reveal the raw subscriber count only above threshold. Below it,
-    # show a qualitative "early access" label so weekly churn noise can't
-    # downgrade the public brand. See module docstring.
     reveal_threshold = _subscriber_reveal_threshold()
     if subs >= reveal_threshold:
         subs_html = f"{subs:,}"

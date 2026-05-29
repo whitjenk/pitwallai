@@ -1,13 +1,9 @@
 """Onboarding funnel telemetry.
 
-Three-step funnel: SUBSCRIBE → team set → first picks received. Drop-off
-at any step is operationally critical — the screenshot OCR is the most
-fragile dependency in the product (the F1 Fantasy app changes the My
-Team UI, our parser silently breaks, activation falls to zero overnight).
-
-This module computes the funnel and emits a warning when the completion
-rate dips below a configurable threshold. Routing the warning to PagerDuty
-or Slack is up to ops — `loguru.bind(...).warning(...)` is the contract.
+Three-step funnel: SUBSCRIBE → team set → first picks received. Computes
+the funnel and emits a structured warning when the completion rate dips
+below a configurable threshold so operators can route an alert via their
+existing log pipeline.
 """
 
 from __future__ import annotations

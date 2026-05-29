@@ -104,14 +104,7 @@ class UrgencyLevel(str, Enum):
 
 
 class StreamEventType(str, Enum):
-    """WebSocket event types for dashboard streaming.
-
-    `LATENCY_BREACH` was removed when the 800ms decode contract was
-    retired — latency is now soft telemetry surfaced via bench.py only.
-    `COMPETITOR_INTEL_UNCONFIRMED` was renamed to ``UNVERIFIED`` when the
-    three-state confirmation flow (UNCONFIRMED → ACKNOWLEDGED → ACTED_ON)
-    collapsed to a single ``verified`` boolean on CompetitorIntel.
-    """
+    """WebSocket event types for dashboard streaming."""
 
     TRANSMISSION_DECODED = "TRANSMISSION_DECODED"
     COMPETITOR_INTEL_UNVERIFIED = "COMPETITOR_INTEL_UNVERIFIED"

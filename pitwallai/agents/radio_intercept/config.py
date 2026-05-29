@@ -159,10 +159,8 @@ class PitWallSettings:
             ws_max_connections=max(1, int(os.getenv("PITWALL_WS_MAX_CONNECTIONS", "32"))),
             log_transcripts=os.getenv("PITWALL_LOG_TRANSCRIPTS", "false").lower() == "true",
             llm_budget_acknowledged=budget_ack,
-            # Cost-tuned defaults (lowered pre-launch). Non-race days call
-            # zero LLMs; a race weekend uses 5 sessions × ~8 calls each on
-            # the hybrid path. Keep envs available for an ops dial-up when
-            # a chaotic weekend justifies the spend.
+            # Conservative defaults — override via env when a weekend
+            # justifies more headroom.
             llm_max_calls_per_session=max(0, int(os.getenv("PITWALL_LLM_MAX_CALLS_PER_SESSION", "8"))),
             llm_max_calls_per_minute=max(1, int(os.getenv("PITWALL_LLM_MAX_CALLS_PER_MINUTE", "4"))),
             llm_max_calls_per_hour=max(1, int(os.getenv("PITWALL_LLM_MAX_CALLS_PER_HOUR", "20"))),

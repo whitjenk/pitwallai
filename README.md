@@ -10,7 +10,7 @@ PitWallAI is an open-source multi-agent intelligence system that delivers person
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![CI](https://github.com/whitjenk/pitwallai/actions/workflows/ci.yml/badge.svg)](https://github.com/whitjenk/pitwallai/actions/workflows/ci.yml)
+[![CI](https://github.com/whitjenk/f1-tactical-intelligence-hive/actions/workflows/ci.yml/badge.svg)](https://github.com/whitjenk/f1-tactical-intelligence-hive/actions/workflows/ci.yml)
 [![OpenF1](https://img.shields.io/badge/OpenF1-WebSocket-red)](https://openf1.org/)
 
 ---
@@ -54,8 +54,8 @@ Picks are scored against **Grand Prix race results** using the official F1 Fanta
 No API key required for the Monaco rehearsal demo:
 
 ```bash
-git clone https://github.com/whitjenk/pitwallai.git
-cd pitwallai
+git clone https://github.com/whitjenk/f1-tactical-intelligence-hive.git
+cd f1-tactical-intelligence-hive
 python3.11 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 python main.py --mode rehearsal --speed 3.0

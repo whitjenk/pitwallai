@@ -298,9 +298,12 @@ async def send_chip_detail(phone: str, chip_raw: str) -> str:
     if not matches:
         return _truncate(f"No strong {chip.value} window in remaining races.")
     best = max(matches, key=lambda w: w.confidence)
+    # The window score is a circuit-profile + calendar-timing heuristic, not
+    # a points-projection probability — surface it as a fit tier, not a
+    # false-precision percentage.
     return _with_verify_guard(
         f"🎴 {chip.value} — {best.race_name}\n"
-        f"Confidence {best.confidence:.0%} ({best.priority})\n"
+        f"Circuit fit: {best.confidence_tier.value}\n"
         f"{best.reasoning}\n"
         f"Sprint: {'yes' if best.is_sprint else 'no'}",
         300,

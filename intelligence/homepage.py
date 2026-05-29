@@ -243,7 +243,7 @@ def render_homepage_html(stats: dict[str, int | float]) -> str:
     <div class="links">
       <a href="/sample">See a sample pick + recap</a>
       <a href="/results">Season hit-rate page</a>
-      <a href="https://github.com/whitjenk/pitwallai">Open-source repo</a>
+      <a href="https://github.com/whitjenk/f1-tactical-intelligence-hive">Open-source repo</a>
     </div>
   </div>
 

@@ -129,7 +129,7 @@ ALO 0.4s off pace on hards in FP2.
 Predicted Δ: +9 pts. Confidence 78%.
 
 🎴 Chip note
-Hold Limitless — Monaco next week scores stronger.
+Hold Limitless — Monaco next week is a better circuit fit.
 
 ──────────────────
 PitWallAI · Not financial advice"""

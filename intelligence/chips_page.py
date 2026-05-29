@@ -27,7 +27,7 @@ def render_chips_share_html(plan: ChipPlan) -> str:
         tier = w.confidence_tier.value
         reasons = "; ".join(w.confidence_reasons[:2]) if w.confidence_reasons else ""
         band = (
-            f'<div class="band"><span class="band-label {tier}">{tier} confidence</span>'
+            f'<div class="band"><span class="band-label {tier}">{tier} circuit fit</span>'
             f"{' · ' + escape(reasons) if reasons else ''}</div>"
         )
         rows += (
@@ -39,8 +39,8 @@ def render_chips_share_html(plan: ChipPlan) -> str:
     window_count = len(plan.windows)
     og_title = "PitWallAI · Chip plan"
     og_desc = (
-        f"Per-race chip windows for the remaining season — "
-        f"{window_count} race{'s' if window_count != 1 else ''} scored with confidence bands."
+        f"Circuit-informed chip windows for the remaining season — "
+        f"{window_count} race{'s' if window_count != 1 else ''} ranked by circuit fit."
     )
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
@@ -55,6 +55,12 @@ def render_chips_share_html(plan: ChipPlan) -> str:
 <style>{_CHIPS_CSS}</style></head>
 <body><main class="wrap"><article class="card">
 <h1>Chip plan</h1>{rows}
+<div class="row" style="color:#8b949e;font-size:11px">
+ℹ️ Windows are ranked on circuit characteristics (tyre deg, overtaking,
+weather and safety-car history) and where each race sits in the remaining
+calendar — not a points projection. "Circuit fit" is a heuristic guide, not
+a probability.
+</div>
 <div class="row" style="color:#8b949e;font-size:11px">
 🔍 Verify in the F1 Fantasy app before lock. Official game rules are authoritative.
 </div>

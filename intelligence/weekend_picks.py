@@ -23,6 +23,7 @@ from intelligence.repository import (
     get_latest_team_value_snapshot,
     load_practice_signals,
 )
+from whatsapp.sender import mask_phone
 from intelligence.schemas import PickGeneratorInput, PickOutput
 from openf1.client import OpenF1Client
 from pitwallai.agents.radio_intercept.agent import RadioInterceptAgent
@@ -132,7 +133,7 @@ async def generate_picks_for_weekend(
             if stored is not None and abs(snap.effective_budget - stored) > 0.5:
                 logger.info(
                     "effective_budget differs from stored phone={} stored={} calc={}",
-                    phone[:6],
+                    mask_phone(phone),
                     stored,
                     snap.effective_budget,
                 )

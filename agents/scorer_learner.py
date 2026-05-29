@@ -24,6 +24,7 @@ from intelligence.repository import (
 from intelligence.season_recap import build_season_recap
 from intelligence.scorer import _fetch_final_positions, _points_for_position
 from openf1.client import OpenF1Client
+from whatsapp.sender import mask_phone
 from orchestrator.race_context import (
     SignalQuality,
     SignalQualityEntry,
@@ -307,7 +308,7 @@ async def run_scorer_and_learner(
             await generate_share_card(phone, race_key)
             await track_team_value(phone, race_key)
         except Exception as exc:
-            logger.error("post-score share/value failed phone={}: {}", phone[:6], exc)
+            logger.error("post-score share/value failed phone={}: {}", mask_phone(phone), exc)
 
     await _broadcast_recap(
         new_ctx,

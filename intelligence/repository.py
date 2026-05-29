@@ -865,36 +865,6 @@ async def build_signal_quality_from_db(circuit_key: str) -> SignalQuality | None
     return SignalQuality(entries=entries)
 
 
-async def was_inbound_message_processed(message_id: str) -> bool:
-    """True when this inbound WhatsApp message_id was already handled."""
-    if not message_id.strip():
-        return False
-    await _maybe_prune_security_tables()
-    try:
-        async with get_session() as session:
-            row = await session.get(ProcessedInboundMessage, message_id)
-            return row is not None
-    except ValueError:
-        return message_id in _FALLBACK_SEEN_MESSAGES
-
-
-async def mark_inbound_message_processed(message_id: str) -> None:
-    """Record successful handling for webhook deduplication."""
-    if not message_id.strip():
-        return
-    await _maybe_prune_security_tables()
-    try:
-        async with get_session() as session:
-            session.add(ProcessedInboundMessage(message_id=message_id))
-            try:
-                await session.flush()
-            except IntegrityError:
-                # Already recorded by another worker/request.
-                await session.rollback()
-    except ValueError:
-        _FALLBACK_SEEN_MESSAGES.add(message_id)
-
-
 async def can_send_live_alert(
     race_key: str,
     phone: str,

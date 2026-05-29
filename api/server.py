@@ -536,6 +536,20 @@ def create_app(
                 payload["pick_explanation_cards"] = previews
         return payload
 
+    @app.get(
+        "/api/onboarding/metrics",
+        dependencies=[Depends(require_picks_api_key)],
+    )
+    async def onboarding_metrics_endpoint() -> dict[str, Any]:
+        """Operator-only onboarding funnel snapshot + alert state."""
+        from dataclasses import asdict
+        from intelligence.onboarding_metrics import (
+            check_and_alert_onboarding_funnel,
+        )
+
+        funnel = await check_and_alert_onboarding_funnel()
+        return asdict(funnel)
+
     @app.post(
         "/api/intel/confirm/{transmission_id}",
         dependencies=[Depends(require_picks_api_key)],

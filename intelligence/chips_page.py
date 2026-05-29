@@ -55,6 +55,9 @@ def render_chips_share_html(plan: ChipPlan) -> str:
 <style>{_CHIPS_CSS}</style></head>
 <body><main class="wrap"><article class="card">
 <h1>Chip plan</h1>{rows}
+<div class="row" style="color:#8b949e;font-size:11px">
+🔍 Verify in the F1 Fantasy app before lock. Official game rules are authoritative.
+</div>
 </article></main></body></html>"""
 
 

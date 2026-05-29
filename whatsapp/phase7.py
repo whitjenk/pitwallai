@@ -298,7 +298,7 @@ async def send_chip_detail(phone: str, chip_raw: str) -> str:
     if not matches:
         return _truncate(f"No strong {chip.value} window in remaining races.")
     best = max(matches, key=lambda w: w.confidence)
-    return _truncate(
+    return _with_verify_guard(
         f"🎴 {chip.value} — {best.race_name}\n"
         f"Confidence {best.confidence:.0%} ({best.priority})\n"
         f"{best.reasoning}\n"
@@ -315,20 +315,23 @@ async def send_transfers_status(phone: str) -> str:
         return _truncate("Text TEAM to set up your squad.")
     n = team.transfers_available
     if n == 3:
-        return _truncate(
+        return _with_verify_guard(
             "🔄 Transfers: you have 3 banked\n"
             "⚠️ At the cap — new transfers won't accumulate. "
             "Consider using one this weekend.",
+            300,
         )
     if n == 0:
-        return _truncate(
+        return _with_verify_guard(
             f"🔄 Transfers: you have 0 banked\n"
             f"No transfers banked. Using one this weekend costs "
             f"-{PENALTY_EXTRA_TRANSFER_PTS}pts.",
+            300,
         )
-    return _truncate(
+    return _with_verify_guard(
         f"🔄 Transfers: you have {n} banked\n"
         f"{n} available. Each unused banks for next race (max 3).",
+        300,
     )
 
 

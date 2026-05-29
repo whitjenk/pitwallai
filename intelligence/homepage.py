@@ -5,11 +5,31 @@ GP hit rate, races scored. No vs.-the-field comparison until the
 methodology is wired (Phase 2). The page is intentionally one-screen,
 text-first, and screenshottable — designed for the curious player and
 the BD scout, not for the existing subscriber.
+
+Subscriber count is gated behind a reveal threshold (see
+`SUBSCRIBER_REVEAL_THRESHOLD`). Showing "23 subscribers" publicly is
+worse than not showing the raw number — it anchors the brand to a
+volatile early figure and a single unsubscribe events the page. Below
+threshold we show a qualitative "early access" badge instead.
 """
 
 from __future__ import annotations
 
+import os
 from html import escape
+
+
+# Default reveal threshold. Override via PITWALL_SUBSCRIBER_REVEAL_THRESHOLD.
+# 250 picked as the floor where weekly volatility is dominated by trend
+# rather than churn noise.
+_DEFAULT_SUBSCRIBER_REVEAL_THRESHOLD = 250
+
+
+def _subscriber_reveal_threshold() -> int:
+    raw = os.getenv("PITWALL_SUBSCRIBER_REVEAL_THRESHOLD", "").strip()
+    if raw.isdigit():
+        return max(0, int(raw))
+    return _DEFAULT_SUBSCRIBER_REVEAL_THRESHOLD
 
 
 _HOMEPAGE_CSS = """
@@ -157,8 +177,19 @@ def render_homepage_html(stats: dict[str, int | float]) -> str:
         else "no races scored yet"
     )
 
-    subs_html = f"{subs:,}" if subs > 0 else "—"
-    subs_sub = "on WhatsApp" if subs > 0 else "pre-launch"
+    # Reveal the raw subscriber count only above threshold. Below it,
+    # show a qualitative "early access" label so weekly churn noise can't
+    # downgrade the public brand. See module docstring.
+    reveal_threshold = _subscriber_reveal_threshold()
+    if subs >= reveal_threshold:
+        subs_html = f"{subs:,}"
+        subs_sub = "on WhatsApp"
+    elif subs > 0:
+        subs_html = "Early"
+        subs_sub = "invite-only ramp"
+    else:
+        subs_html = "—"
+        subs_sub = "pre-launch"
 
     races_html = f"{races_scored}" if races_scored > 0 else "—"
     races_sub = "this season" if races_scored > 0 else "season opens soon"

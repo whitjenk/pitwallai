@@ -82,11 +82,13 @@ def test_median_decode_latency() -> None:
 
 
 def test_quiet_race_whatsapp_message() -> None:
+    """Quiet races render as a verdict ('moments that mattered'), not as
+    missing data — see the quieter-framing rework."""
     recap = build_called_recap(
         race_key="2026_test", race_label="Test GP", events=[]
     )
     msg = render_called_recap_whatsapp(recap, share_url=None)
-    assert "quiet race" in msg.lower()
+    assert "zero strategic moments" in msg
     assert "Not financial advice" in msg
 
 
@@ -118,11 +120,12 @@ def test_share_page_renders_with_evidence_timestamps() -> None:
 
 
 def test_share_page_empty_state() -> None:
+    """Empty share page also reads as a verdict, not an absence."""
     recap = build_called_recap(
         race_key="2026_test", race_label="Test GP", events=[]
     )
     html = render_called_recap_share_html(recap)
-    assert "Quiet race" in html
+    assert "moments that mattered" in html
 
 
 def test_json_round_trip_preserves_moments() -> None:

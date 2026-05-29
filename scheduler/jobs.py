@@ -44,12 +44,12 @@ def _strategist():
 
 
 async def job_practice_analysis(race_key: str) -> None:
-    """Agent 2 — practice analyst."""
+    """PicksAgent stage 2/3 — practice analysis."""
     await _strategist().run_practice_analyst(race_key)
 
 
 async def job_quali_broadcast(race_key: str) -> None:
-    """Agent 3 — quali strategist + WhatsApp broadcast."""
+    """PicksAgent stage 3/3 — quali picks + WhatsApp broadcast."""
     from fantasy.rules import DRIVER_PRICES_M
     from intelligence.cache_health import check_signal_cache_health
     from loguru import logger as log
@@ -66,17 +66,17 @@ async def job_quali_broadcast(race_key: str) -> None:
 
 
 async def job_race_monitor_start(race_key: str) -> None:
-    """Agent 4 — live race monitor."""
+    """RaceMonitor — Sunday live race watching."""
     await _strategist().run_race_monitor(race_key)
 
 
 async def job_post_race_scorer(race_key: str) -> None:
-    """Agent 5 — scorer and learner."""
+    """ScorerLearner — post-race scoring + eval harness."""
     await _strategist().run_scorer_and_learner(race_key)
 
 
 async def job_thursday_context(race_key: str) -> None:
-    """Agent 1 — context build; sprint weekends use sprint playbook broadcast."""
+    """PicksAgent stage 1/3 — context build; sprint weekends use sprint playbook."""
     weekend = get_race_weekend(race_key)
     if weekend is not None and weekend.is_sprint:
         from whatsapp.phase7 import broadcast_sprint_playbook

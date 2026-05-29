@@ -19,7 +19,7 @@ import os
 
 # Bump these explicitly in PRs that change behaviour.
 PROMPT_VERSION = "2026-bet1-cards-v2"  # bumped: bands + field_angle rename
-PIPELINE_VERSION = "5-agent-v1"         # consolidation will bump this
+PIPELINE_VERSION = "3-agent-v1"         # PicksAgent (3 stages) + RaceMonitor + ScorerLearner
 DEFAULT_MODEL_VERSION = "gemini-2.0-flash"
 
 

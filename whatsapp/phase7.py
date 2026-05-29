@@ -50,6 +50,25 @@ def _truncate(text: str, limit: int) -> str:
     return text[: limit - 3] + "…"
 
 
+# Verify-in-official-app guard. Required on every chip / transfer
+# recommendation surface because our fantasy/rules.py is a snapshot of
+# the official game rules — when the game patches mid-season, our
+# advice can lag by a race or two. The official app is authoritative;
+# the user should always confirm before lock.
+_VERIFY_GUARD = "🔍 Verify in F1 Fantasy app before lock."
+
+
+def _with_verify_guard(body: str, limit: int) -> str:
+    """Truncate body and append the verify-in-app guard, fitting `limit` chars.
+
+    The guard is non-negotiable — if the body would push the message
+    over the limit, the body is truncated to make room.
+    """
+    suffix = "\n\n" + _VERIFY_GUARD
+    body_budget = max(0, limit - len(suffix))
+    return _truncate(body, body_budget) + suffix
+
+
 def _lock_time_local(weekend: RaceWeekend, timezone: str) -> str:
     tz = ZoneInfo(timezone)
     lock = weekend.fantasy_lock_utc.astimezone(tz)
@@ -255,7 +274,7 @@ async def send_chips_summary(phone: str) -> str:
         label = wk.display_name if wk else rk
         seq_lines.append(f"{chip} → {label}")
     seq_txt = "\n".join(seq_lines) if seq_lines else "No unused chips scored highly."
-    return _truncate(
+    return _with_verify_guard(
         f"🎴 Chip plan for remaining {remaining} races\n\n"
         f"📅 Recommended sequence:\n{seq_txt}\n\n"
         f"Full plan: pitwallai.app/chips/{plan.share_token}\n"
@@ -279,9 +298,12 @@ async def send_chip_detail(phone: str, chip_raw: str) -> str:
     if not matches:
         return _truncate(f"No strong {chip.value} window in remaining races.")
     best = max(matches, key=lambda w: w.confidence)
-    return _truncate(
+    # The window score is a circuit-profile + calendar-timing heuristic, not
+    # a points-projection probability — surface it as a fit tier, not a
+    # false-precision percentage.
+    return _with_verify_guard(
         f"🎴 {chip.value} — {best.race_name}\n"
-        f"Confidence {best.confidence:.0%} ({best.priority})\n"
+        f"Circuit fit: {best.confidence_tier.value}\n"
         f"{best.reasoning}\n"
         f"Sprint: {'yes' if best.is_sprint else 'no'}",
         300,
@@ -296,20 +318,23 @@ async def send_transfers_status(phone: str) -> str:
         return _truncate("Text TEAM to set up your squad.")
     n = team.transfers_available
     if n == 3:
-        return _truncate(
+        return _with_verify_guard(
             "🔄 Transfers: you have 3 banked\n"
             "⚠️ At the cap — new transfers won't accumulate. "
             "Consider using one this weekend.",
+            300,
         )
     if n == 0:
-        return _truncate(
+        return _with_verify_guard(
             f"🔄 Transfers: you have 0 banked\n"
             f"No transfers banked. Using one this weekend costs "
             f"-{PENALTY_EXTRA_TRANSFER_PTS}pts.",
+            300,
         )
-    return _truncate(
+    return _with_verify_guard(
         f"🔄 Transfers: you have {n} banked\n"
         f"{n} available. Each unused banks for next race (max 3).",
+        300,
     )
 
 

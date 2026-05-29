@@ -10,18 +10,20 @@ Developer-facing documentation for the radio intercept pipeline, WhatsApp integr
 |-----------|--------|
 | Radio Intercept Decoder + dashboard | Shipped |
 | Monaco rehearsal scenario | Shipped |
-| WhatsApp webhook, commands, `send_message` | Shipped |
+| WhatsApp webhook, command router, `send_message` | Shipped |
 | Postgres subscriber schema + Fernet BYOK | Shipped |
-| Context Builder | Planned |
-| Practice Analyst (FP1/FP2 + anomalies) | Shipped |
+| **3-agent weekend pipeline** (`PIPELINE_VERSION=3-agent-v1`) | Shipped |
+| PicksAgent — context stage (Thursday) | Shipped |
+| PicksAgent — practice stage (FP1/FP2 + anomalies) | Shipped |
+| PicksAgent — quali stage (pre-lock picks + broadcast) | Shipped |
+| RaceMonitor (Sunday live alerts) | Shipped |
+| ScorerLearner (post-race scoring + signal quality) | Shipped |
 | Pick generator (PATH A/B) + audit log | Shipped |
 | `/api/picks` + scheduled picks job | Shipped |
 | APScheduler race calendar + WhatsApp broadcast | Shipped |
-| Post-race scorer + recap broadcast | Shipped |
-| Lead Strategist + Agents 1–5 (Phase 6) | Shipped |
-| Quali Strategist | Planned |
-| Scorer + season leaderboard | Planned |
-| `TEAM` fantasy setup command | Shipped |
+| Screenshot team onboarding (Gemini Vision) | Shipped |
+| `TEAM` / `UPDATE` fantasy setup commands | Shipped |
+| App-review hygiene (vision caps, media validation, claim-then-process webhook, `PRIVACY.md`) | Shipped |
 
 ---
 
@@ -99,7 +101,17 @@ Set `PITWALL_DECODE_BACKEND=hybrid` to escalate only low-confidence decodes. Har
 
 Factory: `pitwallai/agents/radio_intercept/model_factory.py` → `get_model(provider, api_key)`.
 
-New agents should use: typed `AgentDependencies`, `RunContext`-scoped tools, Pydantic v2 output, `asyncio` throughout. Additional agents can subscribe to the decoder fan-out queue without modifying the consumer.
+Weekend orchestration uses **three named agents** (`agents/__init__.py`, `agents/picks_agent.py`):
+
+| Agent | Module(s) | Notes |
+|-------|-----------|-------|
+| **PicksAgent** | `context_builder.py`, `practice_analyst.py`, `quali_strategist.py` | Three **stages** (`PicksStage`: `context` → `practice` → `quali`), one versioned interface |
+| **RaceMonitor** | `race_monitor.py` | Sunday live loop; separate 800ms decode contract |
+| **ScorerLearner** | `scorer_learner.py` | Post-race scoring, season accuracy, signal-quality weights |
+
+`LeadStrategist` (`orchestrator/lead_strategist.py`) coordinates all three. Bump `PIPELINE_VERSION` in `pitwallai/version.py` when topology or stage behaviour changes.
+
+Radio decode uses typed `AgentDependencies`, `RunContext`-scoped tools, Pydantic v2 output, `asyncio` throughout. Additional consumers can subscribe to the decoder fan-out queue without modifying the consumer.
 
 ---
 
@@ -125,6 +137,8 @@ Copy `.env.example` to `.env`.
 | Picks API | `PITWALL_PICKS_API_KEY` | Protects `/api/picks` (required for `?phone=` personalized access) |
 | Security | `ENCRYPTION_KEY` | Fernet for BYOK keys at rest |
 | Database | `DATABASE_URL` | Postgres (Railway injects in prod) |
+| Vision caps | `PITWALL_VISION_MAX_PER_PHONE_HOUR`, `PITWALL_VISION_MAX_GLOBAL_DAY` | Screenshot / standings extractors |
+| Dev webhook | `PITWALL_DEV_ONLY_SKIP_WEBHOOK_SIGNATURE` | Local only; ignored when `mode=live` |
 
 Generate Fernet key:
 
@@ -154,18 +168,27 @@ Settings load via `whatsapp/settings.py` (`WhatsAppSettings`, pydantic-settings)
 **Webhook** (registered on `main:app`):
 
 - `GET /webhook` — Meta verify (`hub.mode`, `hub.verify_token`, `hub.challenge`)
-- `POST /webhook` — returns 200 immediately; processes inbound messages in background. Requires `WHATSAPP_APP_SECRET` and valid `X-Hub-Signature-256` (HMAC-SHA256 of raw body). Set `PITWALL_WEBHOOK_SKIP_SIGNATURE=1` for local dev only (ignored in `live` mode). Inbound `message_id` values are deduplicated in DB for safe retries across instances, with retention pruning.
+- `POST /webhook` — returns 200 immediately; processes inbound messages in background. Requires `WHATSAPP_APP_SECRET` and valid `X-Hub-Signature-256` (HMAC-SHA256 of raw body). Set `PITWALL_DEV_ONLY_SKIP_WEBHOOK_SIGNATURE=1` for local dev only (legacy alias `PITWALL_WEBHOOK_SKIP_SIGNATURE`; ignored when `mode=live`). Logs a warning when signature verification is skipped.
 
-**Commands** (`whatsapp/commands.py`):
+**Idempotency:** claim-then-process via `claim_inbound_message()` → handler → `complete_inbound_message()` on `processed_inbound_messages` (`status=claimed` → `done`, stale reclaim after 5 min). Safe under Meta’s multi-day retries.
+
+**Inbound images:** `whatsapp/inbound_image.py` — when `pending_screenshot_state` is set (DB-backed, TTL per kind), downloads media (`whatsapp/media.py`: magic-byte validation, 8 MiB reject, Meta CDN host allowlist), runs vision extractors under `intelligence/vision_budget.py` caps, saves team or league standings.
+
+**Commands** — `whatsapp/inbound.py` (onboarding flows) + `whatsapp/command_router.py` (structured commands in `whatsapp/commands/`):
 
 | Command | Behavior |
 |---------|----------|
-| `SUBSCRIBE` | Prompt for IANA timezone → create subscriber row |
-| `UNSUBSCRIBE` | `active=False` (soft delete) |
-| `HELP` | Command list (≤160 chars) |
-| `SETTINGS` | Link to BYOK settings page |
+| `SUBSCRIBE` | Infer timezone from country code; unknown codes get IANA prompt (`pending_timezone_state`, 24h TTL) |
+| `TIMEZONE Europe/London` | Override timezone explicitly |
+| `UNSUBSCRIBE` | `active=False` (soft delete); mentions `DELETE` |
+| `DELETE` | Hard-delete all subscriber-linked rows — see [PRIVACY.md](PRIVACY.md) |
+| `TEAM` / screenshot | Progressive fantasy team setup (text or vision) |
+| `HELP` | Command list |
+| `PICKS`, `HISTORY`, `STREAK`, driver codes, `SHARE`, `LIVE ON/OFF`, … | See `whatsapp/commands/` |
 
-**Outbound:** `whatsapp/sender.py` → `send_message(phone, text)` with exponential backoff on 429/5xx (max 3 retries).
+**Outbound:** `whatsapp/sender.py` → `send_message(phone, text)` with exponential backoff on 429/5xx (max 3 retries). Phone numbers masked in logs via `mask_phone()`.
+
+**Local simulator:** `python scripts/whatsapp_chat.py` (patches `send_message` to stdout).
 
 Local verify:
 
@@ -225,27 +248,37 @@ Active weekend detection uses OpenF1 Race sessions nearest to “now”, unless 
 
 | Job | Trigger | Action |
 |-----|---------|--------|
-| `thursday_context` | race − 72h | Agent 1 stub (logs, no-op) |
-| `practice_analysis` | FP2 + 90min | FP1/FP2 practice analyst |
-| `quali_broadcast` | fantasy_lock − 3h | `broadcast_race_picks()` |
-| `race_monitor_start` | race − 5min | Agent 4 stub |
-| `post_race_scorer` | race + 3h | `score_race()` + `broadcast_race_recap()` |
+| `thursday_context` | race − 72h | PicksAgent `context` stage (+ sprint/banked-transfer broadcasts) |
+| `practice_analysis` | FP2 + 90min | PicksAgent `practice` stage |
+| `quali_broadcast` | fantasy_lock − 3h | PicksAgent `quali` stage → `broadcast_race_picks()` |
+| `race_monitor_start` | race − 5min | **RaceMonitor** |
+| `post_race_scorer` | race + 3h | **ScorerLearner** → recap broadcast |
 
 Jobs persist in Postgres table `apscheduler_jobs` (same `DATABASE_URL`, sync driver). Stable IDs `{race_key}:{job}` + `replace_existing=True` prevent duplicates on Railway restart.
 
 **WhatsApp broadcast** — `whatsapp/broadcast.py` + `whatsapp/message_format.py` (mandatory char assertions: 400 / 350 / 300). Subscriber timezone used only at send time for “hrs to lock”.
 
-**Scoring** — `agents/scorer_learner.py` (Agent 5) scores driver picks vs **Grand Prix race results** only (official race points scale; see `recap_metrics.PICK_SCORING_SCOPE`). Rolls up `season_accuracy` (GP pick hit rate) and writes `signal_quality` weights. User-facing copy says “GP hit rate”, not generic “accuracy”.
+**Scoring** — `agents/scorer_learner.py` (**ScorerLearner**) scores driver picks vs **Grand Prix race results** only (official race points scale; see `recap_metrics.PICK_SCORING_SCOPE`). Rolls up `season_accuracy` (GP pick hit rate) and writes `signal_quality` weights. User-facing copy says “GP hit rate”, not generic “accuracy”.
 
-**Orchestration (Phase 6)** — `orchestrator/lead_strategist.py` holds immutable `RaceContext` (`evolve_race_context()` / `model_copy`). Scheduler jobs delegate to:
+**Orchestration** — `orchestrator/lead_strategist.py` holds immutable `RaceContext` (`evolve_race_context()` / `model_copy`). Scheduler jobs call `LeadStrategist` methods, which delegate to `PicksAgent.run_stage()`, `run_race_monitor()`, or `run_scorer_and_learner()`:
 
-| Agent | Module | Trigger |
-|-------|--------|---------|
-| 1 Context Builder | `agents/context_builder.py` | Thursday |
-| 2 Practice Analyst | `agents/practice_analyst.py` | FP2 + 90min |
-| 3 Quali Strategist | `agents/quali_strategist.py` | Pre-lock |
-| 4 Race Monitor | `agents/race_monitor.py` | Race − 5min (long-lived) |
-| 5 Scorer/Learner | `agents/scorer_learner.py` | Race + 3h |
+| Agent | Stage / role | Module | Trigger |
+|-------|----------------|--------|---------|
+| **PicksAgent** | `context` | `agents/context_builder.py` | Thursday |
+| **PicksAgent** | `practice` | `agents/practice_analyst.py` | FP2 + 90min |
+| **PicksAgent** | `quali` | `agents/quali_strategist.py` | Pre-lock |
+| **RaceMonitor** | — | `agents/race_monitor.py` | Race − 5min (long-lived) |
+| **ScorerLearner** | — | `agents/scorer_learner.py` | Race + 3h |
+
+Stage functions remain separately testable; `PicksAgent` is the named, versioned interface (`agents/picks_agent.py`). Logs and `run_meta()` carry `pipeline_version` + stage tags for calibration attribution.
+
+**Durable onboarding state** (Postgres, multi-worker safe):
+
+| Table | Purpose | TTL |
+|-------|---------|-----|
+| `pending_screenshot_state` | Awaiting team / locked-team / standings image | 48h / 36h / 72h |
+| `pending_timezone_state` | Awaiting manual IANA timezone | 24h |
+| `vision_call_log` | Per-phone hourly + global daily vision caps | Rolling |
 
 Subscriber prefs: `live_alerts`, `cadence_preference` (`FULL` / `RACE_DAY_ONLY`). Commands: `LIVE ON/OFF`, `CADENCE FULL/RACEDAY`.
 
@@ -295,24 +328,29 @@ Set `DATABASE_URL`, WhatsApp vars, and `PITWALL_MODE` in the Railway dashboard. 
 ## Repository layout (core)
 
 ```
-pitwallai/agents/radio_intercept/   # decode pipeline, agents, models
-intelligence/                       # practice analyst, pick generator, picks pipeline
+agents/                             # PicksAgent, RaceMonitor, ScorerLearner (+ stage modules)
+pitwallai/agents/radio_intercept/   # Radio Intercept Decoder (separate from weekend agents)
+orchestrator/                       # LeadStrategist, RaceContext store
+intelligence/                       # pick generator, vision extractors, repository, cache health
 openf1/                             # REST client + Postgres cache
 circuits/                           # static circuit profiles (startup-injected)
 api/                                # FastAPI app factory, picks router, rehearsal
-whatsapp/                           # webhook, commands, sender, settings
-db/                                 # Subscriber ORM, async session, Fernet
+whatsapp/                           # webhook, inbound, command_router, sender, media
+db/                                 # ORM models, migrate, Fernet
+scheduler/                          # APScheduler jobs → LeadStrategist
 main.py                             # ASGI entry (uvicorn main:app)
 dashboard.jsx                       # strategist / demo UI
 bench.py                            # latency benchmark
-tests/                              # e2e, resilience, llm contracts, ws stress
+scripts/whatsapp_chat.py            # terminal command simulator
+tests/                              # e2e, resilience, integration image flow, erase audit
+PRIVACY.md                          # data handling + DELETE scope (app review)
 ```
 
 ---
 
 ## Contributing
 
-Open an issue before starting a new agent. Follow the contracts above; see `tests/` for regression patterns.
+The weekend surface is **three agents** — extend an existing `PicksStage` or agent before proposing a fourth top-level agent. Follow typed `AgentRunDependencies`, Pydantic v2 outputs, and bump `PROMPT_VERSION` / `PIPELINE_VERSION` in `pitwallai/version.py` when user-facing or pipeline behaviour changes. See `tests/` for regression patterns (`test_integration_image_flow.py`, `test_erase_subscriber.py`, `test_mask_phone_audit.py`).
 
 ## License
 

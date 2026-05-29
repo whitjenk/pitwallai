@@ -310,10 +310,13 @@ async def run_scorer_and_learner(
         except Exception as exc:
             logger.error("post-score share/value failed phone={}: {}", mask_phone(phone), exc)
 
+    called_tail = await _build_called_recap_tail(new_ctx)
+
     await _broadcast_recap(
         new_ctx,
         overall,
         signal_quality.quality_note,
+        called_tail=called_tail,
         share_secret=(
             deps.settings.whatsapp_app_secret
             or deps.settings.webhook_verify_token
@@ -352,6 +355,7 @@ async def _broadcast_recap(
     quality_note: str | None,
     *,
     share_secret: str,
+    called_tail: str | None = None,
 ) -> None:
     """Post-race recap with optional signal quality note for FULL cadence."""
     from intelligence.repository import get_fantasy_team
@@ -415,6 +419,9 @@ async def _broadcast_recap(
             if len(msg) + len(extra) <= 300:
                 msg = msg + extra
 
+        if called_tail and sub.cadence_preference == CadencePreference.FULL.value:
+            msg = msg + "\n\n" + called_tail
+
         try:
             await send_message(sub.phone, msg)
             if season_finale:
@@ -436,3 +443,30 @@ async def _broadcast_recap(
                 await send_message(sub.phone, season_msg)
         except Exception as exc:
             logger.error("Recap failed phone={}: {}", mask_phone(sub.phone), exc)
+
+
+async def _build_called_recap_tail(ctx: RaceContext) -> str | None:
+    """Build the "what we called" tail bundled into the per-user recap.
+
+    Persists the recap with its share token (so /called/{token} resolves),
+    then returns the WhatsApp-formatted text to append to FULL cadence
+    recap messages. Returns None on build failure so the season-recap
+    pipeline never blocks.
+    """
+    from intelligence.called_recap import (
+        generate_and_persist_called_recap,
+        render_called_recap_whatsapp,
+    )
+
+    race_key = ctx.race_weekend.race_key
+    try:
+        recap = await generate_and_persist_called_recap(
+            race_key=race_key,
+            race_label=ctx.race_weekend.display_name,
+        )
+    except Exception as exc:
+        logger.error("called_recap_build_failed race_key={}: {}", race_key, exc)
+        return None
+
+    share_url = f"https://pitwallai.app/called/{recap.share_token}"
+    return render_called_recap_whatsapp(recap, share_url=share_url)

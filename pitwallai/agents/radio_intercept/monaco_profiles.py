@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pitwallai.agents.radio_intercept.enums import (
-    ConfirmationState,
     RadioIntent,
     StrategicSignal,
     UrgencyLevel,
@@ -53,7 +52,7 @@ def apply_monaco_profile(
                     ),
                     reliability_score=0.91,
                     evidence_transcript=transcript,
-                    confirmation_state=ConfirmationState.UNCONFIRMED,
+                    verified=False,
                 ),
                 "evidence_summary": (
                     "Ferrari pit call on LEC radio matches pre-box historical precedents; "

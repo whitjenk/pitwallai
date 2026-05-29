@@ -54,8 +54,42 @@ jobs:
         env:
           HF_HUB_DISABLE_TELEMETRY: "1"
 
-      - name: Run unit, e2e, and LLM contract tests
-        run: PYTHONPATH=. pytest tests/test_e2e.py tests/test_resilience.py tests/test_llm_contracts.py -v
+      - name: Run full test suite
+        # Whole suite gates the build. The live-server websocket stress test
+        # boots a uvicorn subprocess and is exercised in a separate,
+        # non-gating job below.
+        run: PYTHONPATH=. pytest --ignore=tests/test_ws_stress.py -q
+        env:
+          HF_HUB_DISABLE_TELEMETRY: "1"
+          PITWALL_DECODE_BACKEND: rules
+
+  ws-stress:
+    runs-on: ubuntu-latest
+    # Live-server websocket load test — informational, does not gate merges
+    # (timing-sensitive; boots a real uvicorn on port 8000).
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Pre-download embedding model
+        run: |
+          python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+        env:
+          HF_HUB_DISABLE_TELEMETRY: "1"
+
+      - name: Run websocket stress test
+        run: PYTHONPATH=. pytest tests/test_ws_stress.py -q
         env:
           HF_HUB_DISABLE_TELEMETRY: "1"
           PITWALL_DECODE_BACKEND: rules

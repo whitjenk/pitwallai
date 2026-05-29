@@ -163,7 +163,7 @@ async def test_three_simultaneous_clients_all_receive_events(server_process) -> 
 
     for events in results:
         assert _decoded_count(events) >= 10
-        intel = [e for e in events if e.get("event_type") == "COMPETITOR_INTEL_UNCONFIRMED"]
+        intel = [e for e in events if e.get("event_type") == "COMPETITOR_INTEL_UNVERIFIED"]
         assert len(intel) >= 1
 
 

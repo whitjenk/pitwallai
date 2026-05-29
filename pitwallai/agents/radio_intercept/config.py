@@ -159,14 +159,16 @@ class PitWallSettings:
             ws_max_connections=max(1, int(os.getenv("PITWALL_WS_MAX_CONNECTIONS", "32"))),
             log_transcripts=os.getenv("PITWALL_LOG_TRANSCRIPTS", "false").lower() == "true",
             llm_budget_acknowledged=budget_ack,
-            llm_max_calls_per_session=max(0, int(os.getenv("PITWALL_LLM_MAX_CALLS_PER_SESSION", "12"))),
+            # Conservative defaults — override via env when a weekend
+            # justifies more headroom.
+            llm_max_calls_per_session=max(0, int(os.getenv("PITWALL_LLM_MAX_CALLS_PER_SESSION", "8"))),
             llm_max_calls_per_minute=max(1, int(os.getenv("PITWALL_LLM_MAX_CALLS_PER_MINUTE", "4"))),
-            llm_max_calls_per_hour=max(1, int(os.getenv("PITWALL_LLM_MAX_CALLS_PER_HOUR", "25"))),
-            llm_max_calls_per_day=max(1, int(os.getenv("PITWALL_LLM_MAX_CALLS_PER_DAY", "75"))),
+            llm_max_calls_per_hour=max(1, int(os.getenv("PITWALL_LLM_MAX_CALLS_PER_HOUR", "20"))),
+            llm_max_calls_per_day=max(1, int(os.getenv("PITWALL_LLM_MAX_CALLS_PER_DAY", "50"))),
             llm_max_estimated_usd_per_session=float(
-                os.getenv("PITWALL_LLM_MAX_USD_PER_SESSION", "0.50")
+                os.getenv("PITWALL_LLM_MAX_USD_PER_SESSION", "0.30")
             ),
-            llm_max_estimated_usd_per_day=float(os.getenv("PITWALL_LLM_MAX_USD_PER_DAY", "2.00")),
+            llm_max_estimated_usd_per_day=float(os.getenv("PITWALL_LLM_MAX_USD_PER_DAY", "1.00")),
             llm_estimated_cost_per_call_usd=float(
                 os.getenv("PITWALL_LLM_COST_PER_CALL_USD", "0.02")
             ),

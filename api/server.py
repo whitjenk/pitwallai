@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -16,6 +16,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 from api.picks import router as picks_router
+from api.picks_auth import require_picks_api_key
 from intelligence.season_recap import (
     build_latest_session_snapshot,
     build_season_recap,
@@ -28,7 +29,6 @@ from pitwallai.agents.radio_intercept.agent import RadioInterceptAgent
 from pitwallai.agents.radio_intercept.config import PitWallSettings
 from pitwallai.agents.radio_intercept.decode_utils import is_valid_transmission_id
 from pitwallai.agents.radio_intercept.enums import (
-    ConfirmationState,
     StreamEventType,
     UrgencyLevel,
 )
@@ -50,9 +50,15 @@ STATIC_DIR = PROJECT_ROOT / "api" / "static"
 
 
 class ConfirmIntelBody(BaseModel):
-    """Request body for competitor intel confirmation."""
+    """Request body for competitor intel verification.
 
-    state: ConfirmationState
+    Collapsed from the legacy three-state flow (UNCONFIRMED → ACKNOWLEDGED
+    → ACTED_ON) to a single ``verified`` boolean — the state machine
+    assumed a user acting on live signals, which the live-race product no
+    longer does.
+    """
+
+    verified: bool = True
 
 
 class RehearsalStartBody(BaseModel):
@@ -334,7 +340,10 @@ def create_app(
             "llm_budget": agent.budget_guard.to_public_dict(budget_snap),
         }
 
-    @app.get("/api/budget")
+    @app.get(
+        "/api/budget",
+        dependencies=[Depends(require_picks_api_key)],
+    )
     async def budget_status(
         session_key: int | None = Query(default=None),
     ) -> dict[str, Any]:
@@ -438,15 +447,35 @@ def create_app(
             raise HTTPException(status_code=404, detail="Chip plan not found")
         return HTMLResponse(content=html)
 
+    @app.get("/called/{token}", response_class=HTMLResponse)
+    async def called_recap_page(token: str) -> HTMLResponse:
+        """Public post-race 'what we called' share page."""
+        from intelligence.called_recap_page import render_called_recap_page_for_token
+
+        html = await render_called_recap_page_for_token(token)
+        if html is None:
+            raise HTTPException(status_code=404, detail="Recap not found")
+        return HTMLResponse(content=html)
+
     @app.get("/results", include_in_schema=False)
     async def results_page() -> RedirectResponse:
         """Public season hit-rate page (static HTML)."""
         return RedirectResponse(url="/static/results.html", status_code=302)
 
-    @app.get("/", include_in_schema=False)
-    async def root_redirect():
-        """Send browsers to the dashboard (avoid blank 404 on /)."""
-        return RedirectResponse(url="/dashboard", status_code=302)
+    @app.get("/sample", include_in_schema=False, response_class=HTMLResponse)
+    async def sample_page() -> HTMLResponse:
+        """Public preview of a PitWallAI weekend (pick, recap, called card)."""
+        from intelligence.sample_page import render_sample_page
+
+        return HTMLResponse(content=render_sample_page())
+
+    @app.get("/", include_in_schema=False, response_class=HTMLResponse)
+    async def homepage() -> HTMLResponse:
+        """Public marketing homepage with live aggregate stats."""
+        from intelligence.homepage import render_homepage_for_request
+
+        html = await render_homepage_for_request()
+        return HTMLResponse(content=html)
 
     @app.get("/dashboard")
     async def dashboard() -> FileResponse:
@@ -510,7 +539,24 @@ def create_app(
                 payload["pick_explanation_cards"] = previews
         return payload
 
-    @app.post("/api/intel/confirm/{transmission_id}")
+    @app.get(
+        "/api/onboarding/metrics",
+        dependencies=[Depends(require_picks_api_key)],
+    )
+    async def onboarding_metrics_endpoint() -> dict[str, Any]:
+        """Operator-only onboarding funnel snapshot + alert state."""
+        from dataclasses import asdict
+        from intelligence.onboarding_metrics import (
+            check_and_alert_onboarding_funnel,
+        )
+
+        funnel = await check_and_alert_onboarding_funnel()
+        return asdict(funnel)
+
+    @app.post(
+        "/api/intel/confirm/{transmission_id}",
+        dependencies=[Depends(require_picks_api_key)],
+    )
     async def confirm_intel(
         transmission_id: str,
         body: ConfirmIntelBody,
@@ -530,11 +576,6 @@ def create_app(
         """
         if not is_valid_transmission_id(transmission_id):
             raise HTTPException(status_code=400, detail="Invalid transmission_id format")
-        if body.state not in (
-            ConfirmationState.ACKNOWLEDGED,
-            ConfirmationState.ACTED_ON,
-        ):
-            raise HTTPException(status_code=400, detail="Invalid confirmation state")
 
         session: SessionState = app.state.session
         transmission = session.transmissions.get(transmission_id)
@@ -544,13 +585,16 @@ def create_app(
             raise HTTPException(status_code=404, detail="No competitor intel on transmission")
 
         updated_intel = transmission.competitor_intel.model_copy(
-            update={"confirmation_state": body.state}
+            update={"verified": body.verified}
         )
         updated = transmission.model_copy(update={"competitor_intel": updated_intel})
         session.transmissions[transmission_id] = updated
         return updated
 
-    @app.post("/api/rehearsal/start")
+    @app.post(
+        "/api/rehearsal/start",
+        dependencies=[Depends(require_picks_api_key)],
+    )
     async def rehearsal_start(body: RehearsalStartBody) -> dict[str, Any]:
         """
         Start or restart a rehearsal scenario.
@@ -592,7 +636,10 @@ def create_app(
             ),
         }
 
-    @app.post("/api/rehearsal/stop")
+    @app.post(
+        "/api/rehearsal/stop",
+        dependencies=[Depends(require_picks_api_key)],
+    )
     async def rehearsal_stop() -> dict[str, str]:
         """
         Cancel the active rehearsal run.
@@ -605,7 +652,10 @@ def create_app(
             await engine.stop()
         return {"status": "stopped"}
 
-    @app.get("/api/history")
+    @app.get(
+        "/api/history",
+        dependencies=[Depends(require_picks_api_key)],
+    )
     async def history(
         limit: int = Query(default=50, ge=1, le=500),
         driver_code: str | None = Query(default=None),

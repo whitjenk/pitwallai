@@ -10,32 +10,32 @@ PitWallAI is an open-source multi-agent intelligence system that delivers person
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![CI](https://github.com/whitjenk/pitwallai/actions/workflows/ci.yml/badge.svg)](https://github.com/whitjenk/pitwallai/actions/workflows/ci.yml)
+[![CI](https://github.com/whitjenk/f1-tactical-intelligence-hive/actions/workflows/ci.yml/badge.svg)](https://github.com/whitjenk/f1-tactical-intelligence-hive/actions/workflows/ci.yml)
 [![OpenF1](https://img.shields.io/badge/OpenF1-WebSocket-red)](https://openf1.org/)
 
 ---
 
 ## What it does
 
-Three hours before race lock, you get a WhatsApp message. Not generic advice — picks filtered to your actual team, your remaining budget, and your available transfers. Backed by five agents that have been working since Thursday.
+Three hours before race lock, you get a WhatsApp message. Not generic advice — picks filtered to your actual team, your remaining budget, and your available transfers. Backed by **three agents** that run across the weekend (the pre-lock pipeline is one agent with three stages).
 
-**Thursday** — Context Builder ingests circuit history, championship pressure per driver, weather forecast, and any FIA directives issued that week.
+**PicksAgent (Thursday → Saturday)** — three stages, one versioned pipeline:
 
-**Friday** — Practice Analyst processes FP1 and FP2. Extracts structured sentiment from team radio ("the rear feels loose in sector two") and flags statistical anomalies — a driver 0.8s off their FP1 pace on used rubber is a signal worth knowing about.
+- **Thursday (context)** — circuit history, championship pressure per driver, weather forecast, FIA directives.
+- **Friday (practice)** — FP1/FP2 telemetry, team radio decode, statistical anomalies (e.g. a driver 0.8s off FP1 pace on used rubber).
+- **Saturday (quali)** — your team, budget, and qualifying result; models legal transfer combinations and sends the swap that pencils out.
 
-**Saturday night** — Quali Strategist takes your team, your budget, and the qualifying result. Models every legal transfer combination. Sends you the one swap that pencils out.
+**Sunday (race)** — **RaceMonitor** watches the OpenF1 stream and timestamps every strategic moment as PitWallAI sees it: safety cars, retirements, pit windows, weather flips. The picks are already locked — the value here is *receipts*. Each call-out is saved with its source-signal time and our decode time so you can show your league chat afterward what we saw and when.
 
-**Sunday during the race** — Live Race Monitor watches the OpenF1 stream. Safety car on lap 23? Your phone gets an alert before the commentators finish their sentence.
-
-**Sunday night** — Scorer logs every pick against the actual result. The system gets measurably smarter each race.
+**Sunday night** — **ScorerLearner** logs every pick against the actual result and updates season accuracy + signal-quality weights. **CalledRecap** drops a forwardable summary of the weekend's call-outs to your WhatsApp with a shareable link (`/called/{token}`) — same idea as the season recap, but for live race intelligence.
 
 ---
 
 ## Subscribe
 
 Text **SUBSCRIBE** to [number] on WhatsApp.  
-Text **TEAM** to set up your fantasy team for personalized picks.  
-Text **HELP** for all commands.
+Send a screenshot of your F1 Fantasy **My Team** screen (or text **TEAM**) to set up your squad.  
+Text **HELP** for commands · **UNSUBSCRIBE** to stop messages · **DELETE** to erase your data ([PRIVACY.md](PRIVACY.md)).
 
 *Free. Open source. No app required.*
 
@@ -54,15 +54,15 @@ Picks are scored against **Grand Prix race results** using the official F1 Fanta
 No API key required for the Monaco rehearsal demo:
 
 ```bash
-git clone https://github.com/whitjenk/pitwallai.git
-cd pitwallai
+git clone https://github.com/whitjenk/f1-tactical-intelligence-hive.git
+cd f1-tactical-intelligence-hive
 python3.11 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 python main.py --mode rehearsal --speed 3.0
 # Dashboard → http://localhost:8000/dashboard
 ```
 
-What you'll see: Lap 37, Ferrari boxes. Before it hits the broadcast, the competitor intel panel surfaces a 91% reliability signal. An amber gate holds it until a human acknowledges it. Lap 38, Norris reports his fronts are gone — CRITICAL tire complaint, decoded in under 100ms.
+What you'll see: Lap 37, Ferrari boxes. PitWallAI logs the pit-window event with two timestamps — the OpenF1 source signal and our decode time — so the Sunday-night recap can show your league chat exactly what we saw, when. Lap 38, Norris reports his fronts are gone — CRITICAL tire complaint, decoded by the rules path in milliseconds and added to the recap.
 
 *The full rehearsal runs on local mock data. No live connection needed.*
 
@@ -70,21 +70,22 @@ What you'll see: Lap 37, Ferrari boxes. Before it hits the broadcast, the compet
 
 ## How it works
 
-Five agents. One orchestrator. One shared context object passed across the race weekend.
+**Three agents.** One orchestrator (`LeadStrategist`). One shared `RaceContext` across the weekend.
+
+`PicksAgent` owns Thursday–Saturday as three **stages** (`context` → `practice` → `quali`). Stage logic still lives in `agents/context_builder.py`, `practice_analyst.py`, and `quali_strategist.py` for testing — the consolidation is the *named interface*, not a merge of code paths.
 
 ```
-Thursday     Friday        Saturday      Sunday        Post-Race
-────────────────────────────────────────────────────────────────
-Context   Practice      Quali         Live Race     Scorer +
-Builder   Analyst       Strategist    Monitor       Learner
-    │         │              │              │            │
-    └─────────┴──────────────┴──────────────┴────────────┘
-                          Orchestrator
-                              │
-                    WhatsApp → Fan
+Thursday–Saturday (PicksAgent)          Sunday              Post-race
+────────────────────────────────────────────────────────────────────
+ context → practice → quali      RaceMonitor        ScorerLearner
+         │                              │                    │
+         └──────────────┬───────────────┴────────────────────┘
+                    LeadStrategist
+                          │
+                  WhatsApp → Fan
 ```
 
-The radio intelligence pipeline (Practice Analyst / Live Race Monitor) extends the existing Radio Intercept Decoder — rules-first with optional LLM escalation, sub-100ms on the default path:
+The radio pipeline (practice + live race) uses the **Radio Intercept Decoder** — rules-first with optional LLM escalation, sub-100ms on the default path:
 
 ```
 OpenF1 WebSocket → asyncio.Queue → RadioInterceptDecoder
@@ -132,7 +133,7 @@ DecodedTransmission (Pydantic v2, frozen)
 
 ## Contributing
 
-Contributions are open. The five-agent architecture is the roadmap — see [TECHNICAL.md](TECHNICAL.md) for implementation contracts. New agents must follow the established pattern: typed `AgentDependencies`, `RunContext`-scoped tools, Pydantic v2 output model, asyncio-native throughout. Open an issue before starting a new agent.
+Contributions are open. The **3-agent** topology (`PicksAgent`, `RaceMonitor`, `ScorerLearner`) is the current contract — see [TECHNICAL.md](TECHNICAL.md) for stage schedules, WhatsApp commands, and data models. New weekend logic should extend an existing stage or agent, not add a fourth top-level agent without discussion. Pattern: typed `AgentRunDependencies`, Pydantic v2 outputs, asyncio-native, `PIPELINE_VERSION` bump in [pitwallai/version.py](pitwallai/version.py) when behaviour changes.
 
 ## Disclaimer
 

@@ -7,8 +7,9 @@ from dataclasses import dataclass
 
 from intelligence.repository import count_vision_calls, record_vision_call
 
-_DEFAULT_PHONE_HOURLY = 5
-_DEFAULT_GLOBAL_DAILY = 5000
+# Override via PITWALL_VISION_MAX_PER_PHONE_HOUR / _MAX_GLOBAL_DAY.
+_DEFAULT_PHONE_HOURLY = 2
+_DEFAULT_GLOBAL_DAILY = 500
 
 
 def _phone_hourly_limit() -> int:

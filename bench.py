@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """
-PitWallAI Latency Benchmark
+PitWallAI Latency Telemetry
 Measures wall-clock time for each stage of the decode pipeline.
-Target: median (P50) end-to-end < 800ms, P95 < 1200ms.
+
+The P50<800ms / P95<1200ms thresholds shown here are a soft regression
+budget for catching pipeline drift — not a product contract or CI gate.
 
 Usage: python bench.py [--runs N] [--backend rules|hybrid|llm] [--verbose]
 """
@@ -163,13 +165,13 @@ def _print_table(
     runs: int,
     backend: str,
     inference_key: str,
-    target_met: bool,
+    within_soft_budget: bool,
 ) -> None:
     """Print formatted benchmark table with mean and percentile columns."""
     green = "\033[32m"
-    red = "\033[31m"
+    yellow = "\033[33m"
     reset = "\033[0m"
-    print(f"\nPITWALLAI LATENCY BENCHMARK — {runs} runs  [backend: {backend}]")
+    print(f"\nPITWALLAI LATENCY TELEMETRY — {runs} runs  [backend: {backend}]")
     print("─" * 68)
     print(f"{'Stage':<18}{'Mean':>10}{'P50':>10}{'P95':>10}{'P99':>10}{'Max':>10}")
     print("─" * 68)
@@ -192,8 +194,14 @@ def _print_table(
         f"{total_stats['p95']:>9.0f}ms{total_stats['p99']:>9.0f}ms{total_stats['max']:>9.0f}ms"
     )
     print("─" * 68)
-    status = f"{green}PASS{reset}" if target_met else f"{red}FAIL{reset}"
-    print(f"TARGET (P50<800ms, P95<1200ms): {status}")
+    # Soft regression budget — for noticing drift, not for failing CI.
+    # The product no longer requires sub-second decode (see module docstring).
+    status = (
+        f"{green}within soft budget{reset}"
+        if within_soft_budget
+        else f"{yellow}slower than soft budget{reset}"
+    )
+    print(f"Soft regression budget (P50<800ms, P95<1200ms): {status}")
 
 
 async def run_benchmark(runs: int, backend: str, verbose: bool) -> dict[str, Any]:
@@ -232,8 +240,10 @@ async def run_benchmark(runs: int, backend: str, verbose: bool) -> dict[str, Any
             stage_results[key].append(value)
 
     stage_stats = {key: _stage_stats(vals) for key, vals in stage_results.items()}
-    target_met = stage_stats["total"]["p50"] < 800.0 and stage_stats["total"]["p95"] < 1200.0
-    breach_count = sum(1 for value in stage_results["total"] if value >= 800.0)
+    within_soft_budget = (
+        stage_stats["total"]["p50"] < 800.0 and stage_stats["total"]["p95"] < 1200.0
+    )
+    slow_count = sum(1 for value in stage_results["total"] if value >= 800.0)
 
     report = {
         "run_at": datetime.now(tz=UTC).isoformat(),
@@ -241,11 +251,11 @@ async def run_benchmark(runs: int, backend: str, verbose: bool) -> dict[str, Any
         "runs": len(corpus),
         "notes": BACKEND_NOTES[backend],
         "stages": stage_stats,
-        "target_met": target_met,
-        "breach_count": breach_count,
+        "within_soft_budget": within_soft_budget,
+        "slow_count": slow_count,
     }
 
-    _print_table(stage_stats, len(corpus), backend, inference_key, target_met)
+    _print_table(stage_stats, len(corpus), backend, inference_key, within_soft_budget)
 
     with open("latency_report.json", "w", encoding="utf-8") as handle:
         json.dump(report, handle, indent=2)

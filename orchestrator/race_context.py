@@ -68,7 +68,14 @@ class RaceEventType(str, Enum):
 
 
 class RaceEvent(BaseModel):
-    """Persisted / in-memory live race event."""
+    """Persisted / in-memory live race event.
+
+    ``utc_timestamp`` is the source signal time (OpenF1 race-control or pit
+    record). ``decoded_at_utc`` is when PitWallAI first processed it. The
+    delta between the two is the "we called it" lead time the recap surfaces.
+    Note: lead time is vs. race-control posting, not TV broadcast — the UI
+    must label it accordingly.
+    """
 
     model_config = ConfigDict(frozen=True)
 
@@ -78,6 +85,19 @@ class RaceEvent(BaseModel):
     description: str
     utc_timestamp: datetime
     driver_code: str | None = None
+    decoded_at_utc: datetime | None = None
+
+    @property
+    def decode_latency_seconds(self) -> float | None:
+        """Seconds between source-signal time and our decode.
+
+        This measures *our pipeline latency*, not lead vs. TV broadcast.
+        Broadcast lead is implicit — surfaced via both timestamps so the
+        fan can compare against their own memory of when Sky picked it up.
+        """
+        if self.decoded_at_utc is None:
+            return None
+        return (self.decoded_at_utc - self.utc_timestamp).total_seconds()
 
 
 class RaceContext(BaseModel):

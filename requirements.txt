@@ -25,8 +25,11 @@ google-auth>=2.0,<3.0
 # OpenAI provider (gpt-4o-mini, Ollama OpenAI-compatible shim)
 openai>=1.50,<2.0
 
-# Anthropic BYOK path (claude provider — retained for bring-your-own-key)
-anthropic>=0.40,<1.0
+# Anthropic BYOK path (claude provider — retained for bring-your-own-key).
+# Upper bound coupled to pydantic-ai 0.8.x: its Anthropic adapter imports
+# `UserLocation` from anthropic.types.beta, which the SDK renamed to
+# `BetaUserLocationParam` in >=0.70. Bump this together with pydantic-ai.
+anthropic>=0.40,<0.70
 
 # Optional extras if you prefer slim installs:
 # pip install "pydantic-ai-slim[google,openai,anthropic]"

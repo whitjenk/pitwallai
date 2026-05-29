@@ -7,7 +7,6 @@ import time
 import uuid
 from datetime import UTC, datetime
 
-from pitwallai.agents.radio_intercept.enums import ConfirmationState
 from pitwallai.agents.radio_intercept.models import (
     AgentDependencies,
     CompetitorIntel,
@@ -87,7 +86,7 @@ def infer_competitor_intel(transcript: str) -> CompetitorIntel | None:
             inferred_action="Imminent pit stop — Ferrari undercut window opening",
             reliability_score=0.85,
             evidence_transcript=transcript,
-            confirmation_state=ConfirmationState.UNCONFIRMED,
+            verified=False,
         )
     if "norris pitting" in lowered or "nor boxing" in lowered:
         return CompetitorIntel(
@@ -96,7 +95,7 @@ def infer_competitor_intel(transcript: str) -> CompetitorIntel | None:
             inferred_action="Rival pit stop imminent — track position under threat",
             reliability_score=0.75,
             evidence_transcript=transcript,
-            confirmation_state=ConfirmationState.UNCONFIRMED,
+            verified=False,
         )
     if "verstappen" in lowered and ("box" in lowered or "pit" in lowered):
         return CompetitorIntel(
@@ -105,7 +104,7 @@ def infer_competitor_intel(transcript: str) -> CompetitorIntel | None:
             inferred_action="Red Bull pit activity detected on competitor radio",
             reliability_score=0.7,
             evidence_transcript=transcript,
-            confirmation_state=ConfirmationState.UNCONFIRMED,
+            verified=False,
         )
     return None
 
@@ -143,7 +142,6 @@ def finalize_transmission(
             "decoded_at": datetime.now(tz=UTC),
             "processing_latency_ms": processing_latency_ms,
             "team_color": team_color,
-            "exceeds_latency_target": processing_latency_ms > 800.0,
             "lap_number": lap_number,
             "competitor_intel": competitor_intel,
         }

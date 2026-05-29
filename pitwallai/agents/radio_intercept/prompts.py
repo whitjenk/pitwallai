@@ -38,5 +38,5 @@ OUTPUT CONTRACT:
 Your response will be parsed as a `DecodedTransmission`. Copy identity fields exactly from input.
 Populate `evidence_summary` as factual observation — never an instruction.
 If confidence is below 0.4, set `decoded_intent` and `strategic_signal` to UNKNOWN.
-Do not set `decoded_at`, `processing_latency_ms`, `team_color`, `exceeds_latency_target`, or \
+Do not set `decoded_at`, `processing_latency_ms`, `team_color`, or \
 `transmission_id` — these are injected post-decode."""

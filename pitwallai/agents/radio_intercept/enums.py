@@ -103,19 +103,10 @@ class UrgencyLevel(str, Enum):
                 return cls.LOW
 
 
-class ConfirmationState(str, Enum):
-    """Human confirmation state for competitor intelligence."""
-
-    UNCONFIRMED = "UNCONFIRMED"
-    ACKNOWLEDGED = "ACKNOWLEDGED"
-    ACTED_ON = "ACTED_ON"
-
-
 class StreamEventType(str, Enum):
     """WebSocket event types for dashboard streaming."""
 
     TRANSMISSION_DECODED = "TRANSMISSION_DECODED"
-    LATENCY_BREACH = "LATENCY_BREACH"
-    COMPETITOR_INTEL_UNCONFIRMED = "COMPETITOR_INTEL_UNCONFIRMED"
+    COMPETITOR_INTEL_UNVERIFIED = "COMPETITOR_INTEL_UNVERIFIED"
     REHEARSAL_COMPLETE = "REHEARSAL_COMPLETE"
     SYSTEM_STATUS = "SYSTEM_STATUS"

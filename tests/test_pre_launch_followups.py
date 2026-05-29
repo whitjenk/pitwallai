@@ -82,6 +82,97 @@ def test_chips_share_page_carries_verify_guard() -> None:
     assert "Verify in the F1 Fantasy app" in html
 
 
+# ── Chip-planner honest framing (no false-precision "confidence %") ───────
+
+
+def test_chips_share_page_frames_as_circuit_fit_not_probability() -> None:
+    """The window score is a circuit heuristic — the page must say 'circuit
+    fit' and carry the not-a-projection disclaimer, never imply a model
+    probability."""
+    from datetime import UTC, datetime
+
+    from intelligence.chip_conviction import ConfidenceTier
+    from intelligence.chip_planner import ChipPlan, ChipType, ChipWindow
+    from intelligence.chips_page import render_chips_share_html
+
+    plan = ChipPlan(
+        windows=[
+            ChipWindow(
+                race_key="2026_monaco",
+                circuit_key="monaco",
+                race_name="Monaco Grand Prix",
+                race_utc=datetime(2026, 5, 24, 13, 0, tzinfo=UTC),
+                is_sprint=False,
+                championship_week=2,
+                recommended_chips=[ChipType.LIMITLESS],
+                reasoning="high overtaking difficulty",
+                confidence=0.82,
+                priority="HIGH",
+                confidence_tier=ConfidenceTier.HIGH,
+                confidence_reasons=["high overtaking difficulty"],
+            )
+        ],
+        recommended_sequence=[("limitless", "2026_monaco")],
+        sprint_warnings=[],
+        mini_league_windows=[],
+        generated_at=datetime.now(tz=UTC),
+        share_token="t",
+    )
+    html = render_chips_share_html(plan)
+    assert "circuit fit" in html
+    assert "not a points projection" in html
+    assert "heuristic guide" in html
+    # No raw confidence percentage leaked into the rendered page.
+    assert "82%" not in html
+
+
+@pytest.mark.asyncio
+async def test_chip_detail_message_uses_fit_tier_not_percentage() -> None:
+    """CHIPS <chip> reply must show a fit tier, not a false-precision %."""
+    from datetime import UTC, datetime
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+
+    from intelligence.chip_conviction import ConfidenceTier
+    from intelligence.chip_planner import ChipPlan, ChipType, ChipWindow
+
+    team = SimpleNamespace(chips_used={})
+    window = ChipWindow(
+        race_key="2026_monaco",
+        circuit_key="monaco",
+        race_name="Monaco Grand Prix",
+        race_utc=datetime(2026, 5, 24, 13, 0, tzinfo=UTC),
+        is_sprint=False,
+        championship_week=2,
+        recommended_chips=[ChipType.LIMITLESS],
+        reasoning="high overtaking difficulty",
+        confidence=0.82,
+        priority="HIGH",
+        confidence_tier=ConfidenceTier.HIGH,
+        confidence_reasons=["high overtaking difficulty"],
+    )
+    plan = ChipPlan(
+        windows=[window],
+        recommended_sequence=[],
+        sprint_warnings=[],
+        mini_league_windows=[],
+        generated_at=datetime.now(tz=UTC),
+        share_token="t",
+    )
+    with (
+        patch("whatsapp.phase7.get_fantasy_team", new=AsyncMock(return_value=team)),
+        patch("whatsapp.phase7.chip_available", return_value=True),
+        patch("whatsapp.phase7.generate_chip_plan", return_value=plan),
+        patch("whatsapp.phase7.remaining_races_from_now", return_value=[]),
+    ):
+        from whatsapp.phase7 import send_chip_detail
+
+        msg = await send_chip_detail("+10000000001", "limitless")
+
+    assert "Circuit fit: HIGH" in msg
+    assert "%" not in msg  # no false-precision percentage
+
+
 # ── Cost cut: Sunday message bundling ─────────────────────────────────────
 
 

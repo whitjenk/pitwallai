@@ -6,9 +6,14 @@ from loguru import logger
 
 from fantasy.rules import DRIVERS_PER_TEAM
 from intelligence.repository import upsert_fantasy_team_fields
-from intelligence.team_extractor import extract_team_from_image
 from intelligence.standings_extractor import extract_standings_from_image
-from whatsapp.media import download_media
+from intelligence.team_extractor import extract_team_from_image
+from intelligence.vision_budget import check_vision_budget, record_vision_call_for
+from whatsapp.media import (
+    InvalidMediaError,
+    MediaTooLargeError,
+    download_media,
+)
 from whatsapp.sender import mask_phone, send_message
 from whatsapp.subscribe_flow import (
     clear_pending_screenshot,
@@ -94,7 +99,7 @@ async def _handle_team_screenshot(
             result.team.transfers_available,
         )
 
-    clear_pending_screenshot(phone)
+    await clear_pending_screenshot(phone)
 
     if kind == "locked_team":
         await send_message(phone, (
@@ -128,7 +133,7 @@ async def _handle_standings_screenshot(
     result = await extract_standings_from_image(image_bytes, mime_type=mime_type)
 
     if result.status != "ok" or result.standings is None:
-        clear_pending_screenshot(phone)
+        await clear_pending_screenshot(phone)
         await send_message(phone, truncate(
             "I couldn't quite make those standings out — no problem. "
             "I'll ask again after the next race when the screen's fresh."
@@ -144,7 +149,7 @@ async def _handle_standings_screenshot(
     except Exception as exc:  # additive: never block
         logger.warning("save_league_standings_snapshot skipped phone={}: {}", mask_phone(phone), exc)
 
-    clear_pending_screenshot(phone)
+    await clear_pending_screenshot(phone)
     top = result.standings.entries[0] if result.standings.entries else None
     me = next((e for e in result.standings.entries if e.is_user), None)
     if top and me and me.position:
@@ -159,15 +164,42 @@ async def _handle_standings_screenshot(
         ))
 
 
+_VISION_LIMIT_REPLY = (
+    "I've hit my vision limit for now — let's pick this up in an hour or so. "
+    "You can also text your team codes manually anytime."
+)
+
+
 async def handle_inbound_image(phone: str, media_id: str, mime_type: str) -> None:
     """Process an inbound image. Dispatches on the pending_screenshot state."""
-    kind = get_pending_screenshot(phone)
+    kind = await get_pending_screenshot(phone)
     if kind is None:
         logger.debug("Inbound image ignored (not awaiting screenshot) phone={}", mask_phone(phone))
         return
 
+    budget = await check_vision_budget(phone)
+    if not budget.allowed:
+        logger.info(
+            "Vision budget blocked phone={} kind={} reason={}",
+            mask_phone(phone),
+            kind,
+            budget.reason,
+        )
+        await send_message(phone, truncate(_VISION_LIMIT_REPLY))
+        return
+
     try:
         image_bytes, detected_mime = await download_media(media_id)
+    except MediaTooLargeError:
+        await send_message(phone, truncate(
+            "That image is a bit large for me — try a smaller screenshot (under 8 MB)."
+        ))
+        return
+    except InvalidMediaError:
+        await send_message(phone, truncate(
+            "I couldn't read that as a photo — please send a JPEG or PNG screenshot."
+        ))
+        return
     except Exception as exc:
         logger.exception("download_media failed phone={}: {}", mask_phone(phone), exc)
         await send_message(phone, truncate(
@@ -176,6 +208,7 @@ async def handle_inbound_image(phone: str, media_id: str, mime_type: str) -> Non
         return
 
     effective_mime = detected_mime or mime_type
+    await record_vision_call_for(phone, kind)
 
     if kind in {"team_setup", "locked_team"}:
         await _handle_team_screenshot(phone, image_bytes, effective_mime, kind)
@@ -185,4 +218,4 @@ async def handle_inbound_image(phone: str, media_id: str, mime_type: str) -> Non
         return
 
     logger.warning("Unknown pending screenshot kind={} phone={}", kind, mask_phone(phone))
-    clear_pending_screenshot(phone)
+    await clear_pending_screenshot(phone)

@@ -102,6 +102,14 @@ def _match_country_code(digits: str) -> str | None:
     return None
 
 
+def needs_manual_timezone(phone: str) -> bool:
+    """True when the country code is unknown — caller should ask for IANA tz."""
+    digits = _digits_only(phone)
+    if not digits:
+        return True
+    return _match_country_code(digits) is None
+
+
 def infer_timezone(phone: str) -> str:
     """Best-guess IANA timezone from an E.164 phone number.
 

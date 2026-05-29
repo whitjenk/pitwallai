@@ -14,6 +14,9 @@ _COLUMN_MIGRATIONS: tuple[str, ...] = (
     "ALTER TABLE subscribers ADD COLUMN IF NOT EXISTS rehearsal_complete BOOLEAN NOT NULL DEFAULT false",
     "ALTER TABLE subscribers ADD COLUMN IF NOT EXISTS share_cards_private BOOLEAN NOT NULL DEFAULT false",
     "ALTER TABLE subscribers ADD COLUMN IF NOT EXISTS races_received INTEGER NOT NULL DEFAULT 0",
+    # Two-phase webhook claim — status + claimed_at on the dedup ledger.
+    "ALTER TABLE processed_inbound_messages ADD COLUMN IF NOT EXISTS status VARCHAR(16) NOT NULL DEFAULT 'done'",
+    "ALTER TABLE processed_inbound_messages ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
 )
 
 

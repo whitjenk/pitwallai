@@ -8,13 +8,14 @@ import os
 
 
 def webhook_skip_signature() -> bool:
-    """True when local dev explicitly disables signature checks."""
-    return os.getenv("PITWALL_WEBHOOK_SKIP_SIGNATURE", "").strip().lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
-    )
+    """True when local dev explicitly disables signature checks (never in live mode)."""
+    for key in (
+        "PITWALL_DEV_ONLY_SKIP_WEBHOOK_SIGNATURE",
+        "PITWALL_WEBHOOK_SKIP_SIGNATURE",  # legacy name
+    ):
+        if os.getenv(key, "").strip().lower() in {"1", "true", "yes", "on"}:
+            return True
+    return False
 
 
 def verify_meta_signature(

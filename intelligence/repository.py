@@ -20,6 +20,8 @@ from db.models import (
     LeagueOnboardingState,
     LiveAlertDelivery,
     PickRow,
+    PendingScreenshotState,
+    PendingTimezoneState,
     PickOwnershipRow,
     PricePrediction,
     ProcessedInboundMessage,
@@ -33,6 +35,7 @@ from db.models import (
     TeamOnboardingState,
     TeamValueSnapshot,
     UserReportedPriceChange,
+    VisionCallLog,
     WeekendNotificationSent,
 )
 from orchestrator.race_context import RaceEvent, SignalQuality, SignalQualityEntry
@@ -1316,6 +1319,22 @@ async def load_constructor_strategy(circuit_key: str) -> dict[str, dict[str, Any
     }
 
 
+# Tables with phone / reporter_phone that lack ON DELETE CASCADE from subscribers.
+# Keep in sync with db.models — tests/test_erase_subscriber.py asserts completeness.
+_ERASE_PHONE_TARGETS: tuple[tuple[type, str], ...] = (
+    (PickRow, "phone"),
+    (LiveAlertDelivery, "phone"),
+    (UserReportedPriceChange, "reporter_phone"),
+    (PendingScreenshotState, "phone"),
+    (PendingTimezoneState, "phone"),
+    (VisionCallLog, "phone"),
+    (ShareCard, "phone"),
+    (ChipPlanStore, "phone"),
+    (TeamValueSnapshot, "phone"),
+    (WeekendNotificationSent, "phone"),
+)
+
+
 async def erase_subscriber_data(phone: str) -> bool:
     """
     Remove all subscriber-linked rows after explicit DELETE request.
@@ -1325,13 +1344,202 @@ async def erase_subscriber_data(phone: str) -> bool:
     # All other deletes are soft (active=False).
     """
     async with get_session() as session:
-        await session.execute(delete(PickRow).where(PickRow.phone == phone))
-        await session.execute(delete(LiveAlertDelivery).where(LiveAlertDelivery.phone == phone))
-        await session.execute(
-            delete(UserReportedPriceChange).where(UserReportedPriceChange.reporter_phone == phone),
-        )
+        for model, column in _ERASE_PHONE_TARGETS:
+            await session.execute(
+                delete(model).where(getattr(model, column) == phone),
+            )
         row = await session.get(Subscriber, phone)
         if row is None:
             return False
         await session.delete(row)
     return True
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Pending screenshot state — DB-backed replacement for in-memory dict.
+# Survives restarts; consistent across uvicorn workers.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_SCREENSHOT_TTL_HOURS: dict[str, int] = {
+    "team_setup": 48,
+    "locked_team": 36,
+    "league_standings": 72,
+}
+_SCREENSHOT_DEFAULT_TTL_HOURS = 48
+
+
+async def set_pending_screenshot_db(phone: str, kind: str) -> None:
+    """Set/refresh the expected screenshot kind for a phone, with TTL."""
+    ttl_hours = _SCREENSHOT_TTL_HOURS.get(kind, _SCREENSHOT_DEFAULT_TTL_HOURS)
+    expires_at = datetime.now(tz=UTC) + timedelta(hours=ttl_hours)
+    try:
+        async with get_session() as session:
+            row = await session.get(PendingScreenshotState, phone)
+            if row is None:
+                session.add(PendingScreenshotState(
+                    phone=phone, kind=kind, expires_at=expires_at,
+                ))
+            else:
+                row.kind = kind
+                row.expires_at = expires_at
+    except ValueError:
+        pass  # no DB configured — onboarding will degrade gracefully
+
+
+async def get_pending_screenshot_db(phone: str) -> str | None:
+    """Return the expected screenshot kind, or None if absent/expired."""
+    now = datetime.now(tz=UTC)
+    try:
+        async with get_session() as session:
+            row = await session.get(PendingScreenshotState, phone)
+            if row is None:
+                return None
+            if row.expires_at <= now:
+                await session.delete(row)
+                return None
+            return row.kind
+    except ValueError:
+        return None
+
+
+async def clear_pending_screenshot_db(phone: str) -> None:
+    try:
+        async with get_session() as session:
+            row = await session.get(PendingScreenshotState, phone)
+            if row is not None:
+                await session.delete(row)
+    except ValueError:
+        pass
+
+
+_PENDING_TIMEZONE_TTL_HOURS = 24
+
+
+async def set_pending_timezone_db(phone: str) -> None:
+    expires_at = datetime.now(tz=UTC) + timedelta(hours=_PENDING_TIMEZONE_TTL_HOURS)
+    try:
+        async with get_session() as session:
+            row = await session.get(PendingTimezoneState, phone)
+            if row is None:
+                session.add(PendingTimezoneState(phone=phone, expires_at=expires_at))
+            else:
+                row.expires_at = expires_at
+    except ValueError:
+        pass
+
+
+async def is_pending_timezone_db(phone: str) -> bool:
+    now = datetime.now(tz=UTC)
+    try:
+        async with get_session() as session:
+            row = await session.get(PendingTimezoneState, phone)
+            if row is None:
+                return False
+            if row.expires_at <= now:
+                await session.delete(row)
+                return False
+            return True
+    except ValueError:
+        return False
+
+
+async def clear_pending_timezone_db(phone: str) -> None:
+    try:
+        async with get_session() as session:
+            row = await session.get(PendingTimezoneState, phone)
+            if row is not None:
+                await session.delete(row)
+    except ValueError:
+        pass
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Vision-call budget — per-phone hourly + global daily caps.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+async def count_vision_calls(phone: str | None, *, hours: int) -> int:
+    """Count vision calls in the trailing window. None = global count."""
+    since = datetime.now(tz=UTC) - timedelta(hours=hours)
+    try:
+        async with get_session() as session:
+            stmt = select(func.count()).select_from(VisionCallLog).where(
+                VisionCallLog.called_at >= since,
+            )
+            if phone is not None:
+                stmt = stmt.where(VisionCallLog.phone == phone)
+            result = await session.execute(stmt)
+            return int(result.scalar() or 0)
+    except ValueError:
+        return 0  # no DB → fail-open in dev/no-storage mode
+
+
+async def record_vision_call(phone: str, kind: str) -> None:
+    try:
+        async with get_session() as session:
+            session.add(VisionCallLog(phone=phone, kind=kind))
+    except ValueError:
+        pass
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Two-phase webhook claim — true idempotency under Meta retry.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_CLAIM_STALE_AFTER = timedelta(minutes=5)
+
+
+async def claim_inbound_message(message_id: str) -> bool:
+    """Atomic claim. Returns True iff we are the worker that should process.
+
+    Semantics:
+      * No row exists                              → INSERT (status=claimed). True.
+      * Row exists, status='done'                  → already handled. False.
+      * Row exists, status='claimed', fresh        → another worker has it. False.
+      * Row exists, status='claimed', >5min stale  → reclaim (refresh). True.
+    """
+    if not message_id.strip():
+        return False
+    await _maybe_prune_security_tables()
+    now = datetime.now(tz=UTC)
+    try:
+        async with get_session() as session:
+            row = await session.get(ProcessedInboundMessage, message_id)
+            if row is None:
+                session.add(ProcessedInboundMessage(
+                    message_id=message_id,
+                    status="claimed",
+                    claimed_at=now,
+                    processed_at=now,
+                ))
+                try:
+                    await session.flush()
+                except IntegrityError:
+                    await session.rollback()
+                    return False  # another worker won the race
+                return True
+            if row.status == "done":
+                return False
+            if row.status == "claimed" and (now - row.claimed_at) > _CLAIM_STALE_AFTER:
+                row.claimed_at = now
+                return True
+            return False
+    except ValueError:
+        if message_id in _FALLBACK_SEEN_MESSAGES:
+            return False
+        _FALLBACK_SEEN_MESSAGES.add(message_id)
+        return True
+
+
+async def complete_inbound_message(message_id: str) -> None:
+    """Mark a claimed message as fully processed."""
+    if not message_id.strip():
+        return
+    try:
+        async with get_session() as session:
+            row = await session.get(ProcessedInboundMessage, message_id)
+            if row is not None:
+                row.status = "done"
+                row.processed_at = datetime.now(tz=UTC)
+    except ValueError:
+        pass

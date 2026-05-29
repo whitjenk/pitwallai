@@ -29,10 +29,11 @@ from whatsapp.league_flow import handle_league_command
 from whatsapp.message_format import format_season_recap_message
 from whatsapp.sender import mask_phone, send_message as _send_message
 from whatsapp.subscribe_flow import (
+    clear_pending_timezone,
     complete_subscribe,
     handle_subscribe,
     handle_unsubscribe,
-    pending_timezone,
+    is_pending_timezone,
     truncate,
 )
 from whatsapp.team_flow import handle_team_command
@@ -55,7 +56,7 @@ def _next_race_key() -> str | None:
 
 async def _handle_delete(phone: str) -> str:
     deleted = await erase_subscriber_data(phone)
-    pending_timezone.discard(phone)
+    await clear_pending_timezone(phone)
     if deleted:
         logger.bind(phone=mask_phone(phone)).info("Subscriber data erased (DELETE command)")
     return truncate(
@@ -236,14 +237,17 @@ async def handle_inbound_text(phone: str, text: str, raw_text: str) -> None:
             league_state.awaiting_confirm or league_state.step > 0 or league_state.update_mode
         )
 
-        if phone in pending_timezone and text not in {
+        if await is_pending_timezone(phone) and text not in {
             "SUBSCRIBE",
             "UNSUBSCRIBE",
+            "DELETE",
             "HELP",
             "SETTINGS",
             "TEAM",
         }:
             reply = await complete_subscribe(phone, raw_text)
+        elif text.startswith("TIMEZONE "):
+            reply = await complete_subscribe(phone, raw_text[9:].strip())
         elif in_team_flow and text != "TEAM":
             reply = await handle_team_command(phone, text, raw_text)
         elif in_league_flow and text not in {"LEAGUE", "LEAGUE UPDATE"}:

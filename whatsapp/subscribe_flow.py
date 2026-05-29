@@ -10,27 +10,50 @@ from db.models import Subscriber
 from db.session import get_session
 from pitwallai.feature_flags import screenshot_onboarding_enabled
 from whatsapp.sender import mask_phone
-from whatsapp.timezone_infer import infer_timezone
+from whatsapp.timezone_infer import infer_timezone, needs_manual_timezone
 
-pending_timezone: set[str] = set()
-
-# Closed-loop screenshot state machine. Keyed by phone → expected screenshot type.
-#   "team_setup"      — initial onboarding (post-SUBSCRIBE)
-#   "locked_team"     — post-Saturday-lock confirmation (feeds Scorer/Learner)
-#   "league_standings"— Monday post-mortem capture
-pending_screenshot: dict[str, str] = {}
-
-
-def set_pending_screenshot(phone: str, kind: str) -> None:
-    pending_screenshot[phone] = kind
+# Closed-loop screenshot state machine: DB-backed so it survives restarts and
+# is consistent across uvicorn workers.
+#   "team_setup"      — initial onboarding (post-SUBSCRIBE), TTL 48h
+#   "locked_team"     — post-Saturday-lock confirmation, TTL 36h
+#   "league_standings"— Monday post-mortem capture, TTL 72h
+# Helpers are thin wrappers so call sites don't import from intelligence.repository.
 
 
-def get_pending_screenshot(phone: str) -> str | None:
-    return pending_screenshot.get(phone)
+async def set_pending_screenshot(phone: str, kind: str) -> None:
+    from intelligence.repository import set_pending_screenshot_db
+
+    await set_pending_screenshot_db(phone, kind)
 
 
-def clear_pending_screenshot(phone: str) -> None:
-    pending_screenshot.pop(phone, None)
+async def get_pending_screenshot(phone: str) -> str | None:
+    from intelligence.repository import get_pending_screenshot_db
+
+    return await get_pending_screenshot_db(phone)
+
+
+async def clear_pending_screenshot(phone: str) -> None:
+    from intelligence.repository import clear_pending_screenshot_db
+
+    await clear_pending_screenshot_db(phone)
+
+
+async def set_pending_timezone(phone: str) -> None:
+    from intelligence.repository import set_pending_timezone_db
+
+    await set_pending_timezone_db(phone)
+
+
+async def is_pending_timezone(phone: str) -> bool:
+    from intelligence.repository import is_pending_timezone_db
+
+    return await is_pending_timezone_db(phone)
+
+
+async def clear_pending_timezone(phone: str) -> None:
+    from intelligence.repository import clear_pending_timezone_db
+
+    await clear_pending_timezone_db(phone)
 
 _SUBSCRIBE_DATA_NOTE = (
     "📋 Data note: PitWallAI stores your phone number and "
@@ -94,8 +117,13 @@ async def handle_subscribe(phone: str) -> list[str]:
     if is_first:
         out.append(truncate(_SUBSCRIBE_DATA_NOTE))
     out.append(_SUBSCRIBE_CONFIRM)
+    if needs_manual_timezone(phone):
+        await set_pending_timezone(phone)
+        out.append(truncate(
+            "What timezone are you in? Reply with IANA format, e.g. Europe/London or America/Los_Angeles."
+        ))
     if screenshot_onboarding_enabled():
-        set_pending_screenshot(phone, "team_setup")
+        await set_pending_screenshot(phone, "team_setup")
         out.append(_SCREENSHOT_PROMPT)
     return out
 
@@ -104,7 +132,7 @@ async def complete_subscribe(phone: str, timezone: str) -> list[str]:
     if not is_valid_iana_timezone(timezone):
         return [truncate("Unknown timezone. Use IANA format, e.g. Europe/London.")]
 
-    pending_timezone.discard(phone)
+    await clear_pending_timezone(phone)
     tz_clean = timezone.strip()
 
     async with get_session() as session:
@@ -133,6 +161,10 @@ async def handle_unsubscribe(phone: str) -> str:
             return truncate("Not subscribed. Send SUBSCRIBE to get race alerts.")
         row.active = False
 
-    pending_timezone.discard(phone)
+    await clear_pending_timezone(phone)
+    await clear_pending_screenshot(phone)
     logger.bind(phone=mask_phone(phone)).info("Subscriber deactivated")
-    return truncate("Unsubscribed. You won't receive alerts. Send SUBSCRIBE to rejoin.")
+    return truncate(
+        "Unsubscribed — no more alerts. Send SUBSCRIBE to rejoin. "
+        "Want your data removed too? Text DELETE."
+    )

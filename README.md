@@ -25,9 +25,9 @@ Three hours before race lock, you get a WhatsApp message. Not generic advice —
 - **Friday (practice)** — FP1/FP2 telemetry, team radio decode, statistical anomalies (e.g. a driver 0.8s off FP1 pace on used rubber).
 - **Saturday (quali)** — your team, budget, and qualifying result; models legal transfer combinations and sends the swap that pencils out.
 
-**Sunday (race)** — **RaceMonitor** watches the OpenF1 stream. Safety car on lap 23? Your phone gets an alert before the commentators finish their sentence.
+**Sunday (race)** — **RaceMonitor** watches the OpenF1 stream and timestamps every strategic moment as PitWallAI sees it: safety cars, retirements, pit windows, weather flips. The picks are already locked — the value here is *receipts*. Each call-out is saved with its source-signal time and our decode time so you can show your league chat afterward what we saw and when.
 
-**Sunday night** — **ScorerLearner** logs every pick against the actual result and updates season accuracy + signal-quality weights.
+**Sunday night** — **ScorerLearner** logs every pick against the actual result and updates season accuracy + signal-quality weights. **CalledRecap** drops a forwardable summary of the weekend's call-outs to your WhatsApp with a shareable link (`/called/{token}`) — same idea as the season recap, but for live race intelligence.
 
 ---
 
@@ -62,7 +62,7 @@ python main.py --mode rehearsal --speed 3.0
 # Dashboard → http://localhost:8000/dashboard
 ```
 
-What you'll see: Lap 37, Ferrari boxes. Before it hits the broadcast, the competitor intel panel surfaces a 91% reliability signal. An amber gate holds it until a human acknowledges it. Lap 38, Norris reports his fronts are gone — CRITICAL tire complaint, decoded in under 100ms.
+What you'll see: Lap 37, Ferrari boxes. PitWallAI logs the pit-window event with two timestamps — the OpenF1 source signal and our decode time — so the Sunday-night recap can show your league chat exactly what we saw, when. Lap 38, Norris reports his fronts are gone — CRITICAL tire complaint, decoded by the rules path in milliseconds and added to the recap.
 
 *The full rehearsal runs on local mock data. No live connection needed.*
 

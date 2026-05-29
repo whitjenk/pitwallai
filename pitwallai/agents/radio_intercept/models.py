@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, ConfigDict, field_validator
 
 from pitwallai.agents.radio_intercept.enums import (
-    ConfirmationState,
     RadioIntent,
     StrategicSignal,
     StreamEventType,
@@ -81,7 +80,14 @@ class JargonEntry(BaseModel):
 
 
 class CompetitorIntel(BaseModel):
-    """Intelligence extracted about a rival team or driver."""
+    """Intelligence extracted about a rival team or driver.
+
+    The old three-state confirmation flow (UNCONFIRMED → ACKNOWLEDGED →
+    ACTED_ON) collapsed to a single ``verified`` boolean — that state
+    machine assumed a user acting on live signals, which the live-race
+    product no longer does. Verified means a human (ops or the dashboard)
+    has confirmed the intel; everything else is unverified.
+    """
 
     model_config = ConfigDict(frozen=True)
 
@@ -90,7 +96,7 @@ class CompetitorIntel(BaseModel):
     inferred_action: str
     reliability_score: float
     evidence_transcript: str
-    confirmation_state: ConfirmationState = ConfirmationState.UNCONFIRMED
+    verified: bool = False
 
 
 class HistoricalRadio(BaseModel):
@@ -134,7 +140,6 @@ class DecodedTransmission(BaseModel):
 
     team_color: str | None = None
     lap_number: int | None = None
-    exceeds_latency_target: bool = False
 
     context_doc_ids: list[str]
     model_reasoning: str

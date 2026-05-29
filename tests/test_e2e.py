@@ -5,7 +5,6 @@ from __future__ import annotations
 import pytest
 
 from pitwallai.agents.radio_intercept.enums import (
-    ConfirmationState,
     RadioIntent,
     StrategicSignal,
     UrgencyLevel,
@@ -28,7 +27,7 @@ async def test_monaco_event6_triggers_competitor_intel(
     assert result.decoded_intent == RadioIntent.PIT_CALL
     assert result.competitor_intel is not None
     assert result.competitor_intel.target_team == "Ferrari"
-    assert result.competitor_intel.confirmation_state == ConfirmationState.UNCONFIRMED
+    assert result.competitor_intel.verified is False
     assert result.urgency_level in (UrgencyLevel.HIGH, UrgencyLevel.CRITICAL)
 
 
@@ -63,11 +62,16 @@ async def test_evidence_summary_is_not_directive(
 
 
 @pytest.mark.asyncio
-async def test_latency_target(
+async def test_decode_latency_soft_ceiling(
     agent,
     agent_deps: AgentDependencies,
 ) -> None:
-    """All Monaco decodes complete within CI latency budget."""
+    """Regression guard: decode pipeline stays under a soft 1500ms ceiling.
+
+    Not a product contract — the live-race surface earns its value from
+    shareable call-outs, not sub-second decode. This assertion exists
+    only to catch order-of-magnitude regressions in CI.
+    """
     for message in MONACO_REHEARSAL_SCENARIO.events:
         result = await agent.decode(message, agent_deps)
         assert result.processing_latency_ms is not None

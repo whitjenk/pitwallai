@@ -16,7 +16,9 @@ from intelligence.repository import (
     get_fantasy_team,
     get_monitor_state,
     list_live_alert_subscribers,
+    load_seen_keys,
     record_live_alert_delivery,
+    record_seen_key,
     save_race_event,
     set_monitor_state,
 )
@@ -111,6 +113,30 @@ async def _race_complete(client: OpenF1Client, session_key: int) -> bool:
     return len(by_driver) >= 18
 
 
+async def _rehydrate_dedup(race_key: str) -> None:
+    """Rehydrate dedup ledgers from Postgres into the in-memory sets.
+
+    Called once at monitor start so a Railway restart mid-race doesn't
+    re-broadcast events we already processed pre-restart. The in-memory
+    sets remain the hot path; the DB is the durable mirror. Failures
+    here are logged but never raise — the monitor must keep running.
+    """
+    try:
+        persisted_msgs = await load_seen_keys(race_key, "msg")
+        persisted_pits = await load_seen_keys(race_key, "pit")
+        if persisted_msgs:
+            _seen_messages[race_key].update(persisted_msgs)
+        if persisted_pits:
+            _seen_pit_stops[race_key].update(persisted_pits)
+        logger.bind(
+            race_key=race_key,
+            msgs=len(persisted_msgs),
+            pits=len(persisted_pits),
+        ).info("monitor_dedup_rehydrated")
+    except Exception as exc:
+        logger.warning("monitor_dedup_rehydrate_failed race_key={}: {}", race_key, exc)
+
+
 async def _poll_loop(
     ctx: RaceContext,
     deps: AgentRunDependencies,
@@ -120,6 +146,8 @@ async def _poll_loop(
     race_key = ctx.race_weekend.race_key
     client = deps.openf1_client
     last_rain: bool | None = None
+
+    await _rehydrate_dedup(race_key)
 
     logger.bind(race_key=race_key, session_key=session_key).info("Agent 4 race monitor started")
 
@@ -132,6 +160,7 @@ async def _poll_loop(
                 if msg_id in _seen_messages[race_key]:
                     continue
                 _seen_messages[race_key].add(msg_id)
+                await record_seen_key(race_key, "msg", msg_id)
 
                 event_type = _classify_message(msg, row.lap_number, row.driver_number)
                 if event_type is None:
@@ -150,6 +179,7 @@ async def _poll_loop(
                     description=desc,
                     utc_timestamp=row.date or datetime.now(tz=UTC),
                     driver_code=driver_code,
+                    decoded_at_utc=datetime.now(tz=UTC),
                 )
                 await save_race_event(event)
 
@@ -181,6 +211,7 @@ async def _poll_loop(
                 if pit_key in _seen_pit_stops[race_key]:
                     continue
                 _seen_pit_stops[race_key].add(pit_key)
+                await record_seen_key(race_key, "pit", pit_key)
                 code = driver_code_for(pit.driver_number)
                 await _broadcast_alert(
                     race_key,

@@ -17,6 +17,8 @@ _COLUMN_MIGRATIONS: tuple[str, ...] = (
     # Two-phase webhook claim — status + claimed_at on the dedup ledger.
     "ALTER TABLE processed_inbound_messages ADD COLUMN IF NOT EXISTS status VARCHAR(16) NOT NULL DEFAULT 'done'",
     "ALTER TABLE processed_inbound_messages ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
+    # Decode-time provenance for the "called it" recap.
+    "ALTER TABLE race_events ADD COLUMN IF NOT EXISTS decoded_at_utc TIMESTAMPTZ",
 )
 
 

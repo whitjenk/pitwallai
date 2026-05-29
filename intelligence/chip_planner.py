@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from circuits.profiles import CircuitProfile, get_circuit_profile
 from db.models import FantasyTeam
 from fantasy.rules import CHIP_NAMES_2026, chip_available, normalize_chip_name
+from intelligence.chip_conviction import ConfidenceTier, assess_chip_conviction
 from intelligence.repository import get_chip_plan_by_token, save_chip_plan
 from scheduler.calendar import CALENDAR_2026, RaceWeekend, get_race_weekend, profile_circuit_key
 
@@ -47,6 +48,8 @@ class ChipWindow(BaseModel):
     reasoning: str
     confidence: float
     priority: str
+    confidence_tier: ConfidenceTier = ConfidenceTier.MEDIUM
+    confidence_reasons: list[str] = Field(default_factory=list)
 
 
 class ChipPlan(BaseModel):
@@ -149,6 +152,7 @@ def generate_chip_plan(
             continue
         score, rec, reasoning = _score_window(weekend, profile, pressure_avg=pressure_avg)
         rec = [c for c in rec if c in available and CHIP_TO_CANONICAL[c] not in used]
+        conviction = assess_chip_conviction(score, profile, weekend, idx)
         windows.append(
             ChipWindow(
                 race_key=weekend.race_key,
@@ -161,12 +165,19 @@ def generate_chip_plan(
                 reasoning=reasoning,
                 confidence=round(min(0.95, score), 2),
                 priority="HIGH" if score > 0.75 else "MEDIUM" if score > 0.55 else "LOW",
+                confidence_tier=conviction.tier,
+                confidence_reasons=list(conviction.reasons),
             )
         )
 
     sequence: list[tuple[str, str]] = []
     assigned: set[ChipType] = set()
     for window in sorted(windows, key=lambda w: w.confidence, reverse=True):
+        if window.confidence_tier == ConfidenceTier.LOW:
+            # Don't anchor a chip to a Low-conviction window — holding beats
+            # a half-hearted placement. The chip stays unassigned and the UI
+            # surfaces it as "no strong window yet".
+            continue
         for chip in window.recommended_chips:
             if chip in assigned or chip not in available:
                 continue

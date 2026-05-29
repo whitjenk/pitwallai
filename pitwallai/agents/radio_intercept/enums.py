@@ -103,19 +103,17 @@ class UrgencyLevel(str, Enum):
                 return cls.LOW
 
 
-class ConfirmationState(str, Enum):
-    """Human confirmation state for competitor intelligence."""
-
-    UNCONFIRMED = "UNCONFIRMED"
-    ACKNOWLEDGED = "ACKNOWLEDGED"
-    ACTED_ON = "ACTED_ON"
-
-
 class StreamEventType(str, Enum):
-    """WebSocket event types for dashboard streaming."""
+    """WebSocket event types for dashboard streaming.
+
+    `LATENCY_BREACH` was removed when the 800ms decode contract was
+    retired — latency is now soft telemetry surfaced via bench.py only.
+    `COMPETITOR_INTEL_UNCONFIRMED` was renamed to ``UNVERIFIED`` when the
+    three-state confirmation flow (UNCONFIRMED → ACKNOWLEDGED → ACTED_ON)
+    collapsed to a single ``verified`` boolean on CompetitorIntel.
+    """
 
     TRANSMISSION_DECODED = "TRANSMISSION_DECODED"
-    LATENCY_BREACH = "LATENCY_BREACH"
-    COMPETITOR_INTEL_UNCONFIRMED = "COMPETITOR_INTEL_UNCONFIRMED"
+    COMPETITOR_INTEL_UNVERIFIED = "COMPETITOR_INTEL_UNVERIFIED"
     REHEARSAL_COMPLETE = "REHEARSAL_COMPLETE"
     SYSTEM_STATUS = "SYSTEM_STATUS"

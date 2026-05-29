@@ -8,10 +8,11 @@ from datetime import UTC, datetime
 from datetime import timedelta
 from typing import Any
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import Integer, delete, func, select
 from sqlalchemy.exc import IntegrityError
 
 from db.models import (
+    CalledRecapStore,
     ChipPlanStore,
     ConstructorStrategyProfile,
     ConstructorStrategyRow,
@@ -27,6 +28,7 @@ from db.models import (
     ProcessedInboundMessage,
     PracticeSignalRow,
     RaceEventRow,
+    RaceMonitorSeen,
     RaceMonitorState,
     SeasonAccuracy,
     ShareCard,
@@ -264,6 +266,55 @@ async def list_active_subscribers() -> list[Subscriber]:
             select(Subscriber).where(Subscriber.active.is_(True))
         )
         return list(result.scalars().all())
+
+
+async def get_public_stats() -> dict[str, Any]:
+    """Aggregate stats for the public homepage.
+
+    Three honest numbers:
+      - active_subscribers: count of subscribers with active=True
+      - season_hit_rate_pct: % of generic (phone IS NULL) picks where
+        was_correct=True, across all scored picks this season. Generic
+        picks are the right denominator for a public claim because they
+        don't depend on subscriber-specific team state.
+      - races_scored: distinct race_keys with at least one scored pick
+
+    Returns zeros (not None) for cold-start so the homepage renders cleanly.
+    """
+    async with get_session() as session:
+        subs = await session.execute(
+            select(func.count()).select_from(Subscriber).where(Subscriber.active.is_(True))
+        )
+        active_subscribers = int(subs.scalar_one() or 0)
+
+        scored_q = await session.execute(
+            select(
+                func.count().label("total"),
+                func.sum(
+                    func.cast(PickRow.was_correct, Integer)
+                ).label("correct"),
+            )
+            .select_from(PickRow)
+            .where(PickRow.phone.is_(None))
+            .where(PickRow.was_correct.is_not(None))
+        )
+        scored_row = scored_q.one()
+        total = int(scored_row.total or 0)
+        correct = int(scored_row.correct or 0)
+        season_hit_rate_pct = (correct / total * 100.0) if total > 0 else 0.0
+
+        races_q = await session.execute(
+            select(func.count(func.distinct(PickRow.race_key)))
+            .where(PickRow.was_correct.is_not(None))
+        )
+        races_scored = int(races_q.scalar_one() or 0)
+
+    return {
+        "active_subscribers": active_subscribers,
+        "season_hit_rate_pct": round(season_hit_rate_pct, 1),
+        "races_scored": races_scored,
+        "scored_picks": total,
+    }
 
 
 async def get_picks_for_race(
@@ -592,6 +643,24 @@ async def get_chip_plan_by_token(share_token: str) -> ChipPlanStore | None:
         return await session.get(ChipPlanStore, share_token)
 
 
+async def save_called_recap(
+    race_key: str, share_token: str, recap_json: dict[str, Any]
+) -> None:
+    async with get_session() as session:
+        session.add(
+            CalledRecapStore(
+                share_token=share_token,
+                race_key=race_key,
+                recap_json=recap_json,
+            )
+        )
+
+
+async def get_called_recap_by_token(share_token: str) -> CalledRecapStore | None:
+    async with get_session() as session:
+        return await session.get(CalledRecapStore, share_token)
+
+
 async def upsert_team_value_snapshot(
     *,
     phone: str,
@@ -777,8 +846,66 @@ async def save_race_event(event: RaceEvent) -> None:
                 description=event.description,
                 driver_code=event.driver_code,
                 utc_timestamp=event.utc_timestamp,
+                decoded_at_utc=event.decoded_at_utc,
             )
         )
+
+
+async def list_race_events(race_key: str) -> list[RaceEvent]:
+    """Load all persisted race events for a race, oldest first.
+
+    Source for the post-race "called it" recap.
+    """
+    from orchestrator.race_context import RaceEventType
+
+    async with get_session() as session:
+        result = await session.execute(
+            select(RaceEventRow)
+            .where(RaceEventRow.race_key == race_key)
+            .order_by(RaceEventRow.utc_timestamp.asc())
+        )
+        rows = result.scalars().all()
+    return [
+        RaceEvent(
+            race_key=r.race_key,
+            event_type=RaceEventType(r.event_type),
+            lap=r.lap,
+            description=r.description,
+            utc_timestamp=r.utc_timestamp,
+            driver_code=r.driver_code,
+            decoded_at_utc=r.decoded_at_utc,
+        )
+        for r in rows
+    ]
+
+
+async def load_seen_keys(race_key: str, kind: str) -> set[str]:
+    """Rehydrate the in-memory dedup set for the given race + kind."""
+    async with get_session() as session:
+        result = await session.execute(
+            select(RaceMonitorSeen.dedup_key)
+            .where(RaceMonitorSeen.race_key == race_key)
+            .where(RaceMonitorSeen.kind == kind)
+        )
+        return {row[0] for row in result.all()}
+
+
+async def record_seen_key(race_key: str, kind: str, dedup_key: str) -> None:
+    """Idempotently mark a key as seen for this race + kind."""
+    truncated = dedup_key[:128]
+    async with get_session() as session:
+        try:
+            session.add(
+                RaceMonitorSeen(
+                    race_key=race_key,
+                    kind=kind,
+                    dedup_key=truncated,
+                )
+            )
+            await session.flush()
+        except IntegrityError:
+            # Already seen — composite PK conflict is the success path.
+            await session.rollback()
 
 
 async def get_monitor_state(race_key: str) -> RaceMonitorState | None:

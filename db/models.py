@@ -179,6 +179,30 @@ class RaceEventRow(Base):
     description: Mapped[str] = mapped_column(Text, nullable=False)
     driver_code: Mapped[str | None] = mapped_column(String(8), nullable=True)
     utc_timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    decoded_at_utc: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class RaceMonitorSeen(Base):
+    """Persistent dedup ledger for the live race monitor.
+
+    `kind` is "msg" (race-control message) or "pit" (driver+lap pit stop).
+    Rehydrated into in-memory sets on monitor startup so a Railway restart
+    mid-race doesn't re-broadcast previously-seen events or double-count
+    them in the called-recap.
+    """
+
+    __tablename__ = "race_monitor_seen"
+
+    race_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(8), primary_key=True)
+    dedup_key: Mapped[str] = mapped_column(String(128), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
 
 
 class RaceMonitorState(Base):
@@ -471,6 +495,21 @@ class ChipPlanStore(Base):
     share_token: Mapped[str] = mapped_column(String(36), primary_key=True)
     phone: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     plan_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+
+class CalledRecapStore(Base):
+    """Persisted post-race 'we called it' recap for web share."""
+
+    __tablename__ = "called_recaps"
+
+    share_token: Mapped[str] = mapped_column(String(36), primary_key=True)
+    race_key: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    recap_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

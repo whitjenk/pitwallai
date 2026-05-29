@@ -50,6 +50,25 @@ def _truncate(text: str, limit: int) -> str:
     return text[: limit - 3] + "…"
 
 
+# Verify-in-official-app guard. Required on every chip / transfer
+# recommendation surface because our fantasy/rules.py is a snapshot of
+# the official game rules — when the game patches mid-season, our
+# advice can lag by a race or two. The official app is authoritative;
+# the user should always confirm before lock.
+_VERIFY_GUARD = "🔍 Verify in F1 Fantasy app before lock."
+
+
+def _with_verify_guard(body: str, limit: int) -> str:
+    """Truncate body and append the verify-in-app guard, fitting `limit` chars.
+
+    The guard is non-negotiable — if the body would push the message
+    over the limit, the body is truncated to make room.
+    """
+    suffix = "\n\n" + _VERIFY_GUARD
+    body_budget = max(0, limit - len(suffix))
+    return _truncate(body, body_budget) + suffix
+
+
 def _lock_time_local(weekend: RaceWeekend, timezone: str) -> str:
     tz = ZoneInfo(timezone)
     lock = weekend.fantasy_lock_utc.astimezone(tz)
@@ -255,7 +274,7 @@ async def send_chips_summary(phone: str) -> str:
         label = wk.display_name if wk else rk
         seq_lines.append(f"{chip} → {label}")
     seq_txt = "\n".join(seq_lines) if seq_lines else "No unused chips scored highly."
-    return _truncate(
+    return _with_verify_guard(
         f"🎴 Chip plan for remaining {remaining} races\n\n"
         f"📅 Recommended sequence:\n{seq_txt}\n\n"
         f"Full plan: pitwallai.app/chips/{plan.share_token}\n"

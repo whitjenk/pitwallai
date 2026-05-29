@@ -17,7 +17,6 @@ from pydantic import ValidationError
 from pitwallai.agents.radio_intercept.agent import RadioInterceptAgent
 from pitwallai.agents.radio_intercept.errors import DecodeRuntimeError, DecodeValidationError
 from pitwallai.agents.radio_intercept.enums import (
-    ConfirmationState,
     RadioIntent,
     StreamEventType,
     UrgencyLevel,
@@ -348,26 +347,13 @@ class RadioInterceptDecoder:
                     emitted_at=emitted_at,
                 )
             ]
-            if result.exceeds_latency_target:
-                events.append(
-                    WebSocketEvent(
-                        event_type=StreamEventType.LATENCY_BREACH,
-                        payload={
-                            "latency_ms": result.processing_latency_ms,
-                            "driver": result.driver_code,
-                        },
-                        session_key=result.session_key,
-                        emitted_at=emitted_at,
-                    )
-                )
             if (
                 result.competitor_intel is not None
-                and result.competitor_intel.confirmation_state
-                == ConfirmationState.UNCONFIRMED
+                and not result.competitor_intel.verified
             ):
                 events.append(
                     WebSocketEvent(
-                        event_type=StreamEventType.COMPETITOR_INTEL_UNCONFIRMED,
+                        event_type=StreamEventType.COMPETITOR_INTEL_UNVERIFIED,
                         payload=result,
                         session_key=result.session_key,
                         emitted_at=emitted_at,

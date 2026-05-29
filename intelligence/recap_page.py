@@ -88,13 +88,24 @@ def render_recap_share_html(card: ShareCard) -> str:
             f'<div class="stat">{escape((detail.get("reasoning") or "")[:120])}</div></div>'
         )
 
+    og_title = f"PitWallAI · {card.race_name} recap"
+    og_desc = (
+        f"{card.picks_correct}/{card.picks_total} picks "
+        f"({card.accuracy_pct:.0f}%) · Season GP hit rate {card.season_accuracy_pct:.0f}%"
+    )
     return f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>PitWallAI · {escape(card.race_name)} recap</title>
-  <meta name="description" content="PitWallAI race recap — {card.picks_correct}/{card.picks_total} picks" />
+  <title>{escape(og_title)}</title>
+  <meta name="description" content="{escape(og_desc)}" />
+  <meta property="og:title" content="{escape(og_title)}" />
+  <meta property="og:description" content="{escape(og_desc)}" />
+  <meta property="og:type" content="article" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="{escape(og_title)}" />
+  <meta name="twitter:description" content="{escape(og_desc)}" />
   <style>{_RECAP_CSS}</style>
 </head>
 <body>

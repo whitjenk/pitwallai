@@ -10,7 +10,8 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from loguru import logger
 from pydantic import BaseModel
 
@@ -45,6 +46,7 @@ from pitwallai.agents.radio_intercept.vector_store import MockVectorStore
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DASHBOARD_PATH = PROJECT_ROOT / "dashboard.jsx"
+STATIC_DIR = PROJECT_ROOT / "api" / "static"
 
 
 class ConfirmIntelBody(BaseModel):
@@ -120,6 +122,8 @@ def create_app(
 
     app = FastAPI(title="PitWallAI Radio Intercept Decoder", version="1.0")
     app.include_router(picks_router)
+    STATIC_DIR.mkdir(parents=True, exist_ok=True)
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
     app.state.mode = mode
     app.state.rehearsal_speed = rehearsal_speed
     app.state.settings = pitwall_settings
@@ -236,6 +240,26 @@ def create_app(
             engine.start_background(speed_multiplier=rehearsal_speed)
             log.info("Monaco 2024 rehearsal auto-started")
 
+            from fantasy.rules import DRIVER_PRICES_M
+            from intelligence.cache_health import check_signal_cache_health
+            from intelligence.rehearsal_cache_seed import seed_rehearsal_practice_signals_if_needed
+            from onboarding.monaco_calendar import MONACO_2024_REHEARSAL
+
+            await seed_rehearsal_practice_signals_if_needed()
+            print("\n=== SIGNAL CACHE HEALTH CHECK ===")
+            health = await check_signal_cache_health(
+                race_key=MONACO_2024_REHEARSAL.race_key,
+                driver_codes=sorted(DRIVER_PRICES_M.keys()),
+            )
+            print(f"Practice coverage: {health.practice_hits}/{health.drivers_checked}")
+            print(f"Radio coverage:    {health.radio_hits}/{health.drivers_checked}")
+            print(f"Ready for cards:   {health.ready_for_explanations}")
+            if health.practice_misses:
+                print(f"Missing practice:  {', '.join(health.practice_misses)}")
+            if health.radio_misses:
+                print(f"Missing radio:     {', '.join(health.radio_misses)}")
+            print("=================================\n")
+
         from agents.race_monitor import resume_monitors_on_startup
         from agents.base import AgentRunDependencies
 
@@ -246,6 +270,27 @@ def create_app(
             settings=pitwall_settings,
         )
         await resume_monitors_on_startup(monitor_deps)
+
+        from pitwallai.feature_flags import constructor_strategy_enabled
+
+        if constructor_strategy_enabled():
+            from intelligence.constructor_strategy import seed_constructor_profiles
+
+            asyncio.create_task(seed_constructor_profiles())
+            log.info("Constructor strategy profile seeder scheduled (background)")
+        else:
+            log.info("Constructor strategy seeder skipped (flag off)")
+
+        from whatsapp.settings import get_whatsapp_settings
+
+        if (
+            not get_whatsapp_settings().database_url.strip()
+            and pitwall_settings.explanation_cards_enabled
+        ):
+            from intelligence.demo_picks import build_demo_picks_result
+
+            app.state.last_picks_result = build_demo_picks_result()
+            log.info("Loaded demo picks with explanation cards (no DATABASE_URL)")
 
         log.info("PitWallAI startup complete")
 
@@ -310,6 +355,10 @@ def create_app(
     @app.get("/api/season/{token}")
     async def season_recap(token: str) -> dict[str, Any]:
         """Return a public share payload for a season recap token."""
+        from pitwallai.feature_flags import season_recap_enabled
+
+        if not season_recap_enabled():
+            raise HTTPException(status_code=404, detail="Season recap disabled")
         parsed = parse_share_token(token, _season_share_secret())
         if parsed is None:
             raise HTTPException(status_code=404, detail="Invalid season recap token")
@@ -333,6 +382,10 @@ def create_app(
     @app.get("/you/{token}", response_class=HTMLResponse)
     async def season_recap_page(token: str) -> HTMLResponse:
         """Render a public, share-friendly season recap page."""
+        from pitwallai.feature_flags import season_recap_enabled
+
+        if not season_recap_enabled():
+            raise HTTPException(status_code=404, detail="Season recap disabled")
         parsed = parse_share_token(token, _season_share_secret())
         if parsed is None:
             raise HTTPException(status_code=404, detail="Invalid season recap token")
@@ -360,6 +413,10 @@ def create_app(
     @app.get("/recap/{token}", response_class=HTMLResponse)
     async def race_recap_page(token: str) -> HTMLResponse:
         """Public post-race recap share page (token is auth)."""
+        from pitwallai.feature_flags import counterfactual_recap_enabled
+
+        if not counterfactual_recap_enabled():
+            raise HTTPException(status_code=404, detail="Recap disabled")
         from intelligence.recap_page import render_recap_page_for_token
 
         html = await render_recap_page_for_token(token)
@@ -370,12 +427,26 @@ def create_app(
     @app.get("/chips/{token}", response_class=HTMLResponse)
     async def chip_plan_page(token: str) -> HTMLResponse:
         """Public chip plan calendar page."""
+        from pitwallai.feature_flags import chips_enabled
+
+        if not chips_enabled():
+            raise HTTPException(status_code=404, detail="Chips disabled")
         from intelligence.chips_page import render_chips_page_for_token
 
         html = await render_chips_page_for_token(token)
         if html is None:
             raise HTTPException(status_code=404, detail="Chip plan not found")
         return HTMLResponse(content=html)
+
+    @app.get("/results", include_in_schema=False)
+    async def results_page() -> RedirectResponse:
+        """Public season hit-rate page (static HTML)."""
+        return RedirectResponse(url="/static/results.html", status_code=302)
+
+    @app.get("/", include_in_schema=False)
+    async def root_redirect():
+        """Send browsers to the dashboard (avoid blank 404 on /)."""
+        return RedirectResponse(url="/dashboard", status_code=302)
 
     @app.get("/dashboard")
     async def dashboard() -> FileResponse:
@@ -411,7 +482,7 @@ def create_app(
         avg_latency = sum(latencies) / len(latencies) if latencies else 0.0
         engine: RehearsalEngine | None = app.state.rehearsal_engine
         progress = engine.get_progress() if engine is not None else {}
-        return {
+        payload: dict[str, Any] = {
             "mode": session.mode,
             "current_lap": session.current_lap or progress.get("current_lap", 0),
             "circuit": session.circuit,
@@ -421,6 +492,23 @@ def create_app(
             "avg_latency_ms": round(avg_latency, 1),
             "rehearsal_progress": progress,
         }
+        cached = getattr(app.state, "last_picks_result", None)
+        if cached is not None:
+            from whatsapp.message_format import format_explanation_card
+
+            previews: list[dict[str, Any]] = []
+            for pick in cached.output.picks[:3]:
+                if pick.explanation is None:
+                    continue
+                previews.append(
+                    {
+                        "driver_code": pick.driver_code,
+                        "card": format_explanation_card(pick.explanation),
+                    }
+                )
+            if previews:
+                payload["pick_explanation_cards"] = previews
+        return payload
 
     @app.post("/api/intel/confirm/{transmission_id}")
     async def confirm_intel(

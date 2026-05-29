@@ -98,25 +98,24 @@ class PicksScheduler:
         persist_picks: bool,
     ) -> PicksRunResult:
         client = OpenF1Client()
-        try:
-            result = await run_picks_pipeline(
-                client=client,
-                agent=self._app.state.agent,
-                vector_store=self._app.state.vector_store,
-                settings=self._app.state.settings,
-                ctx=self._app.state.orchestrator_context,
-                year=year or self._settings.race_year,
-                circuit_key=circuit_key or self._settings.circuit_key_override,
-                phone=phone,
-                persist_picks=persist_picks,
-            )
-            self._app.state.last_picks_result = result
-            logger.bind(
-                circuit=result.weekend.circuit_key,
-                picks=len(result.output.picks),
-                personalized=result.output.personalized,
-            ).info("Picks pipeline completed")
-            return result
+        result = await run_picks_pipeline(
+            client=client,
+            agent=self._app.state.agent,
+            vector_store=self._app.state.vector_store,
+            settings=self._app.state.settings,
+            ctx=self._app.state.orchestrator_context,
+            year=year or self._settings.race_year,
+            circuit_key=circuit_key or self._settings.circuit_key_override,
+            phone=phone,
+            persist_picks=persist_picks,
+        )
+        self._app.state.last_picks_result = result
+        logger.bind(
+            circuit=result.weekend.circuit_key,
+            picks=len(result.output.picks),
+            personalized=result.output.personalized,
+        ).info("Picks pipeline completed")
+        return result
 
     async def _loop(self) -> None:
         """Background loop — initial run then sleep interval."""

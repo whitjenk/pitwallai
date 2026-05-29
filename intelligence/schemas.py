@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from circuits.profiles import CircuitProfile
 from db.models import FantasyTeam, PricePrediction
+from models.pick_explanation import PickExplanation
 
 
 class PracticeSignal(BaseModel):
@@ -69,6 +70,9 @@ class PickRecommendation(BaseModel):
     price_confidence: float | None = None
     price_timing_note: str | None = None
     constructor_strategy_note: str | None = None
+    constructor_tendency_note: str | None = None
+    constructor_data_quality: str | None = None
+    explanation: PickExplanation | None = None
 
 
 class PickOutput(BaseModel):

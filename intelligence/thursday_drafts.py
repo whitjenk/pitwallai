@@ -45,5 +45,7 @@ async def generate_thursday_draft_picks(race_key: str, deps: AgentRunDependencie
             )
             created += 1
         except Exception as exc:
-            logger.error("thursday draft failed phone={}: {}", sub.phone[:6], exc)
+            from whatsapp.sender import mask_phone
+
+            logger.error("thursday draft failed phone={}: {}", mask_phone(sub.phone), exc)
     return created

@@ -1,0 +1,221 @@
+"""Handle inbound WhatsApp images — primarily F1 Fantasy team screenshots."""
+
+from __future__ import annotations
+
+from loguru import logger
+
+from fantasy.rules import DRIVERS_PER_TEAM
+from intelligence.repository import upsert_fantasy_team_fields
+from intelligence.standings_extractor import extract_standings_from_image
+from intelligence.team_extractor import extract_team_from_image
+from intelligence.vision_budget import check_vision_budget, record_vision_call_for
+from whatsapp.media import (
+    InvalidMediaError,
+    MediaTooLargeError,
+    download_media,
+)
+from whatsapp.sender import mask_phone, send_message
+from whatsapp.subscribe_flow import (
+    clear_pending_screenshot,
+    get_pending_screenshot,
+    truncate,
+)
+
+
+def _save_fields(team) -> dict[str, object]:
+    """Map ExtractedTeam → repository upsert payload (only non-empty fields)."""
+    fields: dict[str, object] = {}
+    drivers = team.drivers[:DRIVERS_PER_TEAM]
+    for idx, code in enumerate(drivers, start=1):
+        fields[f"driver_{idx}"] = code
+    for idx, code in enumerate(team.constructors[:2], start=1):
+        fields[f"constructor_{idx}"] = code
+    if team.remaining_budget_m is not None:
+        fields["remaining_budget"] = float(team.remaining_budget_m)
+    if team.transfers_available is not None:
+        fields["transfers_available"] = int(team.transfers_available)
+    return fields
+
+
+def _summary_line(team) -> str:
+    drivers = " · ".join(team.drivers) if team.drivers else "—"
+    cons = " · ".join(team.constructors) if team.constructors else "—"
+    budget = (
+        f"`${team.remaining_budget_m:.1f}M`"
+        if team.remaining_budget_m is not None
+        else "—"
+    )
+    tfr = team.transfers_available if team.transfers_available is not None else "—"
+    return (
+        f"*Drivers:* {drivers}\n"
+        f"*Constructors:* {cons}\n"
+        f"*Budget left:* {budget}  ·  *Transfers:* {tfr}"
+    )
+
+
+def _missing_followup(missing: list[str]) -> str:
+    if not missing:
+        return ""
+    labels = {
+        "drivers": "your 5 driver codes (e.g. NOR VER LEC ALB HAM)",
+        "constructors": "your 2 constructor codes (e.g. MCL FER)",
+        "budget": "your remaining budget in $M (e.g. 4.2)",
+        "transfers": "transfers available (a number, usually 1-5)",
+    }
+    parts = [labels[f] for f in missing if f in labels]
+    if not parts:
+        return ""
+    return "A couple of fields were blurry on my end — quick reply with " + "; ".join(parts) + "."
+
+
+async def _handle_team_screenshot(
+    phone: str, image_bytes: bytes, mime_type: str, kind: str,
+) -> None:
+    """Save a team screenshot (initial setup or post-lock confirmation)."""
+    result = await extract_team_from_image(image_bytes, mime_type=mime_type)
+
+    if result.status == "error":
+        await send_message(phone, truncate(
+            "Hmm — my vision step hiccuped on that one. "
+            "Mind resending the screenshot? Or text your 5 driver codes if you'd rather."
+        ))
+        return
+
+    if result.status == "rejected" or result.team is None:
+        await send_message(phone, truncate(
+            "That screen looks different than I expected. "
+            "I'm looking for the *My Team* page in F1 Fantasy — the one with your 5 drivers + 2 constructors."
+        ))
+        return
+
+    fields = _save_fields(result.team)
+    if fields:
+        await upsert_fantasy_team_fields(phone, **fields)
+        logger.bind(phone=mask_phone(phone), kind=kind).info(
+            "Team saved from screenshot · drivers={} constructors={} budget={} transfers={}",
+            len(result.team.drivers),
+            len(result.team.constructors),
+            result.team.remaining_budget_m,
+            result.team.transfers_available,
+        )
+
+    await clear_pending_screenshot(phone)
+
+    if kind == "locked_team":
+        await send_message(phone, (
+            "✅ Locked team saved:\n\n"
+            f"{_summary_line(result.team)}\n\n"
+            "I'll score against this on Sunday and tell you how you did vs PitWallAI's picks."
+        ))
+        return
+
+    if result.status == "ok":
+        await send_message(phone, (
+            "✅ Got your team:\n\n"
+            f"{_summary_line(result.team)}\n\n"
+            "Saturday picks land before lock. Text PICKS anytime, or a driver code (e.g. NOR) for one card."
+        ))
+        return
+
+    await send_message(phone, (
+        "Got most of it:\n\n"
+        f"{_summary_line(result.team)}\n\n"
+        f"{_missing_followup(result.missing_fields)}"
+    ).strip())
+
+
+async def _handle_standings_screenshot(
+    phone: str, image_bytes: bytes, mime_type: str,
+) -> None:
+    """Save a league standings screenshot for the Monday post-mortem."""
+    from intelligence.repository import save_league_standings_snapshot
+
+    result = await extract_standings_from_image(image_bytes, mime_type=mime_type)
+
+    if result.status != "ok" or result.standings is None:
+        await clear_pending_screenshot(phone)
+        await send_message(phone, truncate(
+            "I couldn't quite make those standings out — no problem. "
+            "I'll ask again after the next race when the screen's fresh."
+        ))
+        return
+
+    try:
+        await save_league_standings_snapshot(
+            phone=phone,
+            entries=[e.model_dump() for e in result.standings.entries],
+            captured_at_race_key=None,
+        )
+    except Exception as exc:  # additive: never block
+        logger.warning("save_league_standings_snapshot skipped phone={}: {}", mask_phone(phone), exc)
+
+    await clear_pending_screenshot(phone)
+    top = result.standings.entries[0] if result.standings.entries else None
+    me = next((e for e in result.standings.entries if e.is_user), None)
+    if top and me and me.position:
+        await send_message(phone, (
+            f"Got your league. You're *P{me.position}* — "
+            f"leader is *{top.user_name or 'unknown'}*. "
+            "I'll show you what they did differently on Monday."
+        ))
+    else:
+        await send_message(phone, truncate(
+            "Saved. I'll show you what your league leader did differently on Monday."
+        ))
+
+
+_VISION_LIMIT_REPLY = (
+    "I've hit my vision limit for now — let's pick this up in an hour or so. "
+    "You can also text your team codes manually anytime."
+)
+
+
+async def handle_inbound_image(phone: str, media_id: str, mime_type: str) -> None:
+    """Process an inbound image. Dispatches on the pending_screenshot state."""
+    kind = await get_pending_screenshot(phone)
+    if kind is None:
+        logger.debug("Inbound image ignored (not awaiting screenshot) phone={}", mask_phone(phone))
+        return
+
+    budget = await check_vision_budget(phone)
+    if not budget.allowed:
+        logger.info(
+            "Vision budget blocked phone={} kind={} reason={}",
+            mask_phone(phone),
+            kind,
+            budget.reason,
+        )
+        await send_message(phone, truncate(_VISION_LIMIT_REPLY))
+        return
+
+    try:
+        image_bytes, detected_mime = await download_media(media_id)
+    except MediaTooLargeError:
+        await send_message(phone, truncate(
+            "That image is a bit large for me — try a smaller screenshot (under 8 MB)."
+        ))
+        return
+    except InvalidMediaError:
+        await send_message(phone, truncate(
+            "I couldn't read that as a photo — please send a JPEG or PNG screenshot."
+        ))
+        return
+    except Exception as exc:
+        logger.exception("download_media failed phone={}: {}", mask_phone(phone), exc)
+        await send_message(phone, truncate(
+            "My connection to WhatsApp media slipped — could you resend that image?"
+        ))
+        return
+
+    effective_mime = detected_mime or mime_type
+    await record_vision_call_for(phone, kind)
+
+    if kind in {"team_setup", "locked_team"}:
+        await _handle_team_screenshot(phone, image_bytes, effective_mime, kind)
+        return
+    if kind == "league_standings":
+        await _handle_standings_screenshot(phone, image_bytes, effective_mime)
+        return
+
+    logger.warning("Unknown pending screenshot kind={} phone={}", kind, mask_phone(phone))
+    await clear_pending_screenshot(phone)

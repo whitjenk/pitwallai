@@ -24,6 +24,7 @@ from intelligence.repository import (
 from intelligence.season_recap import build_season_recap
 from intelligence.scorer import _fetch_final_positions, _points_for_position
 from openf1.client import OpenF1Client
+from whatsapp.sender import mask_phone
 from orchestrator.race_context import (
     SignalQuality,
     SignalQualityEntry,
@@ -230,6 +231,24 @@ async def run_scorer_and_learner(
             delta, correct = _score_generic_pick(pick, positions)
         await update_pick_result(pick.id, actual_points_delta=delta, was_correct=correct)
 
+    # Refresh from DB so was_correct/actual_points_delta are populated for the eval pass.
+    try:
+        from intelligence.eval.runner import compute_eval_report, log_eval_report
+        from intelligence.repository import get_prior_season_circuit_winners
+
+        scored_picks = await get_all_picks_for_race(race_key)
+        prior_winners = await get_prior_season_circuit_winners(season=2025)
+        report = compute_eval_report(
+            race_key=race_key,
+            circuit_key=profile_key,
+            picks=scored_picks,
+            positions=positions,
+            prior_winners=prior_winners,
+        )
+        log_eval_report(report)
+    except Exception as exc:  # eval is additive — never block scoring
+        logger.warning("eval_report skipped race_key={}: {}", race_key, exc)
+
     overall, pers, gen, best, worst = await _compute_season_stats(2026)
     await upsert_season_accuracy(
         season=2026,
@@ -252,6 +271,34 @@ async def run_scorer_and_learner(
             logger.info("Price prediction scored race_key={} updated={} hit_rate={:.2f}", race_key, updated, hit_rate)
     new_ctx = evolve_race_context(ctx, signal_quality=signal_quality)
 
+    from intelligence.constructor_strategy import (
+        CONSTRUCTOR_CODES,
+        fetch_pit_history,
+        update_constructor_profile,
+    )
+
+    circuit_key = ctx.circuit_profile.circuit_key
+    race_year = ctx.race_weekend.race_utc.year
+    for constructor_code in CONSTRUCTOR_CODES:
+        try:
+            new_events = await fetch_pit_history(
+                circuit_key,
+                constructor_code,
+                years=[race_year],
+            )
+            await update_constructor_profile(
+                constructor_code=constructor_code,
+                circuit_key=circuit_key,
+                new_pit_events=new_events,
+            )
+        except Exception as exc:
+            logger.warning(
+                "constructor profile update failed {} {}: {}",
+                constructor_code,
+                circuit_key,
+                exc,
+            )
+
     from intelligence.budget_tracker import track_team_value
     from sharing.share_cards import generate_share_card
 
@@ -261,7 +308,7 @@ async def run_scorer_and_learner(
             await generate_share_card(phone, race_key)
             await track_team_value(phone, race_key)
         except Exception as exc:
-            logger.error("post-score share/value failed phone={}: {}", phone[:6], exc)
+            logger.error("post-score share/value failed phone={}: {}", mask_phone(phone), exc)
 
     await _broadcast_recap(
         new_ctx,
@@ -274,8 +321,29 @@ async def run_scorer_and_learner(
         ),
     )
 
+    _regenerate_results_page(race_key=race_key)
+
     logger.bind(race_key=race_key, overall=overall).info("Agent 5 scorer and learner complete")
     return new_ctx
+
+
+def _regenerate_results_page(*, race_key: str) -> None:
+    """Rebuild api/static/results.html after scoring (best-effort)."""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    script = Path(__file__).resolve().parent.parent / "scripts" / "generate_results_page.py"
+    try:
+        subprocess.run(
+            [sys.executable, str(script), "--season", "2026"],
+            check=True,
+            timeout=30,
+            cwd=str(script.parent.parent),
+        )
+        logger.info("results_page_regenerated race_key={}", race_key)
+    except Exception as exc:
+        logger.warning("results_page_regen_failed race_key={} error={}", race_key, exc)
 
 
 async def _broadcast_recap(

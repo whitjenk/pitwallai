@@ -10,11 +10,13 @@ from fastapi import APIRouter, BackgroundTasks, Query, Request, Response, status
 from loguru import logger
 
 from intelligence.repository import (
-    mark_inbound_message_processed,
-    was_inbound_message_processed,
+    claim_inbound_message,
+    complete_inbound_message,
 )
-from whatsapp.commands import handle_inbound_text
-from whatsapp.payload import extract_text_messages
+from whatsapp.sender import mask_phone
+from whatsapp.inbound import handle_inbound_text
+from whatsapp.inbound_image import handle_inbound_image
+from whatsapp.payload import extract_image_messages, extract_text_messages
 from whatsapp.settings import get_whatsapp_settings
 from whatsapp.webhook_verify import (
     verify_meta_signature,
@@ -56,13 +58,13 @@ async def _process_payload(payload: dict[str, Any]) -> None:
         payload: Parsed JSON body from Meta.
     """
     for message in extract_text_messages(payload):
-        if await was_inbound_message_processed(message.message_id):
+        if not await claim_inbound_message(message.message_id):
             logger.debug("Skipping duplicate WhatsApp message_id={}", message.message_id)
             continue
         logger.debug(
             "Inbound WhatsApp message_id={} phone={}",
             message.message_id,
-            message.phone[:6] + "…" if len(message.phone) > 6 else message.phone,
+            mask_phone(message.phone),
         )
         try:
             await handle_inbound_text(message.phone, message.text, message.raw_text)
@@ -72,7 +74,21 @@ async def _process_payload(payload: dict[str, Any]) -> None:
                 message.message_id,
             )
             raise
-        await mark_inbound_message_processed(message.message_id)
+        await complete_inbound_message(message.message_id)
+
+    for image in extract_image_messages(payload):
+        if not await claim_inbound_message(image.message_id):
+            logger.debug("Skipping duplicate WhatsApp image message_id={}", image.message_id)
+            continue
+        try:
+            await handle_inbound_image(image.phone, image.media_id, image.mime_type)
+        except Exception:
+            logger.exception(
+                "Inbound WhatsApp image handler failed message_id={}",
+                image.message_id,
+            )
+            raise
+        await complete_inbound_message(image.message_id)
 
 
 @router.post("/webhook")
@@ -89,6 +105,8 @@ async def webhook_receive(
     settings = get_whatsapp_settings()
     mode = str(getattr(request.app.state, "mode", "unknown")).lower()
     signature_bypass = webhook_skip_signature() and mode != "live"
+    if signature_bypass:
+        logger.warning("Webhook signature verification SKIPPED — dev-only (mode={})", mode)
     if not signature_bypass:
         if not settings.whatsapp_app_secret.strip():
             logger.error("WHATSAPP_APP_SECRET not set — rejecting webhook POST")

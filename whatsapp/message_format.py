@@ -6,8 +6,43 @@ from datetime import UTC, datetime
 import re
 from zoneinfo import ZoneInfo
 
+from fantasy.rules import driver_price_m
 from intelligence.schemas import PickOutput, PickRecommendation
+from models.pick_explanation import PickExplanation, SignalSource
 from scheduler.calendar import RaceWeekend
+
+SIGNAL_EMOJI: dict[str, str] = {
+    SignalSource.PRACTICE.value: "📊",
+    SignalSource.QUALI.value: "⏱️",
+    SignalSource.RADIO.value: "📡",
+    SignalSource.PRICE.value: "💰",
+    SignalSource.CIRCUIT.value: "🗺️",
+}
+
+_DRIVER_LABELS: dict[str, str] = {
+    "VER": "MAX VERSTAPPEN",
+    "NOR": "LANDO NORRIS",
+    "LEC": "CHARLES LECLERC",
+    "HAM": "LEWIS HAMILTON",
+    "PIA": "OSCAR PIASTRI",
+    "RUS": "GEORGE RUSSELL",
+    "SAI": "CARLOS SAINZ",
+    "ALO": "FERNANDO ALONSO",
+    "ALB": "ALEXANDER ALBON",
+    "GAS": "PIERRE GASLY",
+    "OCO": "ESTEBAN OCON",
+    "HUL": "NICO HULKENBERG",
+    "STR": "LANCE STROLL",
+    "LAW": "LIAM LAWSON",
+    "LIN": "ARVID LINDBLAD",
+    "COL": "FRANCO COLAPINTO",
+    "BEA": "OLIVER BEARMAN",
+    "ANT": "ANDREA KIMI ANTONELLI",
+    "HAD": "ISACK HADJAR",
+    "BOR": "GABRIEL BORTOLETO",
+    "BOT": "VALTTERI BOTTAS",
+    "PER": "SERGIO PEREZ",
+}
 
 # Core body limits (footer appended after — see broadcast footer constants).
 PERSONALIZED_MAX_CHARS_CORE = 400
@@ -86,11 +121,50 @@ def _short_reason(pick: PickRecommendation, max_len: int = 72) -> str:
     return _truncate(reason, max_len)
 
 
-def _shrink_core_for_limit(lines: list[str], best: PickRecommendation, core_limit: int) -> str:
-    """Prefer shortening the reasoning line before dropping the legal footer."""
+def format_explanation_card(explanation: PickExplanation) -> str:
+    """Render a PickExplanation as a WhatsApp-safe block (max 3 lines)."""
+    emoji = SIGNAL_EMOJI.get(explanation.signal_source.value, "📡")
+    card_lines = [
+        f"{emoji} Signal: {explanation.primary_signal}",
+        f"⚠️  Risk: {explanation.risk_note}",
+    ]
+    if explanation.field_angle:
+        card_lines.append(f"🎲 Field: {explanation.field_angle}")
+    return "\n".join(card_lines)
+
+
+def _driver_label(code: str) -> str:
+    return _DRIVER_LABELS.get(code.upper(), code.upper())
+
+
+def _explanation_lines(pick: PickRecommendation) -> list[str]:
+    """Header + card for the target driver (transfer-in or pick driver)."""
+    if pick.explanation is None:
+        return []
+    code = (pick.transfer_in or pick.driver_code).upper()
+    price = driver_price_m(code)
+    return [
+        "",
+        f"🏎 {_driver_label(code)}  ·  ${price:.1f}M",
+        "",
+        format_explanation_card(pick.explanation),
+    ]
+
+
+def _shrink_core_for_limit(
+    lines: list[str],
+    best: PickRecommendation,
+    core_limit: int,
+) -> str:
+    """Shorten reasoning first; drop explanation/constructor blocks if still over limit."""
+    core = "\n".join(lines)
+    if len(core) <= core_limit:
+        return core
+    working = _strip_explanation_block(lines)
+    working = [ln for ln in working if not ln.startswith("🏭 ")]
     reason_cap = 72
     while reason_cap >= 24:
-        rebuilt = list(lines)
+        rebuilt = list(working)
         for idx, line in enumerate(rebuilt):
             if line.startswith("📻 "):
                 rebuilt[idx] = f"📻 {_short_reason(best, reason_cap)}"
@@ -99,42 +173,35 @@ def _shrink_core_for_limit(lines: list[str], best: PickRecommendation, core_limi
         if len(core) <= core_limit:
             return core
         reason_cap -= 12
-    return _truncate("\n".join(lines), core_limit)
+    return _truncate("\n".join(working), core_limit)
 
 
-_STRATEGY_NOTE_RE = re.compile(
-    r"([A-Z]{2,4}) pit tendency \((\d+) races\): "
-    r"early (\d+)% in pace-competitive stops \((\d+)\), "
-    r"cross-team undercut (\d+)% \((\d+) attempts\)",
-)
+def _strip_explanation_block(lines: list[str]) -> list[str]:
+    """Remove pick explanation card lines (practice signal priority over this block)."""
+    out: list[str] = []
+    skipping = False
+    for line in lines:
+        if line.startswith("🏎 "):
+            skipping = True
+            continue
+        if skipping:
+            if line.strip() == "":
+                continue
+            if line.startswith(("📡", "📊", "⏱️", "💰", "🗺️", "⚠️", "🎲")):
+                continue
+            skipping = False
+        out.append(line)
+    return out
 
 
-def _constructor_pit_tendency_line(note: str | None, circuit_label: str) -> str | None:
-    """
-    Observation-only pit tendency line (historical OpenF1 proxies).
-
-    Suppressed unless quali strategist met minimum sample thresholds.
-    """
+def _constructor_tendency_line(pick: PickRecommendation) -> str | None:
+    """Fantasy constructor note — HIGH quality only, observation-only."""
+    if (pick.constructor_data_quality or "").upper() != "HIGH":
+        return None
+    note = pick.constructor_tendency_note
     if not note or not note.strip():
         return None
-    m = _STRATEGY_NOTE_RE.search(note)
-    if not m:
-        return None
-    team = m.group(1)
-    races = int(m.group(2))
-    early_pct = int(m.group(3))
-    pace_stops = int(m.group(4))
-    undercut_pct = int(m.group(5))
-    undercut_attempts = int(m.group(6))
-    if races < 3 or pace_stops < 5 or undercut_attempts < 3:
-        return None
-    place = (circuit_label.split() or ["this circuit"])[0]
-    return _truncate(
-        f"⚙️ Historical pit trend ({team}): early {early_pct}% "
-        f"({pace_stops} pace-competitive stops, {races} races), "
-        f"cross-team undercut {undercut_pct}% ({undercut_attempts} attempts) at {place}",
-        120,
-    )
+    return _truncate(f"🏭 {note.strip()}", 60)
 
 
 def _opponent_label_from_reason(reasoning: str) -> str | None:
@@ -200,19 +267,21 @@ def format_personalized_picks(
         f"🏁 {weekend.display_name} — {hrs} hrs to lock",
         "",
         f"🔄 Best swap: {out_d} → {in_d}",
-        money_line,
-        f"📻 {_short_reason(best)}",
     ]
+    lines.extend(_explanation_lines(best))
+    lines.extend(
+        [
+            money_line,
+            f"📻 {_short_reason(best)}",
+        ]
+    )
     price_line = _price_timing_line(best)
     if price_line:
         lines.append(price_line)
 
-    strategy_line = _constructor_pit_tendency_line(
-        best.constructor_strategy_note,
-        weekend.display_name,
-    )
-    if strategy_line:
-        lines.append(strategy_line)
+    constructor_line = _constructor_tendency_line(best)
+    if constructor_line:
+        lines.append(constructor_line)
 
     if len(picks) > 1:
         alt = picks[1]
@@ -276,6 +345,8 @@ def format_generic_picks(
         lines.append(
             f"{emoji} {pick.driver_code} — {int(pick.confidence)}% · {_short_reason(pick, 48)}"
         )
+        if pick.rank == 1:
+            lines.extend(_explanation_lines(pick))
 
     lines.extend(
         [

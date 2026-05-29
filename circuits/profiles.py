@@ -349,6 +349,11 @@ def load_circuit_profiles() -> dict[str, CircuitProfile]:
     return dict(_REGISTRY)
 
 
+def all_circuit_keys() -> list[str]:
+    """All registered circuit_key values for seeding loops."""
+    return list(_REGISTRY.keys())
+
+
 def get_circuit_profile(circuit_key: str) -> CircuitProfile | None:
     """
     Resolve a profile by circuit_key or OpenF1 circuit_short_name.

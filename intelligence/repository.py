@@ -13,12 +13,15 @@ from sqlalchemy.exc import IntegrityError
 
 from db.models import (
     ChipPlanStore,
+    ConstructorStrategyProfile,
     ConstructorStrategyRow,
     DriverPrice,
     FantasyTeam,
     LeagueOnboardingState,
     LiveAlertDelivery,
     PickRow,
+    PendingScreenshotState,
+    PendingTimezoneState,
     PickOwnershipRow,
     PricePrediction,
     ProcessedInboundMessage,
@@ -32,6 +35,7 @@ from db.models import (
     TeamOnboardingState,
     TeamValueSnapshot,
     UserReportedPriceChange,
+    VisionCallLog,
     WeekendNotificationSent,
 )
 from orchestrator.race_context import RaceEvent, SignalQuality, SignalQualityEntry
@@ -268,15 +272,18 @@ async def get_picks_for_race(
     phone: str | None = None,
 ) -> list[PickRow]:
     """Load pick audit rows for a race, optionally filtered by phone."""
-    async with get_session() as session:
-        stmt = select(PickRow).where(PickRow.race_key == race_key)
-        if phone is not None:
-            stmt = stmt.where(PickRow.phone == phone)
-        else:
-            stmt = stmt.where(PickRow.phone.is_(None))
-        stmt = stmt.order_by(PickRow.pick_rank)
-        result = await session.execute(stmt)
-        return list(result.scalars().all())
+    try:
+        async with get_session() as session:
+            stmt = select(PickRow).where(PickRow.race_key == race_key)
+            if phone is not None:
+                stmt = stmt.where(PickRow.phone == phone)
+            else:
+                stmt = stmt.where(PickRow.phone.is_(None))
+            stmt = stmt.order_by(PickRow.pick_rank)
+            result = await session.execute(stmt)
+            return list(result.scalars().all())
+    except ValueError:
+        return []
 
 
 async def list_subscribers_for_race_picks(race_key: str) -> list[Subscriber]:
@@ -456,6 +463,71 @@ async def load_season_accuracy_row(season: int) -> SeasonAccuracy | None:
         return await session.get(SeasonAccuracy, season)
 
 
+async def load_latest_pick_for_driver(
+    race_key: str,
+    driver_code: str,
+    *,
+    phone: str | None = None,
+) -> PickRow | None:
+    """Latest audit pick row for a driver on a race weekend (personalized then generic)."""
+    code = driver_code.upper()
+    if phone:
+        rows = await get_picks_for_race(race_key, phone=phone)
+        for row in rows:
+            if row.driver_code.upper() == code:
+                return row
+    rows = await get_picks_for_race(race_key, phone=None)
+    for row in rows:
+        if row.driver_code.upper() == code:
+            return row
+    return None
+
+
+async def load_subscriber_pick_history(
+    phone: str,
+    *,
+    limit: int = 3,
+) -> list[tuple[str, str, str, float, bool]]:
+    """
+    Return recent race outcomes for a subscriber.
+
+    Each tuple: (race_key, race_name, driver_code, points_delta, was_correct).
+    """
+    from scheduler.calendar import get_race_weekend
+
+    async with get_session() as session:
+        result = await session.execute(
+            select(PickRow)
+            .where(
+                PickRow.phone == phone,
+                PickRow.was_correct.is_not(None),
+            )
+            .order_by(PickRow.created_at.desc())
+        )
+        rows = list(result.scalars().all())
+
+    by_race: dict[str, PickRow] = {}
+    for row in rows:
+        if row.race_key not in by_race:
+            by_race[row.race_key] = row
+
+    history: list[tuple[str, str, str, float, bool]] = []
+    for race_key, row in list(by_race.items())[:limit]:
+        weekend = get_race_weekend(race_key)
+        race_name = weekend.display_name if weekend else race_key.replace("_", " ").title()
+        pts = float(row.actual_points_delta or 0.0)
+        history.append(
+            (
+                race_key,
+                race_name,
+                row.driver_code,
+                pts,
+                bool(row.was_correct),
+            )
+        )
+    return history
+
+
 async def load_season_hit_rate_for_phone(phone: str, *, season: int) -> float:
     prefix = f"{season}_"
     async with get_session() as session:
@@ -577,29 +649,90 @@ async def get_all_picks_for_race(race_key: str) -> list[PickRow]:
         return list(result.scalars().all())
 
 
-async def load_practice_signals_by_circuit(circuit_key: str) -> list[PracticeSignal]:
-    """Load latest practice signals for a circuit."""
+async def save_league_standings_snapshot(
+    phone: str,
+    entries: list[dict[str, Any]],
+    captured_at_race_key: str | None,
+) -> None:
+    """Persist a league standings screenshot extraction onto FantasyTeam.
+
+    Stored on FantasyTeam.opponent_profiles JSONB (already exists, no migration).
+    Replaces any prior snapshot — latest wins.
+    """
+    payload = {
+        "captured_at_race_key": captured_at_race_key,
+        "entries": entries,
+    }
+    async with get_session() as session:
+        row = await session.get(FantasyTeam, phone)
+        if row is None:
+            row = FantasyTeam(phone=phone)
+            session.add(row)
+        row.opponent_profiles = [payload]
+
+
+async def get_prior_season_circuit_winners(season: int) -> dict[str, str]:
+    """{circuit_key → driver_code that scored max points} for a past season.
+
+    Used by the eval baselines. Returns an empty dict when the season has
+    no scored picks yet (cold-start safe).
+    """
     async with get_session() as session:
         result = await session.execute(
-            select(PracticeSignalRow)
-            .where(PracticeSignalRow.circuit_key == circuit_key)
-            .order_by(PracticeSignalRow.created_at.desc())
+            select(PickRow).where(
+                PickRow.race_key.like(f"{season}_%"),
+                PickRow.was_correct.is_not(None),
+            )
         )
         rows = list(result.scalars().all())
-    return [
-        PracticeSignal(
-            driver_number=r.driver_number,
-            driver_code=r.driver_code,
-            session=r.session_label,
-            setup_sentiment=r.setup_sentiment,
-            tire_confidence=r.tire_confidence,
-            mechanical_flags=list(r.mechanical_flags or []),
-            pace_satisfaction=r.pace_satisfaction,
-            anomaly_flags=list(r.anomaly_flags or []),
-            raw_evidence=list(r.raw_evidence or []),
-        )
-        for r in rows
-    ]
+
+    by_circuit: dict[str, tuple[str, float]] = {}
+    for r in rows:
+        delta = r.actual_points_delta or 0.0
+        prior = by_circuit.get(r.circuit_key)
+        if prior is None or delta > prior[1]:
+            by_circuit[r.circuit_key] = (r.driver_code, delta)
+    return {k: v[0] for k, v in by_circuit.items()}
+
+
+def _row_to_practice_signal(r: PracticeSignalRow) -> PracticeSignal:
+    return PracticeSignal(
+        driver_number=r.driver_number,
+        driver_code=r.driver_code,
+        session=r.session_label,
+        setup_sentiment=r.setup_sentiment,
+        tire_confidence=r.tire_confidence,
+        mechanical_flags=list(r.mechanical_flags or []),
+        pace_satisfaction=r.pace_satisfaction,
+        anomaly_flags=list(r.anomaly_flags or []),
+        raw_evidence=list(r.raw_evidence or []),
+    )
+
+
+async def load_practice_signals_by_circuit(circuit_key: str) -> list[PracticeSignal]:
+    """Load latest practice signals for a circuit (one row per driver, FP2 over FP1)."""
+    try:
+        async with get_session() as session:
+            result = await session.execute(
+                select(PracticeSignalRow)
+                .where(PracticeSignalRow.circuit_key == circuit_key)
+                .order_by(PracticeSignalRow.created_at.desc())
+            )
+            rows = list(result.scalars().all())
+    except ValueError:
+        return []
+    priority = {"FP2": 2, "FP1": 1}
+    merged: dict[str, PracticeSignal] = {}
+    for r in rows:
+        sig = _row_to_practice_signal(r)
+        code = sig.driver_code.upper()
+        existing = merged.get(code)
+        if existing is None:
+            merged[code] = sig
+            continue
+        if priority.get(sig.session, 0) > priority.get(existing.session, 0):
+            merged[code] = sig
+    return list(merged.values())
 
 
 async def list_live_alert_subscribers() -> list[Subscriber]:
@@ -730,36 +863,6 @@ async def build_signal_quality_from_db(circuit_key: str) -> SignalQuality | None
             weight_multiplier=mult,
         )
     return SignalQuality(entries=entries)
-
-
-async def was_inbound_message_processed(message_id: str) -> bool:
-    """True when this inbound WhatsApp message_id was already handled."""
-    if not message_id.strip():
-        return False
-    await _maybe_prune_security_tables()
-    try:
-        async with get_session() as session:
-            row = await session.get(ProcessedInboundMessage, message_id)
-            return row is not None
-    except ValueError:
-        return message_id in _FALLBACK_SEEN_MESSAGES
-
-
-async def mark_inbound_message_processed(message_id: str) -> None:
-    """Record successful handling for webhook deduplication."""
-    if not message_id.strip():
-        return
-    await _maybe_prune_security_tables()
-    try:
-        async with get_session() as session:
-            session.add(ProcessedInboundMessage(message_id=message_id))
-            try:
-                await session.flush()
-            except IntegrityError:
-                # Already recorded by another worker/request.
-                await session.rollback()
-    except ValueError:
-        _FALLBACK_SEEN_MESSAGES.add(message_id)
 
 
 async def can_send_live_alert(
@@ -1047,6 +1150,122 @@ async def upsert_constructor_strategy_rows(
     return updated
 
 
+def _profile_row_to_data(row: ConstructorStrategyProfile) -> Any:
+    from intelligence.constructor_strategy import ConstructorStrategyProfileData
+
+    return ConstructorStrategyProfileData(
+        constructor_code=row.constructor_code,
+        circuit_key=row.circuit_key,
+        sample_size=row.sample_size,
+        early_box_rate=row.early_box_rate,
+        undercut_attempt_rate=row.undercut_attempt_rate,
+        overcut_rate=row.overcut_rate,
+        avg_pit_window_open_lap=row.avg_pit_window_open_lap,
+        double_stack_rate=row.double_stack_rate,
+        safety_car_opportunist=row.safety_car_opportunist,
+        championship_pressure_modifier=row.championship_pressure_modifier,
+        fantasy_tendency=row.fantasy_tendency,
+        data_quality=row.data_quality,
+        source_race_keys=list(row.source_race_keys or []),
+    )
+
+
+async def count_constructor_strategy_profiles() -> int:
+    """Count rows in constructor_strategy_profiles (seeder gate)."""
+    try:
+        async with get_session() as session:
+            result = await session.execute(
+                select(func.count()).select_from(ConstructorStrategyProfile)
+            )
+            return int(result.scalar_one() or 0)
+    except ValueError:
+        return 0
+
+
+async def load_constructor_strategy_profile(
+    constructor_code: str,
+    circuit_key: str,
+) -> Any | None:
+    """Load one persisted constructor strategy profile."""
+    try:
+        async with get_session() as session:
+            result = await session.execute(
+                select(ConstructorStrategyProfile).where(
+                    ConstructorStrategyProfile.constructor_code == constructor_code,
+                    ConstructorStrategyProfile.circuit_key == circuit_key,
+                )
+            )
+            row = result.scalars().first()
+        return _profile_row_to_data(row) if row else None
+    except ValueError:
+        return None
+
+
+async def load_constructor_strategy_profiles(
+    circuit_key: str,
+) -> dict[str, Any]:
+    """Load all constructor profiles for a circuit keyed by constructor_code."""
+    try:
+        async with get_session() as session:
+            result = await session.execute(
+                select(ConstructorStrategyProfile).where(
+                    ConstructorStrategyProfile.circuit_key == circuit_key
+                )
+            )
+            rows = list(result.scalars().all())
+        return {row.constructor_code: _profile_row_to_data(row) for row in rows}
+    except ValueError:
+        return {}
+
+
+async def upsert_constructor_strategy_profile(profile: Any) -> None:
+    """Upsert calculated ConstructorStrategyProfileData to Postgres."""
+    try:
+        async with get_session() as session:
+            result = await session.execute(
+                select(ConstructorStrategyProfile).where(
+                    ConstructorStrategyProfile.constructor_code == profile.constructor_code,
+                    ConstructorStrategyProfile.circuit_key == profile.circuit_key,
+                )
+            )
+            existing = result.scalars().first()
+            undercut = profile.undercut_attempt_rate
+            if existing is None:
+                session.add(
+                    ConstructorStrategyProfile(
+                        constructor_code=profile.constructor_code,
+                        circuit_key=profile.circuit_key,
+                        sample_size=profile.sample_size,
+                        early_box_rate=profile.early_box_rate,
+                        undercut_attempt_rate=undercut,
+                        overcut_rate=profile.overcut_rate,
+                        avg_pit_window_open_lap=profile.avg_pit_window_open_lap,
+                        double_stack_rate=profile.double_stack_rate,
+                        safety_car_opportunist=profile.safety_car_opportunist,
+                        championship_pressure_modifier=profile.championship_pressure_modifier,
+                        fantasy_tendency=profile.fantasy_tendency[:120],
+                        data_quality=profile.data_quality,
+                        source_race_keys=list(profile.source_race_keys),
+                        last_updated=datetime.now(tz=UTC),
+                    )
+                )
+            else:
+                existing.sample_size = profile.sample_size
+                existing.early_box_rate = profile.early_box_rate
+                existing.undercut_attempt_rate = undercut
+                existing.overcut_rate = profile.overcut_rate
+                existing.avg_pit_window_open_lap = profile.avg_pit_window_open_lap
+                existing.double_stack_rate = profile.double_stack_rate
+                existing.safety_car_opportunist = profile.safety_car_opportunist
+                existing.championship_pressure_modifier = profile.championship_pressure_modifier
+                existing.fantasy_tendency = profile.fantasy_tendency[:120]
+                existing.data_quality = profile.data_quality
+                existing.source_race_keys = list(profile.source_race_keys)
+                existing.last_updated = datetime.now(tz=UTC)
+    except ValueError:
+        return
+
+
 async def load_constructor_strategy(circuit_key: str) -> dict[str, dict[str, Any]]:
     """Load persisted constructor strategy rows keyed by constructor code."""
     async with get_session() as session:
@@ -1070,6 +1289,22 @@ async def load_constructor_strategy(circuit_key: str) -> dict[str, dict[str, Any
     }
 
 
+# Tables with phone / reporter_phone that lack ON DELETE CASCADE from subscribers.
+# Keep in sync with db.models — tests/test_erase_subscriber.py asserts completeness.
+_ERASE_PHONE_TARGETS: tuple[tuple[type, str], ...] = (
+    (PickRow, "phone"),
+    (LiveAlertDelivery, "phone"),
+    (UserReportedPriceChange, "reporter_phone"),
+    (PendingScreenshotState, "phone"),
+    (PendingTimezoneState, "phone"),
+    (VisionCallLog, "phone"),
+    (ShareCard, "phone"),
+    (ChipPlanStore, "phone"),
+    (TeamValueSnapshot, "phone"),
+    (WeekendNotificationSent, "phone"),
+)
+
+
 async def erase_subscriber_data(phone: str) -> bool:
     """
     Remove all subscriber-linked rows after explicit DELETE request.
@@ -1079,13 +1314,202 @@ async def erase_subscriber_data(phone: str) -> bool:
     # All other deletes are soft (active=False).
     """
     async with get_session() as session:
-        await session.execute(delete(PickRow).where(PickRow.phone == phone))
-        await session.execute(delete(LiveAlertDelivery).where(LiveAlertDelivery.phone == phone))
-        await session.execute(
-            delete(UserReportedPriceChange).where(UserReportedPriceChange.reporter_phone == phone),
-        )
+        for model, column in _ERASE_PHONE_TARGETS:
+            await session.execute(
+                delete(model).where(getattr(model, column) == phone),
+            )
         row = await session.get(Subscriber, phone)
         if row is None:
             return False
         await session.delete(row)
     return True
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Pending screenshot state — DB-backed replacement for in-memory dict.
+# Survives restarts; consistent across uvicorn workers.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_SCREENSHOT_TTL_HOURS: dict[str, int] = {
+    "team_setup": 48,
+    "locked_team": 36,
+    "league_standings": 72,
+}
+_SCREENSHOT_DEFAULT_TTL_HOURS = 48
+
+
+async def set_pending_screenshot_db(phone: str, kind: str) -> None:
+    """Set/refresh the expected screenshot kind for a phone, with TTL."""
+    ttl_hours = _SCREENSHOT_TTL_HOURS.get(kind, _SCREENSHOT_DEFAULT_TTL_HOURS)
+    expires_at = datetime.now(tz=UTC) + timedelta(hours=ttl_hours)
+    try:
+        async with get_session() as session:
+            row = await session.get(PendingScreenshotState, phone)
+            if row is None:
+                session.add(PendingScreenshotState(
+                    phone=phone, kind=kind, expires_at=expires_at,
+                ))
+            else:
+                row.kind = kind
+                row.expires_at = expires_at
+    except ValueError:
+        pass  # no DB configured — onboarding will degrade gracefully
+
+
+async def get_pending_screenshot_db(phone: str) -> str | None:
+    """Return the expected screenshot kind, or None if absent/expired."""
+    now = datetime.now(tz=UTC)
+    try:
+        async with get_session() as session:
+            row = await session.get(PendingScreenshotState, phone)
+            if row is None:
+                return None
+            if row.expires_at <= now:
+                await session.delete(row)
+                return None
+            return row.kind
+    except ValueError:
+        return None
+
+
+async def clear_pending_screenshot_db(phone: str) -> None:
+    try:
+        async with get_session() as session:
+            row = await session.get(PendingScreenshotState, phone)
+            if row is not None:
+                await session.delete(row)
+    except ValueError:
+        pass
+
+
+_PENDING_TIMEZONE_TTL_HOURS = 24
+
+
+async def set_pending_timezone_db(phone: str) -> None:
+    expires_at = datetime.now(tz=UTC) + timedelta(hours=_PENDING_TIMEZONE_TTL_HOURS)
+    try:
+        async with get_session() as session:
+            row = await session.get(PendingTimezoneState, phone)
+            if row is None:
+                session.add(PendingTimezoneState(phone=phone, expires_at=expires_at))
+            else:
+                row.expires_at = expires_at
+    except ValueError:
+        pass
+
+
+async def is_pending_timezone_db(phone: str) -> bool:
+    now = datetime.now(tz=UTC)
+    try:
+        async with get_session() as session:
+            row = await session.get(PendingTimezoneState, phone)
+            if row is None:
+                return False
+            if row.expires_at <= now:
+                await session.delete(row)
+                return False
+            return True
+    except ValueError:
+        return False
+
+
+async def clear_pending_timezone_db(phone: str) -> None:
+    try:
+        async with get_session() as session:
+            row = await session.get(PendingTimezoneState, phone)
+            if row is not None:
+                await session.delete(row)
+    except ValueError:
+        pass
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Vision-call budget — per-phone hourly + global daily caps.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+async def count_vision_calls(phone: str | None, *, hours: int) -> int:
+    """Count vision calls in the trailing window. None = global count."""
+    since = datetime.now(tz=UTC) - timedelta(hours=hours)
+    try:
+        async with get_session() as session:
+            stmt = select(func.count()).select_from(VisionCallLog).where(
+                VisionCallLog.called_at >= since,
+            )
+            if phone is not None:
+                stmt = stmt.where(VisionCallLog.phone == phone)
+            result = await session.execute(stmt)
+            return int(result.scalar() or 0)
+    except ValueError:
+        return 0  # no DB → fail-open in dev/no-storage mode
+
+
+async def record_vision_call(phone: str, kind: str) -> None:
+    try:
+        async with get_session() as session:
+            session.add(VisionCallLog(phone=phone, kind=kind))
+    except ValueError:
+        pass
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Two-phase webhook claim — true idempotency under Meta retry.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_CLAIM_STALE_AFTER = timedelta(minutes=5)
+
+
+async def claim_inbound_message(message_id: str) -> bool:
+    """Atomic claim. Returns True iff we are the worker that should process.
+
+    Semantics:
+      * No row exists                              → INSERT (status=claimed). True.
+      * Row exists, status='done'                  → already handled. False.
+      * Row exists, status='claimed', fresh        → another worker has it. False.
+      * Row exists, status='claimed', >5min stale  → reclaim (refresh). True.
+    """
+    if not message_id.strip():
+        return False
+    await _maybe_prune_security_tables()
+    now = datetime.now(tz=UTC)
+    try:
+        async with get_session() as session:
+            row = await session.get(ProcessedInboundMessage, message_id)
+            if row is None:
+                session.add(ProcessedInboundMessage(
+                    message_id=message_id,
+                    status="claimed",
+                    claimed_at=now,
+                    processed_at=now,
+                ))
+                try:
+                    await session.flush()
+                except IntegrityError:
+                    await session.rollback()
+                    return False  # another worker won the race
+                return True
+            if row.status == "done":
+                return False
+            if row.status == "claimed" and (now - row.claimed_at) > _CLAIM_STALE_AFTER:
+                row.claimed_at = now
+                return True
+            return False
+    except ValueError:
+        if message_id in _FALLBACK_SEEN_MESSAGES:
+            return False
+        _FALLBACK_SEEN_MESSAGES.add(message_id)
+        return True
+
+
+async def complete_inbound_message(message_id: str) -> None:
+    """Mark a claimed message as fully processed."""
+    if not message_id.strip():
+        return
+    try:
+        async with get_session() as session:
+            row = await session.get(ProcessedInboundMessage, message_id)
+            if row is not None:
+                row.status = "done"
+                row.processed_at = datetime.now(tz=UTC)
+    except ValueError:
+        pass

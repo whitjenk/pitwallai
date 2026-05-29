@@ -144,7 +144,7 @@ Fantasy scoring and prices in this repo are simplified approximations of publish
 
 Live timing and session data may be sourced from [OpenF1](https://openf1.org/) and other public APIs; see their terms for attribution and use.
 
-WhatsApp is a trademark of Meta Platforms, Inc. Subscribers opt in via **SUBSCRIBE** and can opt out with **UNSUBSCRIBE**. Phone numbers and team data are stored to deliver picks; do not deploy without a privacy policy appropriate for your jurisdiction.
+WhatsApp is a trademark of Meta Platforms, Inc. Subscribers opt in via **SUBSCRIBE** and can opt out with **UNSUBSCRIBE** or erase all data with **DELETE**. See [PRIVACY.md](PRIVACY.md) for what we store and how deletion works.
 
 ## Legal
 

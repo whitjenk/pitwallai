@@ -27,8 +27,16 @@ app.include_router(whatsapp_router)
 @app.on_event("startup")
 async def _whatsapp_startup() -> None:
     """Ensure DB tables exist and load circuit profiles into orchestrator context."""
+    import asyncio
+
     init_orchestrator_context()
     await init_db()
+    from pitwallai.feature_flags import constructor_strategy_enabled
+
+    if constructor_strategy_enabled():
+        from intelligence.constructor_strategy import seed_constructor_profiles
+
+        asyncio.create_task(seed_constructor_profiles())
 
 
 def parse_args() -> argparse.Namespace:

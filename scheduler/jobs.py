@@ -44,27 +44,39 @@ def _strategist():
 
 
 async def job_practice_analysis(race_key: str) -> None:
-    """Agent 2 — practice analyst."""
+    """PicksAgent stage 2/3 — practice analysis."""
     await _strategist().run_practice_analyst(race_key)
 
 
 async def job_quali_broadcast(race_key: str) -> None:
-    """Agent 3 — quali strategist + WhatsApp broadcast."""
+    """PicksAgent stage 3/3 — quali picks + WhatsApp broadcast."""
+    from fantasy.rules import DRIVER_PRICES_M
+    from intelligence.cache_health import check_signal_cache_health
+    from loguru import logger as log
+
+    driver_codes = sorted(DRIVER_PRICES_M.keys())
+    health = await check_signal_cache_health(race_key, driver_codes)
+    if not health.ready_for_explanations:
+        log.warning(
+            "explanation_cards_may_be_sparse race_key={} ready={}",
+            race_key,
+            health.ready_for_explanations,
+        )
     await _strategist().run_quali_strategist(race_key)
 
 
 async def job_race_monitor_start(race_key: str) -> None:
-    """Agent 4 — live race monitor."""
+    """RaceMonitor — Sunday live race watching."""
     await _strategist().run_race_monitor(race_key)
 
 
 async def job_post_race_scorer(race_key: str) -> None:
-    """Agent 5 — scorer and learner."""
+    """ScorerLearner — post-race scoring + eval harness."""
     await _strategist().run_scorer_and_learner(race_key)
 
 
 async def job_thursday_context(race_key: str) -> None:
-    """Agent 1 — context build; sprint weekends use sprint playbook broadcast."""
+    """PicksAgent stage 1/3 — context build; sprint weekends use sprint playbook."""
     weekend = get_race_weekend(race_key)
     if weekend is not None and weekend.is_sprint:
         from whatsapp.phase7 import broadcast_sprint_playbook
@@ -87,16 +99,55 @@ async def job_friday_delta(race_key: str) -> None:
 
 async def job_post_race_counterfactual(race_key: str) -> None:
     """Post-race counterfactual recap per subscriber."""
+    from pitwallai.feature_flags import counterfactual_recap_enabled
+
+    if not counterfactual_recap_enabled():
+        logger.info("counterfactual_recap skipped race_key={}: flag off", race_key)
+        return
     from whatsapp.phase7 import broadcast_counterfactual_recaps
 
     await broadcast_counterfactual_recaps(race_key)
 
 
 async def job_community_aggregate(race_key: str) -> None:
-    """Community aggregate stats broadcast."""
-    from whatsapp.phase7 import broadcast_community_aggregate
+    """Community aggregate stats broadcast (race + 5h, after counterfactual)."""
+    from pitwallai.feature_flags import community_aggregate_enabled
 
+    if not community_aggregate_enabled():
+        logger.info("community_aggregate skipped race_key={}: flag off", race_key)
+        return
+    from intelligence.repository import list_active_subscribers
+    from whatsapp.community_aggregate import broadcast_community_aggregate
+
+    if len(await list_active_subscribers()) <= 10:
+        logger.info(
+            "community_aggregate skipped race_key={}: active subscribers <= 10",
+            race_key,
+        )
+        return
     await broadcast_community_aggregate(race_key)
+
+
+async def job_friday_what_changed(race_key: str) -> None:
+    """Friday "what changed since Thursday" digest (group-chat-moment broadcast)."""
+    from pitwallai.feature_flags import friday_what_changed_enabled
+
+    if not friday_what_changed_enabled():
+        logger.info("friday_what_changed skipped race_key={}: flag off", race_key)
+        return
+    logger.info("friday_what_changed firing race_key={} (impl TBD)", race_key)
+    # Implementation lands when the diff generator + scheduler integration is
+    # ready. Scaffolded here so the schedule slot is reserved.
+
+
+async def job_monday_postmortem(race_key: str) -> None:
+    """Monday league post-mortem broadcast (group-chat-moment broadcast)."""
+    from pitwallai.feature_flags import monday_league_postmortem_enabled
+
+    if not monday_league_postmortem_enabled():
+        logger.info("monday_postmortem skipped race_key={}: flag off", race_key)
+        return
+    logger.info("monday_postmortem firing race_key={} (impl TBD)", race_key)
 
 
 def _job_times(weekend: RaceWeekend) -> list[tuple[str, datetime, Any]]:
@@ -105,6 +156,7 @@ def _job_times(weekend: RaceWeekend) -> list[tuple[str, datetime, Any]]:
         ("thursday_context", weekend.race_utc - timedelta(hours=72), job_thursday_context),
         ("practice_analysis", weekend.fp2_utc + timedelta(minutes=90), job_practice_analysis),
         ("friday_delta", weekend.fp2_utc + timedelta(minutes=90), job_friday_delta),
+        ("friday_what_changed", weekend.fp2_utc + timedelta(hours=4), job_friday_what_changed),
         (
             "quali_broadcast",
             weekend.fantasy_lock_utc - timedelta(hours=3),
@@ -114,6 +166,7 @@ def _job_times(weekend: RaceWeekend) -> list[tuple[str, datetime, Any]]:
         ("post_race_scorer", weekend.race_utc + timedelta(hours=3), job_post_race_scorer),
         ("post_race_counterfactual", weekend.race_utc + timedelta(hours=4), job_post_race_counterfactual),
         ("community_aggregate", weekend.race_utc + timedelta(hours=5), job_community_aggregate),
+        ("monday_postmortem", weekend.race_utc + timedelta(hours=24), job_monday_postmortem),
     ]
 
 

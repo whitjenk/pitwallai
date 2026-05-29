@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections import Counter, defaultdict
 from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
@@ -20,13 +19,11 @@ from intelligence.chip_planner import (
 )
 from intelligence.counterfactual import generate_counterfactual
 from intelligence.repository import (
-    get_all_picks_for_race,
     get_draft_picks_for_race,
     get_fantasy_team,
     increment_subscriber_races_received,
     list_active_subscribers,
     load_practice_signals_by_circuit,
-    load_season_accuracy_row,
     notification_already_sent,
     record_notification_sent,
 )
@@ -173,72 +170,6 @@ async def broadcast_sprint_playbook(race_key: str) -> dict[str, int]:
             sent += 1
         except Exception as exc:
             logger.error("sprint_playbook failed phone={}: {}", mask_phone(sub.phone), exc)
-    return {"sent": sent}
-
-
-async def broadcast_community_aggregate(race_key: str) -> dict[str, int]:
-    """Community stats 2hrs after scoring — min 10 picks, skip race 1."""
-    weekend = get_race_weekend(race_key)
-    if weekend is None:
-        return {"sent": 0}
-    prior = [w for w in CALENDAR_2026 if w.race_utc < weekend.race_utc]
-    if len(prior) < 1:
-        return {"sent": 0, "skipped": "first_race"}
-
-    rows = await get_all_picks_for_race(race_key)
-    scored = [r for r in rows if r.was_correct is not None and r.pick_status != "draft"]
-    if len(scored) < 10:
-        return {"sent": 0, "skipped": "insufficient_sample"}
-
-    correct_pct = 100.0 * sum(1 for r in scored if r.was_correct) / len(scored)
-    contrarian = [r for r in scored if (r.ownership_tier or "").upper() == "LOW"]
-    consensus = [r for r in scored if (r.ownership_tier or "").upper() == "HIGH"]
-    contra_delta = (
-        sum(float(r.actual_points_delta or 0) for r in contrarian) / len(contrarian)
-        if contrarian
-        else None
-    )
-    cons_delta = (
-        sum(float(r.actual_points_delta or 0) for r in consensus) / len(consensus)
-        if consensus
-        else None
-    )
-
-    attack_rows = [r for r in scored if (r.league_strategy_applied or "").upper() == "ATTACK"]
-    attack_gain = None
-    if attack_rows:
-        attack_gain = sum(1 for r in attack_rows if r.was_correct) / len(attack_rows)
-
-    by_driver: Counter[str] = Counter()
-    for r in scored:
-        if r.was_correct:
-            by_driver[r.driver_code] += 1
-    best_call = by_driver.most_common(1)[0][0] if by_driver else ""
-
-    season = await load_season_accuracy_row(2026)
-    season_pct = season.overall_accuracy if season else 0.0
-    races_done = len([w for w in CALENDAR_2026 if w.race_utc <= weekend.race_utc])
-
-    lines = [
-        f"📊 {weekend.display_name} community results",
-        "",
-        f"{correct_pct:.0f}% of PitWallAI picks scored this weekend",
-    ]
-    if contra_delta is not None and cons_delta is not None and contra_delta > cons_delta:
-        lines.append(f"Contrarian picks +{contra_delta - cons_delta:.1f}pts vs consensus avg")
-    if attack_gain is not None:
-        lines.append(f"ATTACK mode: {attack_gain * 100:.0f}% hit rate this weekend")
-    lines.append(f"Season: {races_done} races · {season_pct:.0f}% overall GP hit rate")
-    lines.append("pitwallai.app/accuracy")
-    msg = _truncate("\n".join(lines), 280)
-
-    sent = 0
-    for sub in await list_active_subscribers():
-        try:
-            await send_message(sub.phone, msg)
-            sent += 1
-        except Exception as exc:
-            logger.error("community_aggregate failed phone={}: {}", mask_phone(sub.phone), exc)
     return {"sent": sent}
 
 

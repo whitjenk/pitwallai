@@ -79,6 +79,7 @@ class PitWallSettings:
         llm_estimated_cost_per_call_usd: Conservative cost estimate per LLM call.
         llm_budget_cooldown_seconds: Cooldown after any cap breach.
         ollama_base_url: OpenAI-compatible Ollama base URL.
+        explanation_cards_enabled: Include structured pick explanation cards in Saturday broadcasts.
     """
 
     decode_backend: DecodeBackend
@@ -105,6 +106,7 @@ class PitWallSettings:
     llm_estimated_cost_per_call_usd: float
     llm_budget_cooldown_seconds: int
     ollama_base_url: str
+    explanation_cards_enabled: bool
 
     @classmethod
     def from_env(cls) -> PitWallSettings:
@@ -174,6 +176,10 @@ class PitWallSettings:
             ollama_base_url=os.getenv(
                 "PITWALL_OLLAMA_BASE_URL", "http://localhost:11434/v1"
             ).strip(),
+            explanation_cards_enabled=os.getenv(
+                "EXPLANATION_CARDS_ENABLED", "false"
+            ).strip().lower()
+            in ("1", "true", "yes"),
         )
 
     @property

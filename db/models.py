@@ -199,15 +199,81 @@ class RaceMonitorState(Base):
 
 
 class ProcessedInboundMessage(Base):
-    """Dedup ledger for inbound WhatsApp webhook message IDs."""
+    """Dedup ledger for inbound WhatsApp webhook message IDs.
+
+    Two-phase: ``status='claimed'`` written at the start of handling;
+    upgraded to ``'done'`` after success. Stale ``'claimed'`` rows
+    (>5 min) are eligible for re-claim — covers crash-mid-handle cases.
+    """
 
     __tablename__ = "processed_inbound_messages"
 
     message_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="done")
+    claimed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
     processed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         server_default=func.now(),
+    )
+
+
+class PendingScreenshotState(Base):
+    """Durable per-subscriber state: 'I'm expecting a screenshot of kind X.'
+
+    Replaces the in-memory dict so state survives restarts and is consistent
+    across uvicorn workers. TTL is enforced on read.
+    """
+
+    __tablename__ = "pending_screenshot_state"
+
+    phone: Mapped[str] = mapped_column(String(20), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
+
+
+class PendingTimezoneState(Base):
+    """Awaiting manual IANA timezone reply after SUBSCRIBE (unknown country code)."""
+
+    __tablename__ = "pending_timezone_state"
+
+    phone: Mapped[str] = mapped_column(String(20), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
+
+
+class VisionCallLog(Base):
+    """One row per Gemini Vision call. Feeds per-phone hourly + global daily caps."""
+
+    __tablename__ = "vision_call_log"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    phone: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    called_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        index=True,
     )
 
 
@@ -264,8 +330,46 @@ class SeasonAccuracy(Base):
     )
 
 
+class ConstructorStrategyProfile(Base):
+    """
+    Fantasy-framed constructor pit strategy at a circuit (seeded from OpenF1).
+
+    Composite key: (constructor_code, circuit_key). Upsert on conflict.
+    """
+
+    __tablename__ = "constructor_strategy_profiles"
+    __table_args__ = (
+        UniqueConstraint(
+            "constructor_code",
+            "circuit_key",
+            name="uq_constructor_strategy_profile",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    constructor_code: Mapped[str] = mapped_column(String(8), nullable=False, index=True)
+    circuit_key: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    sample_size: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    early_box_rate: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    undercut_attempt_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    overcut_rate: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    avg_pit_window_open_lap: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    double_stack_rate: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    safety_car_opportunist: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    championship_pressure_modifier: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    fantasy_tendency: Mapped[str] = mapped_column(String(120), nullable=False, default="")
+    data_quality: Mapped[str] = mapped_column(String(8), nullable=False, default="LOW")
+    source_race_keys: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    last_updated: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
 class ConstructorStrategyRow(Base):
-    """Per-circuit constructor pit-strategy tendency aggregates."""
+    """Legacy per-circuit constructor aggregates (superseded by ConstructorStrategyProfile)."""
 
     __tablename__ = "constructor_strategy"
     __table_args__ = (

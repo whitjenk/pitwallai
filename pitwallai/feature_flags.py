@@ -43,3 +43,8 @@ def budget_transfers_enabled() -> bool:
 def community_aggregate_enabled() -> bool:
     """Community aggregate broadcast job."""
     return _flag("PITWALL_COMMUNITY_AGGREGATE_ENABLED")
+
+
+def screenshot_onboarding_enabled() -> bool:
+    """Screenshot-based team onboarding (Bet 1 activation reducer)."""
+    return _flag("PITWALL_SCREENSHOT_ONBOARDING_ENABLED", default=True)

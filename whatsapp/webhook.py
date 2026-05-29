@@ -14,7 +14,8 @@ from intelligence.repository import (
     was_inbound_message_processed,
 )
 from whatsapp.inbound import handle_inbound_text
-from whatsapp.payload import extract_text_messages
+from whatsapp.inbound_image import handle_inbound_image
+from whatsapp.payload import extract_image_messages, extract_text_messages
 from whatsapp.settings import get_whatsapp_settings
 from whatsapp.webhook_verify import (
     verify_meta_signature,
@@ -73,6 +74,20 @@ async def _process_payload(payload: dict[str, Any]) -> None:
             )
             raise
         await mark_inbound_message_processed(message.message_id)
+
+    for image in extract_image_messages(payload):
+        if await was_inbound_message_processed(image.message_id):
+            logger.debug("Skipping duplicate WhatsApp image message_id={}", image.message_id)
+            continue
+        try:
+            await handle_inbound_image(image.phone, image.media_id, image.mime_type)
+        except Exception:
+            logger.exception(
+                "Inbound WhatsApp image handler failed message_id={}",
+                image.message_id,
+            )
+            raise
+        await mark_inbound_message_processed(image.message_id)
 
 
 @router.post("/webhook")

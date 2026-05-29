@@ -24,6 +24,17 @@ class InboundMessage:
     message_id: str
 
 
+@dataclass(frozen=True, slots=True)
+class InboundImage:
+    """Normalized inbound WhatsApp image message (used for screenshot onboarding)."""
+
+    phone: str
+    media_id: str
+    message_id: str
+    mime_type: str
+    caption: str = ""
+
+
 def normalize_phone(raw: str) -> str:
     """
     Normalize a WhatsApp sender id to E.164.
@@ -68,3 +79,28 @@ def extract_text_messages(payload: dict[str, Any]) -> list[InboundMessage]:
                     )
                 )
     return messages
+
+
+def extract_image_messages(payload: dict[str, Any]) -> list[InboundImage]:
+    """Extract inbound image messages from a Meta webhook JSON body."""
+    images: list[InboundImage] = []
+    for entry in payload.get("entry", []):
+        for change in entry.get("changes", []):
+            value = change.get("value", {})
+            for item in value.get("messages", []):
+                if item.get("type") != "image":
+                    continue
+                image = item.get("image") or {}
+                media_id = str(image.get("id", "")).strip()
+                if not media_id:
+                    continue
+                images.append(
+                    InboundImage(
+                        phone=normalize_phone(str(item.get("from", ""))),
+                        media_id=media_id,
+                        message_id=str(item.get("id", "")),
+                        mime_type=str(image.get("mime_type", "image/jpeg")),
+                        caption=str(image.get("caption", "")).strip(),
+                    )
+                )
+    return images

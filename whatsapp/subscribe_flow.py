@@ -8,9 +8,12 @@ from loguru import logger
 
 from db.models import Subscriber
 from db.session import get_session
+from pitwallai.feature_flags import screenshot_onboarding_enabled
 from whatsapp.sender import mask_phone
+from whatsapp.timezone_infer import infer_timezone
 
 pending_timezone: set[str] = set()
+pending_screenshot: set[str] = set()
 
 _SUBSCRIBE_DATA_NOTE = (
     "📋 Data note: PitWallAI stores your phone number and "
@@ -24,6 +27,13 @@ _SUBSCRIBE_CONFIRM = (
     "⚠️ Independent fan tool. Not affiliated with F1 Fantasy, "
     "ESPN, or Formula 1. All picks are informational only — "
     "never financial or gaming advice. You decide."
+)
+
+_SCREENSHOT_PROMPT = (
+    "Open F1 Fantasy → take a screenshot of your team → send it here.\n\n"
+    "I'll pull out your 5 drivers, constructors, budget, and transfers — "
+    "no typing required. Image is read once, not stored.\n\n"
+    "(Or text your 5 driver codes if you'd rather.)"
 )
 
 
@@ -41,18 +51,36 @@ def is_valid_iana_timezone(tz_name: str) -> bool:
         return False
 
 
-async def handle_subscribe(phone: str) -> str:
+async def handle_subscribe(phone: str) -> list[str]:
     async with get_session() as session:
         existing = await session.get(Subscriber, phone)
         if existing and existing.active:
-            return truncate(
+            return [truncate(
                 f"Already subscribed ({existing.timezone}). Send UNSUBSCRIBE to stop."
-            )
+            )]
 
-    pending_timezone.add(phone)
-    return truncate(
-        "PitWallAI: reply with your IANA timezone (e.g. Europe/London or America/New_York)."
-    )
+        # Infer timezone from phone country code — skip the ask for the 95% case.
+        inferred_tz = infer_timezone(phone)
+        is_first = existing is None
+        if existing is None:
+            session.add(Subscriber(
+                phone=phone, timezone=inferred_tz, preferred_provider="gemini", active=True,
+            ))
+        else:
+            existing.timezone = inferred_tz
+            existing.active = True
+            existing.preferred_provider = existing.preferred_provider or "gemini"
+
+    logger.bind(phone=mask_phone(phone), timezone=inferred_tz).info("Subscriber activated (inferred tz)")
+
+    out: list[str] = []
+    if is_first:
+        out.append(truncate(_SUBSCRIBE_DATA_NOTE))
+    out.append(_SUBSCRIBE_CONFIRM)
+    if screenshot_onboarding_enabled():
+        pending_screenshot.add(phone)
+        out.append(_SCREENSHOT_PROMPT)
+    return out
 
 
 async def complete_subscribe(phone: str, timezone: str) -> list[str]:

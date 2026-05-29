@@ -37,7 +37,7 @@ Text **SUBSCRIBE** to the PitWallAI WhatsApp number (set `WHATSAPP_DISPLAY_NUMBE
 Send a screenshot of your F1 Fantasy **My Team** screen (or text **TEAM**) to set up your squad.  
 Text **HELP** for commands · **UNSUBSCRIBE** to stop messages · **DELETE** to erase your data ([PRIVACY.md](PRIVACY.md)).
 
-*Closed beta — free, open source, no app required.*
+*Closed beta — free, open source, no app required. Operator checklist: [BETA_INVITE.md](BETA_INVITE.md).*
 
 ---
 

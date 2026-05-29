@@ -33,6 +33,7 @@ from db.models import (
     SeasonAccuracy,
     ShareCard,
     SignalQualityRow,
+    SpendEvent,
     Subscriber,
     TeamOnboardingState,
     TeamValueSnapshot,
@@ -920,6 +921,8 @@ async def set_monitor_state(
     session_key: int,
     last_lap: int,
     running: bool,
+    consecutive_poll_failures: int | None = None,
+    data_unavailable: bool | None = None,
 ) -> None:
     """Upsert race monitor state."""
     async with get_session() as session:
@@ -930,12 +933,18 @@ async def set_monitor_state(
                 session_key=session_key,
                 last_lap=last_lap,
                 running=running,
+                consecutive_poll_failures=consecutive_poll_failures or 0,
+                data_unavailable=data_unavailable or False,
             )
             session.add(row)
         else:
             row.session_key = session_key
             row.last_lap = last_lap
             row.running = running
+            if consecutive_poll_failures is not None:
+                row.consecutive_poll_failures = consecutive_poll_failures
+            if data_unavailable is not None:
+                row.data_unavailable = data_unavailable
             row.updated_at = datetime.now(tz=UTC)
 
 

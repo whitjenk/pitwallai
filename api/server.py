@@ -359,7 +359,13 @@ def create_app(
         agent: RadioInterceptAgent = app.state.agent
         key = session_key if session_key is not None else app.state.session.session_key
         snap = await agent.budget_guard.snapshot(key)
-        return agent.budget_guard.to_public_dict(snap)
+        from intelligence.spend_guard import get_spend_guard, to_public_dict
+
+        spend = await get_spend_guard()
+        return {
+            **agent.budget_guard.to_public_dict(snap),
+            "platform_spend": to_public_dict(spend),
+        }
 
     @app.get("/api/season/{token}")
     async def season_recap(token: str) -> dict[str, Any]:

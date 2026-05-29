@@ -92,6 +92,15 @@ def is_valid_iana_timezone(tz_name: str) -> bool:
 
 
 async def handle_subscribe(phone: str) -> list[str]:
+    from intelligence.spend_guard import get_spend_guard
+
+    guard = await get_spend_guard()
+    if not guard.signups_allowed:
+        return [truncate(
+            "PitWallAI is at capacity for new signups this month — "
+            "existing subscribers are unaffected. Try again next month."
+        )]
+
     async with get_session() as session:
         existing = await session.get(Subscriber, phone)
         if existing and existing.active:

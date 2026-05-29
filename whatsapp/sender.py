@@ -97,6 +97,11 @@ async def send_message(phone: str, text: str) -> dict[str, Any]:
                     response.status_code,
                     latency_ms,
                 )
+                from intelligence.spend_guard import record_spend, whatsapp_cost_per_message_usd
+
+                cost = whatsapp_cost_per_message_usd()
+                if cost > 0:
+                    await record_spend("whatsapp", cost)
                 return data
             except httpx.HTTPStatusError as exc:
                 last_error = exc

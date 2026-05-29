@@ -109,3 +109,9 @@ async def init_db() -> None:
 
     engine = get_engine()
     await upgrade_schema(engine)
+    try:
+        from intelligence.spend_guard import refresh_spend_guard_cache
+
+        await refresh_spend_guard_cache()
+    except Exception as exc:
+        logger.warning("spend_guard init skipped: {}", exc)

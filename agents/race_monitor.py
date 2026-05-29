@@ -29,6 +29,7 @@ from whatsapp.sender import mask_phone, send_message
 
 _POLL_INTERVAL_S = 15
 _MAX_ALERTS_PER_HOUR = 3
+_OPENF1_OUTAGE_POLLS = 3  # 3 × 15s without a successful poll
 
 _seen_messages: dict[str, set[str]] = defaultdict(set)
 _seen_pit_stops: dict[str, set[str]] = defaultdict(set)
@@ -151,9 +152,19 @@ async def _poll_loop(
 
     logger.bind(race_key=race_key, session_key=session_key).info("Agent 4 race monitor started")
 
+    poll_failures = 0
     while True:
         try:
             messages = await client.get_race_control(session_key)
+            poll_failures = 0
+            await set_monitor_state(
+                race_key,
+                session_key=session_key,
+                last_lap=0,
+                running=True,
+                consecutive_poll_failures=0,
+                data_unavailable=False,
+            )
             for row in messages:
                 msg = row.message or ""
                 msg_id = f"{row.date}:{msg[:40]}"
@@ -261,7 +272,30 @@ async def _poll_loop(
                 running=True,
             )
         except Exception as exc:
-            logger.exception("Race monitor poll error race_key={}: {}", race_key, exc)
+            poll_failures += 1
+            unavailable = poll_failures >= _OPENF1_OUTAGE_POLLS
+            logger.exception(
+                "Race monitor poll error race_key={} failures={} unavailable={}: {}",
+                race_key,
+                poll_failures,
+                unavailable,
+                exc,
+            )
+            try:
+                await set_monitor_state(
+                    race_key,
+                    session_key=session_key,
+                    last_lap=0,
+                    running=True,
+                    consecutive_poll_failures=poll_failures,
+                    data_unavailable=unavailable,
+                )
+            except Exception as state_exc:
+                logger.warning(
+                    "monitor_state update failed race_key={}: {}",
+                    race_key,
+                    state_exc,
+                )
 
         await asyncio.sleep(_POLL_INTERVAL_S)
 

@@ -81,17 +81,29 @@ class OpenF1Client:
         cached = await cache_get(key)
         if cached is not None:
             logger.debug("OpenF1 cache hit endpoint={} params={}", endpoint, params)
+            from openf1.health import record_openf1_success
+
+            record_openf1_success()
             return cached
 
         await self._throttle()
         url = f"{_BASE_URL}/{endpoint}"
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
-            response = await client.get(url, params=params)
-            response.raise_for_status()
-            data = response.json()
-            if not isinstance(data, list):
-                raise ValueError(f"OpenF1 {endpoint} returned non-list payload")
+        try:
+            async with httpx.AsyncClient(timeout=self._timeout) as client:
+                response = await client.get(url, params=params)
+                response.raise_for_status()
+                data = response.json()
+                if not isinstance(data, list):
+                    raise ValueError(f"OpenF1 {endpoint} returned non-list payload")
+        except Exception as exc:
+            from openf1.health import record_openf1_failure
+
+            record_openf1_failure(exc)
+            raise
         await cache_set(key, endpoint, tier, data)
+        from openf1.health import record_openf1_success
+
+        record_openf1_success()
         logger.debug("OpenF1 fetched endpoint={} rows={}", endpoint, len(data))
         return data
 

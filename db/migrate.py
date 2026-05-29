@@ -24,14 +24,21 @@ _COLUMN_MIGRATIONS: tuple[str, ...] = (
 
 async def upgrade_schema(engine: AsyncEngine) -> None:
     """
-    Ensure all ORM tables and additive columns exist.
+    Ensure all ORM tables and schema revisions exist.
 
-    Safe to run on every startup (Railway restarts, local dev).
+    Order: Alembic revisions (authoritative for renames/drops) → create_all
+    (catches new models before a migration is written) → legacy additive ALTERs.
     """
+    import asyncio
+
     import openf1.cache  # noqa: F401 — OpenF1CacheEntry on Base.metadata
+
+    from db.alembic_runner import run_alembic_upgrade
+
+    await asyncio.to_thread(run_alembic_upgrade)
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         for stmt in _COLUMN_MIGRATIONS:
             await conn.execute(text(stmt))
-    logger.info("Database schema upgrade complete (create_all + column migrations)")
+    logger.info("Database schema upgrade complete (Alembic + create_all + legacy ALTERs)")

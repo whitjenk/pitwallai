@@ -34,6 +34,13 @@ class VisionBudgetResult:
 
 async def check_vision_budget(phone: str) -> VisionBudgetResult:
     """Return whether another vision call is permitted for this phone."""
+    from intelligence.spend_guard import get_spend_guard_cached
+
+    if not get_spend_guard_cached().vision_allowed:
+        return VisionBudgetResult(
+            allowed=False,
+            reason="monthly_spend_cap",
+        )
     phone_count = await count_vision_calls(phone, hours=1)
     if phone_count >= _phone_hourly_limit():
         return VisionBudgetResult(
@@ -50,4 +57,7 @@ async def check_vision_budget(phone: str) -> VisionBudgetResult:
 
 
 async def record_vision_call_for(phone: str, kind: str) -> None:
+    from intelligence.spend_guard import record_spend, vision_cost_per_call_usd
+
     await record_vision_call(phone, kind)
+    await record_spend("vision", vision_cost_per_call_usd(), detail=kind)

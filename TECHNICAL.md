@@ -317,7 +317,11 @@ python bench.py --runs 20 --backend rules
 uvicorn main:app --host 0.0.0.0 --port $PORT
 ```
 
-Set `DATABASE_URL`, WhatsApp vars, and `PITWALL_MODE` in the Railway dashboard. On startup, `init_db()` runs `db/migrate.upgrade_schema()`: `create_all` for new tables plus `ALTER TABLE … ADD COLUMN IF NOT EXISTS` for additive Phase 7 columns (`pick_status`, `rehearsal_complete`, etc.). No separate Alembic step required.
+Set `DATABASE_URL`, WhatsApp vars, and `PITWALL_MODE` in the Railway dashboard. On startup, `init_db()` runs **Alembic** (`alembic upgrade head`) then `create_all` for any models not yet migrated. Legacy additive `ALTER TABLE … IF NOT EXISTS` statements in `db/migrate.py` remain as a safety net for older deployments.
+
+**Schema changes:** add a revision under `alembic/versions/` (`alembic revision -m "describe change"`) — do not rely on additive-only ALTERs for renames/drops.
+
+**Spend kill-switch:** `PITWALL_MONTHLY_SPEND_CAP_USD` (default 75) meters LLM, vision, and WhatsApp outbound into `spend_events`. At 100%: rules-only LLM, vision blocked, new `SUBSCRIBE` paused. See `/api/budget` → `platform_spend`.
 
 **Subscriber rehearsal:** After first `TEAM` confirm (next race >5 days away), `onboarding/rehearsal.py` sends a compressed Monaco 2024 weekend using OpenF1 session `9158` and the same message formatters as production. Set `PITWALL_REHEARSAL_FAST=1` for ~25s spacing in dev. Texting any command pauses rehearsal pacing so replies take priority.
 

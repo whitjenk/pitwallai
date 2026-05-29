@@ -128,12 +128,35 @@ async def job_community_aggregate(race_key: str) -> None:
     await broadcast_community_aggregate(race_key)
 
 
+async def job_friday_what_changed(race_key: str) -> None:
+    """Friday "what changed since Thursday" digest (group-chat-moment broadcast)."""
+    from pitwallai.feature_flags import friday_what_changed_enabled
+
+    if not friday_what_changed_enabled():
+        logger.info("friday_what_changed skipped race_key={}: flag off", race_key)
+        return
+    logger.info("friday_what_changed firing race_key={} (impl TBD)", race_key)
+    # Implementation lands when the diff generator + scheduler integration is
+    # ready. Scaffolded here so the schedule slot is reserved.
+
+
+async def job_monday_postmortem(race_key: str) -> None:
+    """Monday league post-mortem broadcast (group-chat-moment broadcast)."""
+    from pitwallai.feature_flags import monday_league_postmortem_enabled
+
+    if not monday_league_postmortem_enabled():
+        logger.info("monday_postmortem skipped race_key={}: flag off", race_key)
+        return
+    logger.info("monday_postmortem firing race_key={} (impl TBD)", race_key)
+
+
 def _job_times(weekend: RaceWeekend) -> list[tuple[str, datetime, Any]]:
     """Compute UTC run times for all weekend jobs."""
     return [
         ("thursday_context", weekend.race_utc - timedelta(hours=72), job_thursday_context),
         ("practice_analysis", weekend.fp2_utc + timedelta(minutes=90), job_practice_analysis),
         ("friday_delta", weekend.fp2_utc + timedelta(minutes=90), job_friday_delta),
+        ("friday_what_changed", weekend.fp2_utc + timedelta(hours=4), job_friday_what_changed),
         (
             "quali_broadcast",
             weekend.fantasy_lock_utc - timedelta(hours=3),
@@ -143,6 +166,7 @@ def _job_times(weekend: RaceWeekend) -> list[tuple[str, datetime, Any]]:
         ("post_race_scorer", weekend.race_utc + timedelta(hours=3), job_post_race_scorer),
         ("post_race_counterfactual", weekend.race_utc + timedelta(hours=4), job_post_race_counterfactual),
         ("community_aggregate", weekend.race_utc + timedelta(hours=5), job_community_aggregate),
+        ("monday_postmortem", weekend.race_utc + timedelta(hours=24), job_monday_postmortem),
     ]
 
 

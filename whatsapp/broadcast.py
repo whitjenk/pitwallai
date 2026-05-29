@@ -107,12 +107,29 @@ async def broadcast_race_picks(race_key: str) -> dict[str, Any]:
     failed = sum(1 for r in results if not r.success)
     personalized = sum(1 for r in results if r.success and r.personalized)
 
+    # Closed-loop: prime each successful subscriber for a post-lock screenshot.
+    # Marks them in pending_screenshot so the next inbound image is treated as
+    # their *actual* picked team — the ground truth the Scorer/Learner needs.
+    try:
+        from pitwallai.feature_flags import screenshot_onboarding_enabled
+        from whatsapp.subscribe_flow import set_pending_screenshot
+
+        if screenshot_onboarding_enabled():
+            for r in results:
+                if r.success:
+                    set_pending_screenshot(r.phone, "locked_team")
+    except Exception as exc:
+        logger.warning("post_lock_screenshot_priming skipped: {}", exc)
+
+    from pitwallai.version import run_meta
+
     logger.bind(
         race_key=race_key,
         sent=sent,
         failed=failed,
         personalized=personalized,
         total=len(subscribers),
+        **run_meta(),
     ).info("broadcast_race_picks finished")
 
     return {
@@ -224,6 +241,19 @@ def _format_message(
     *,
     personalized: bool,
 ) -> str:
+    from intelligence.conviction import assess_conviction, low_conviction_message
+    from pitwallai.feature_flags import low_conviction_mode_enabled
+
+    if low_conviction_mode_enabled():
+        assessment = assess_conviction(list(output.picks or []))
+        if assessment.is_low_conviction:
+            logger.bind(
+                race_key=weekend.race_key,
+                personalized=personalized,
+                reasons=list(assessment.reasons),
+            ).info("low_conviction_mode_activated")
+            return low_conviction_message(assessment, weekend.display_name)
+
     if personalized:
         return format_personalized_picks(weekend, output, timezone=sub.timezone)
     return format_generic_picks(weekend, output, timezone=sub.timezone)

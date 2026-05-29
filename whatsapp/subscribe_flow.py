@@ -13,7 +13,24 @@ from whatsapp.sender import mask_phone
 from whatsapp.timezone_infer import infer_timezone
 
 pending_timezone: set[str] = set()
-pending_screenshot: set[str] = set()
+
+# Closed-loop screenshot state machine. Keyed by phone → expected screenshot type.
+#   "team_setup"      — initial onboarding (post-SUBSCRIBE)
+#   "locked_team"     — post-Saturday-lock confirmation (feeds Scorer/Learner)
+#   "league_standings"— Monday post-mortem capture
+pending_screenshot: dict[str, str] = {}
+
+
+def set_pending_screenshot(phone: str, kind: str) -> None:
+    pending_screenshot[phone] = kind
+
+
+def get_pending_screenshot(phone: str) -> str | None:
+    return pending_screenshot.get(phone)
+
+
+def clear_pending_screenshot(phone: str) -> None:
+    pending_screenshot.pop(phone, None)
 
 _SUBSCRIBE_DATA_NOTE = (
     "📋 Data note: PitWallAI stores your phone number and "
@@ -78,7 +95,7 @@ async def handle_subscribe(phone: str) -> list[str]:
         out.append(truncate(_SUBSCRIBE_DATA_NOTE))
     out.append(_SUBSCRIBE_CONFIRM)
     if screenshot_onboarding_enabled():
-        pending_screenshot.add(phone)
+        set_pending_screenshot(phone, "team_setup")
         out.append(_SCREENSHOT_PROMPT)
     return out
 

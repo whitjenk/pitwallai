@@ -48,3 +48,21 @@ def community_aggregate_enabled() -> bool:
 def screenshot_onboarding_enabled() -> bool:
     """Screenshot-based team onboarding (Bet 1 activation reducer)."""
     return _flag("PITWALL_SCREENSHOT_ONBOARDING_ENABLED", default=True)
+
+
+def low_conviction_mode_enabled() -> bool:
+    """Switch Saturday broadcast to honest "hold transfers" message when
+    signals are sparse or uncertain. Brand-defining; default ON."""
+    return _flag("PITWALL_LOW_CONVICTION_MODE_ENABLED", default=True)
+
+
+def friday_what_changed_enabled() -> bool:
+    """Friday "what changed since last broadcast" digest. Scaffolded; default OFF
+    until calibration data accumulates."""
+    return _flag("PITWALL_FRIDAY_WHAT_CHANGED_ENABLED")
+
+
+def monday_league_postmortem_enabled() -> bool:
+    """Monday league post-mortem broadcast. Scaffolded; default OFF
+    until league-standings screenshots accumulate."""
+    return _flag("PITWALL_MONDAY_POSTMORTEM_ENABLED")

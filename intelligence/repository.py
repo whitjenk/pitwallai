@@ -269,15 +269,18 @@ async def get_picks_for_race(
     phone: str | None = None,
 ) -> list[PickRow]:
     """Load pick audit rows for a race, optionally filtered by phone."""
-    async with get_session() as session:
-        stmt = select(PickRow).where(PickRow.race_key == race_key)
-        if phone is not None:
-            stmt = stmt.where(PickRow.phone == phone)
-        else:
-            stmt = stmt.where(PickRow.phone.is_(None))
-        stmt = stmt.order_by(PickRow.pick_rank)
-        result = await session.execute(stmt)
-        return list(result.scalars().all())
+    try:
+        async with get_session() as session:
+            stmt = select(PickRow).where(PickRow.race_key == race_key)
+            if phone is not None:
+                stmt = stmt.where(PickRow.phone == phone)
+            else:
+                stmt = stmt.where(PickRow.phone.is_(None))
+            stmt = stmt.order_by(PickRow.pick_rank)
+            result = await session.execute(stmt)
+            return list(result.scalars().all())
+    except ValueError:
+        return []
 
 
 async def list_subscribers_for_race_picks(race_key: str) -> list[Subscriber]:
@@ -643,6 +646,52 @@ async def get_all_picks_for_race(race_key: str) -> list[PickRow]:
         return list(result.scalars().all())
 
 
+async def save_league_standings_snapshot(
+    phone: str,
+    entries: list[dict[str, Any]],
+    captured_at_race_key: str | None,
+) -> None:
+    """Persist a league standings screenshot extraction onto FantasyTeam.
+
+    Stored on FantasyTeam.opponent_profiles JSONB (already exists, no migration).
+    Replaces any prior snapshot — latest wins.
+    """
+    payload = {
+        "captured_at_race_key": captured_at_race_key,
+        "entries": entries,
+    }
+    async with get_session() as session:
+        row = await session.get(FantasyTeam, phone)
+        if row is None:
+            row = FantasyTeam(phone=phone)
+            session.add(row)
+        row.opponent_profiles = [payload]
+
+
+async def get_prior_season_circuit_winners(season: int) -> dict[str, str]:
+    """{circuit_key → driver_code that scored max points} for a past season.
+
+    Used by the eval baselines. Returns an empty dict when the season has
+    no scored picks yet (cold-start safe).
+    """
+    async with get_session() as session:
+        result = await session.execute(
+            select(PickRow).where(
+                PickRow.race_key.like(f"{season}_%"),
+                PickRow.was_correct.is_not(None),
+            )
+        )
+        rows = list(result.scalars().all())
+
+    by_circuit: dict[str, tuple[str, float]] = {}
+    for r in rows:
+        delta = r.actual_points_delta or 0.0
+        prior = by_circuit.get(r.circuit_key)
+        if prior is None or delta > prior[1]:
+            by_circuit[r.circuit_key] = (r.driver_code, delta)
+    return {k: v[0] for k, v in by_circuit.items()}
+
+
 def _row_to_practice_signal(r: PracticeSignalRow) -> PracticeSignal:
     return PracticeSignal(
         driver_number=r.driver_number,
@@ -659,13 +708,16 @@ def _row_to_practice_signal(r: PracticeSignalRow) -> PracticeSignal:
 
 async def load_practice_signals_by_circuit(circuit_key: str) -> list[PracticeSignal]:
     """Load latest practice signals for a circuit (one row per driver, FP2 over FP1)."""
-    async with get_session() as session:
-        result = await session.execute(
-            select(PracticeSignalRow)
-            .where(PracticeSignalRow.circuit_key == circuit_key)
-            .order_by(PracticeSignalRow.created_at.desc())
-        )
-        rows = list(result.scalars().all())
+    try:
+        async with get_session() as session:
+            result = await session.execute(
+                select(PracticeSignalRow)
+                .where(PracticeSignalRow.circuit_key == circuit_key)
+                .order_by(PracticeSignalRow.created_at.desc())
+            )
+            rows = list(result.scalars().all())
+    except ValueError:
+        return []
     priority = {"FP2": 2, "FP1": 1}
     merged: dict[str, PracticeSignal] = {}
     for r in rows:

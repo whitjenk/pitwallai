@@ -230,6 +230,24 @@ async def run_scorer_and_learner(
             delta, correct = _score_generic_pick(pick, positions)
         await update_pick_result(pick.id, actual_points_delta=delta, was_correct=correct)
 
+    # Refresh from DB so was_correct/actual_points_delta are populated for the eval pass.
+    try:
+        from intelligence.eval.runner import compute_eval_report, log_eval_report
+        from intelligence.repository import get_prior_season_circuit_winners
+
+        scored_picks = await get_all_picks_for_race(race_key)
+        prior_winners = await get_prior_season_circuit_winners(season=2025)
+        report = compute_eval_report(
+            race_key=race_key,
+            circuit_key=profile_key,
+            picks=scored_picks,
+            positions=positions,
+            prior_winners=prior_winners,
+        )
+        log_eval_report(report)
+    except Exception as exc:  # eval is additive — never block scoring
+        logger.warning("eval_report skipped race_key={}: {}", race_key, exc)
+
     overall, pers, gen, best, worst = await _compute_season_stats(2026)
     await upsert_season_accuracy(
         season=2026,

@@ -13,7 +13,7 @@ from intelligence.repository import (
     mark_inbound_message_processed,
     was_inbound_message_processed,
 )
-from whatsapp.commands import handle_inbound_text
+from whatsapp.inbound import handle_inbound_text
 from whatsapp.payload import extract_text_messages
 from whatsapp.settings import get_whatsapp_settings
 from whatsapp.webhook_verify import (

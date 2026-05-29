@@ -457,6 +457,71 @@ async def load_season_accuracy_row(season: int) -> SeasonAccuracy | None:
         return await session.get(SeasonAccuracy, season)
 
 
+async def load_latest_pick_for_driver(
+    race_key: str,
+    driver_code: str,
+    *,
+    phone: str | None = None,
+) -> PickRow | None:
+    """Latest audit pick row for a driver on a race weekend (personalized then generic)."""
+    code = driver_code.upper()
+    if phone:
+        rows = await get_picks_for_race(race_key, phone=phone)
+        for row in rows:
+            if row.driver_code.upper() == code:
+                return row
+    rows = await get_picks_for_race(race_key, phone=None)
+    for row in rows:
+        if row.driver_code.upper() == code:
+            return row
+    return None
+
+
+async def load_subscriber_pick_history(
+    phone: str,
+    *,
+    limit: int = 3,
+) -> list[tuple[str, str, str, float, bool]]:
+    """
+    Return recent race outcomes for a subscriber.
+
+    Each tuple: (race_key, race_name, driver_code, points_delta, was_correct).
+    """
+    from scheduler.calendar import get_race_weekend
+
+    async with get_session() as session:
+        result = await session.execute(
+            select(PickRow)
+            .where(
+                PickRow.phone == phone,
+                PickRow.was_correct.is_not(None),
+            )
+            .order_by(PickRow.created_at.desc())
+        )
+        rows = list(result.scalars().all())
+
+    by_race: dict[str, PickRow] = {}
+    for row in rows:
+        if row.race_key not in by_race:
+            by_race[row.race_key] = row
+
+    history: list[tuple[str, str, str, float, bool]] = []
+    for race_key, row in list(by_race.items())[:limit]:
+        weekend = get_race_weekend(race_key)
+        race_name = weekend.display_name if weekend else race_key.replace("_", " ").title()
+        pts = float(row.actual_points_delta or 0.0)
+        history.append(
+            (
+                race_key,
+                race_name,
+                row.driver_code,
+                pts,
+                bool(row.was_correct),
+            )
+        )
+    return history
+
+
 async def load_season_hit_rate_for_phone(phone: str, *, season: int) -> float:
     prefix = f"{season}_"
     async with get_session() as session:

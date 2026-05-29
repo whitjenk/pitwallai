@@ -302,8 +302,29 @@ async def run_scorer_and_learner(
         ),
     )
 
+    _regenerate_results_page(race_key=race_key)
+
     logger.bind(race_key=race_key, overall=overall).info("Agent 5 scorer and learner complete")
     return new_ctx
+
+
+def _regenerate_results_page(*, race_key: str) -> None:
+    """Rebuild api/static/results.html after scoring (best-effort)."""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    script = Path(__file__).resolve().parent.parent / "scripts" / "generate_results_page.py"
+    try:
+        subprocess.run(
+            [sys.executable, str(script), "--season", "2026"],
+            check=True,
+            timeout=30,
+            cwd=str(script.parent.parent),
+        )
+        logger.info("results_page_regenerated race_key={}", race_key)
+    except Exception as exc:
+        logger.warning("results_page_regen_failed race_key={} error={}", race_key, exc)
 
 
 async def _broadcast_recap(

@@ -1,0 +1,266 @@
+#!/usr/bin/env python3
+"""
+Generate /results static HTML from scored pick data.
+
+Run after each race scoring job completes.
+
+Usage:
+    python scripts/generate_results_page.py
+    python scripts/generate_results_page.py --output /path/to/output.html
+    python scripts/generate_results_page.py --season 2026
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import html
+import os
+import sys
+from datetime import UTC, datetime
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+OUTPUT_PATH = PROJECT_ROOT / "api" / "static" / "results.html"
+WA_NUMBER = os.getenv("WHATSAPP_DISPLAY_NUMBER", "Text us on WhatsApp")
+
+
+def _esc(value: object) -> str:
+    return html.escape(str(value), quote=True)
+
+
+def results_body(stats) -> str:
+    rows = ""
+    for r in stats.results:
+        icon = "✓" if r.was_correct else "✗"
+        cls = "correct" if r.was_correct else "wrong"
+        rows += f"""
+      <tr>
+        <td>{_esc(r.race_name)}</td>
+        <td>{_esc(r.pick_driver)}</td>
+        <td>{_esc(r.actual_top_scorer)}</td>
+        <td>{r.fantasy_points:+.0f} pts</td>
+        <td class="{cls}">{icon}</td>
+      </tr>"""
+
+    filled = round(stats.hit_rate_pct / 10)
+    bar = "█" * filled + "░" * (10 - filled)
+
+    return f"""
+  <div class="headline">
+    <span class="pct">{stats.hit_rate_pct:.0f}%</span>
+  </div>
+  <div class="subhead">Pick accuracy · {stats.season} season · {bar}</div>
+  <div class="stat-row">
+    <div class="stat">
+      <div class="stat-label">Races scored</div>
+      <div class="stat-value">{stats.races_scored}</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Correct picks</div>
+      <div class="stat-value">{stats.correct_picks}</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Best race</div>
+      <div class="stat-value">{_esc(stats.best_race_name)}</div>
+    </div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Race</th>
+        <th>Pick</th>
+        <th>Actual</th>
+        <th>Points</th>
+        <th>Result</th>
+      </tr>
+    </thead>
+    <tbody>{rows}
+    </tbody>
+  </table>
+
+  <div class="cta">
+    <div class="cta-label">Get picks on WhatsApp</div>
+    <div class="cta-text">Text SUBSCRIBE to {_esc(WA_NUMBER)}</div>
+    <div class="cta-sub">Free. No app required. Reply HELP for commands.</div>
+  </div>"""
+
+
+def no_data_body(season: int) -> str:
+    return f"""
+  <div class="headline"><span class="pct">—</span></div>
+  <div class="subhead">Season {season} · No races scored yet</div>
+  <p style="color:var(--muted);font-size:14px;margin-bottom:48px">
+    Pick accuracy is published after each race. Check back after Race 1.
+  </p>
+  <div class="cta">
+    <div class="cta-label">Get picks on WhatsApp</div>
+    <div class="cta-text">Text SUBSCRIBE to {_esc(WA_NUMBER)}</div>
+    <div class="cta-sub">Free. No app required. Reply HELP for commands.</div>
+  </div>"""
+
+
+def render_html(stats, *, season: int) -> str:
+    updated = datetime.now(tz=UTC).strftime("%d %b %Y, %H:%M UTC")
+    body = no_data_body(season) if not stats or stats.races_scored == 0 else results_body(stats)
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PitWallAI · Season Results {season}</title>
+  <style>
+    :root {{
+      --black: #0A0A0A;
+      --white: #F5F2ED;
+      --red:   #E10600;
+      --teal:  #00D2BE;
+      --amber: #FF8700;
+      --mid:   #1C1C1C;
+      --border:#2A2A2A;
+      --muted: #666;
+    }}
+    * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+    body {{
+      background: var(--black);
+      color: var(--white);
+      font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 40px 24px 80px;
+    }}
+    .brand {{
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      margin-bottom: 40px;
+    }}
+    .brand span {{ color: var(--red); }}
+    .headline {{
+      font-size: clamp(56px, 12vw, 96px);
+      font-weight: 900;
+      line-height: 0.9;
+      letter-spacing: -2px;
+      margin-bottom: 8px;
+    }}
+    .headline .pct {{ color: var(--red); }}
+    .subhead {{
+      font-size: 13px;
+      color: var(--muted);
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      margin-bottom: 48px;
+    }}
+    .stat-row {{
+      display: flex;
+      gap: 32px;
+      margin-bottom: 48px;
+      flex-wrap: wrap;
+    }}
+    .stat-label {{
+      font-size: 9px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 4px;
+    }}
+    .stat-value {{
+      font-size: 22px;
+      font-weight: 700;
+    }}
+    table {{
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 48px;
+      font-size: 13px;
+    }}
+    th {{
+      font-size: 9px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--muted);
+      text-align: left;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--border);
+    }}
+    td {{
+      padding: 12px 0;
+      border-bottom: 1px solid var(--border);
+      color: #ccc;
+      vertical-align: top;
+    }}
+    td:first-child {{ color: var(--white); font-weight: 600; }}
+    .correct {{ color: var(--teal); font-weight: 700; }}
+    .wrong   {{ color: var(--muted); }}
+    .cta {{
+      background: var(--mid);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--red);
+      padding: 20px 24px;
+      margin-bottom: 40px;
+    }}
+    .cta-label {{
+      font-size: 9px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--red);
+      margin-bottom: 8px;
+    }}
+    .cta-text {{
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }}
+    .cta-sub {{ font-size: 12px; color: var(--muted); }}
+    .updated {{
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: 1px;
+    }}
+    .disclaimer {{
+      font-size: 11px;
+      color: var(--border);
+      margin-top: 16px;
+      line-height: 1.6;
+    }}
+  </style>
+</head>
+<body>
+  <div class="brand">Pit<span>Wall</span>AI</div>
+  {body}
+  <div class="updated">Last updated: {updated}</div>
+  <div class="disclaimer">
+    PitWallAI is an independent fan project not affiliated with Formula 1,
+    F1 Fantasy, ESPN, or any constructor. Picks are informational only.
+    Not financial or betting advice.
+  </div>
+</body>
+</html>"""
+
+
+async def generate(output_path: Path, season: int) -> None:
+    from db.scorer import get_season_accuracy
+
+    stats = await get_season_accuracy(season=season)
+    page = render_html(stats, season=season)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(page, encoding="utf-8")
+    print(f"Generated: {output_path} ({len(page)} bytes)")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Generate PitWallAI public results HTML")
+    parser.add_argument("--output", type=Path, default=OUTPUT_PATH)
+    parser.add_argument("--season", type=int, default=2026)
+    args = parser.parse_args()
+    asyncio.run(generate(output_path=args.output, season=args.season))
+
+
+if __name__ == "__main__":
+    main()

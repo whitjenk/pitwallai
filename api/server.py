@@ -10,7 +10,8 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from loguru import logger
 from pydantic import BaseModel
 
@@ -45,6 +46,7 @@ from pitwallai.agents.radio_intercept.vector_store import MockVectorStore
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DASHBOARD_PATH = PROJECT_ROOT / "dashboard.jsx"
+STATIC_DIR = PROJECT_ROOT / "api" / "static"
 
 
 class ConfirmIntelBody(BaseModel):
@@ -120,6 +122,8 @@ def create_app(
 
     app = FastAPI(title="PitWallAI Radio Intercept Decoder", version="1.0")
     app.include_router(picks_router)
+    STATIC_DIR.mkdir(parents=True, exist_ok=True)
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
     app.state.mode = mode
     app.state.rehearsal_speed = rehearsal_speed
     app.state.settings = pitwall_settings
@@ -413,11 +417,14 @@ def create_app(
             raise HTTPException(status_code=404, detail="Chip plan not found")
         return HTMLResponse(content=html)
 
+    @app.get("/results", include_in_schema=False)
+    async def results_page() -> RedirectResponse:
+        """Public season hit-rate page (static HTML)."""
+        return RedirectResponse(url="/static/results.html", status_code=302)
+
     @app.get("/", include_in_schema=False)
     async def root_redirect():
         """Send browsers to the dashboard (avoid blank 404 on /)."""
-        from fastapi.responses import RedirectResponse
-
         return RedirectResponse(url="/dashboard", status_code=302)
 
     @app.get("/dashboard")

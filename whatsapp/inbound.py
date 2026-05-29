@@ -1,13 +1,11 @@
-"""Inbound WhatsApp text command handlers."""
+"""Inbound WhatsApp orchestration (onboarding flows + command router)."""
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from loguru import logger
-from db.models import Subscriber
-from db.session import get_session
+
 from intelligence.repository import (
     add_user_reported_price_change,
     erase_subscriber_data,
@@ -17,184 +15,24 @@ from intelligence.repository import (
     set_subscriber_share_private,
     update_subscriber_preferences,
 )
-from whatsapp.sender import mask_phone
 from intelligence.season_recap import build_season_recap
 from scheduler.calendar import CALENDAR_2026, get_next_race_weekend
+from scheduler.context import get_current_race_key
+from whatsapp.command_router import route
 from whatsapp.league_flow import handle_league_command
 from whatsapp.message_format import format_season_recap_message
-from whatsapp.sender import send_message as _send_message
+from whatsapp.sender import mask_phone, send_message as _send_message
+from whatsapp.subscribe_flow import (
+    complete_subscribe,
+    handle_subscribe,
+    handle_unsubscribe,
+    pending_timezone,
+    truncate,
+)
 from whatsapp.team_flow import handle_team_command
 
 _SETTINGS_URL = "https://pitwallai.app/settings"
 _SEASON_SHARE_BASE_URL = "https://pitwallai.app"
-
-# Phones awaiting timezone after SUBSCRIBE (in-memory; single-instance OK for MVP).
-_pending_timezone: set[str] = set()
-
-_SUBSCRIBE_DATA_NOTE = (
-    "📋 Data note: PitWallAI stores your phone number and "
-    "timezone to send picks. No data is sold or shared. "
-    "Text DELETE anytime to remove your data."
-)
-
-_SUBSCRIBE_CONFIRM = (
-    "✅ Subscribed to PitWallAI 🏁\n\n"
-    "Picks arrive Saturday before lock. Text HELP for commands.\n\n"
-    "⚠️ Independent fan tool. Not affiliated with F1 Fantasy, "
-    "ESPN, or Formula 1. All picks are informational only — "
-    "never financial or gaming advice. You decide."
-)
-
-
-def _truncate(msg: str, limit: int = 160) -> str:
-    """Ensure outbound text fits WhatsApp short-message UX."""
-    if len(msg) <= limit:
-        return msg
-    return msg[: limit - 3] + "..."
-
-
-def _is_valid_iana_timezone(tz_name: str) -> bool:
-    """
-    Validate an IANA timezone string.
-
-    Args:
-        tz_name: Candidate timezone (e.g. Europe/London).
-
-    Returns:
-        True if recognized by zoneinfo.
-    """
-    try:
-        ZoneInfo(tz_name.strip())
-        return True
-    except ZoneInfoNotFoundError:
-        return False
-
-
-async def _handle_subscribe(phone: str) -> str:
-    """
-    Start or continue SUBSCRIBE flow.
-
-    Args:
-        phone: E.164 sender phone.
-
-    Returns:
-        Outbound reply text (<=160 chars).
-    """
-    async with get_session() as session:
-        existing = await session.get(Subscriber, phone)
-        if existing and existing.active:
-            return _truncate(f"Already subscribed ({existing.timezone}). Send UNSUBSCRIBE to stop.")
-
-    _pending_timezone.add(phone)
-    return _truncate("PitWallAI: reply with your IANA timezone (e.g. Europe/London or America/New_York).")
-
-
-async def _complete_subscribe(phone: str, timezone: str) -> list[str]:
-    """
-    Store subscriber after timezone is provided.
-
-    Args:
-        phone: E.164 sender phone.
-        timezone: IANA timezone string.
-
-    Returns:
-        Outbound messages (data note on first subscribe, then confirmation).
-    """
-    if not _is_valid_iana_timezone(timezone):
-        return [_truncate("Unknown timezone. Use IANA format, e.g. Europe/London.")]
-
-    _pending_timezone.discard(phone)
-    tz_clean = timezone.strip()
-
-    async with get_session() as session:
-        row = await session.get(Subscriber, phone)
-        is_first_subscribe = row is None
-        if row is None:
-            row = Subscriber(phone=phone, timezone=tz_clean, preferred_provider="gemini", active=True)
-            session.add(row)
-        else:
-            row.timezone = tz_clean
-            row.active = True
-            row.preferred_provider = row.preferred_provider or "gemini"
-
-    logger.bind(phone=mask_phone(phone), timezone=tz_clean).info("Subscriber activated")
-    outbound: list[str] = []
-    if is_first_subscribe:
-        outbound.append(_truncate(_SUBSCRIBE_DATA_NOTE))
-    outbound.append(_SUBSCRIBE_CONFIRM)
-    return outbound
-
-
-async def _handle_unsubscribe(phone: str) -> str:
-    """
-    Soft-delete subscriber (active=False).
-
-    Args:
-        phone: E.164 sender phone.
-
-    Returns:
-        Outbound reply text.
-    """
-    async with get_session() as session:
-        row = await session.get(Subscriber, phone)
-        if row is None or not row.active:
-            return _truncate("Not subscribed. Send SUBSCRIBE to get race alerts.")
-        row.active = False
-
-    _pending_timezone.discard(phone)
-    logger.bind(phone=phone).info("Subscriber deactivated")
-    return _truncate("Unsubscribed. You won't receive alerts. Send SUBSCRIBE to rejoin.")
-
-
-async def _handle_delete(phone: str) -> str:
-    """Erase subscriber data after explicit DELETE request."""
-    deleted = await erase_subscriber_data(phone)
-    _pending_timezone.discard(phone)
-    if deleted:
-        logger.bind(phone=mask_phone(phone)).info("Subscriber data erased (DELETE command)")
-    else:
-        logger.bind(phone=mask_phone(phone)).info("DELETE command: no subscriber row found")
-    return _truncate(
-        "✅ All your data has been deleted. Sorry to see you go. "
-        "Text SUBSCRIBE anytime to rejoin."
-    )
-
-
-def _handle_help() -> str:
-    """Return command list."""
-    return _truncate(
-        "SUBSCRIBE · UNSUBSCRIBE · DELETE · TEAM · LEAGUE · PICKS · CHIPS · TRANSFERS · "
-        "BUDGET · PRIVATE · PRICE · WHY · SEASON · SHARE · LIVE ON/OFF · CADENCE · HELP",
-        300,
-    )
-
-
-def _handle_settings() -> str:
-    """Return BYOK settings link."""
-    return _truncate(f"Manage API keys & provider: {_SETTINGS_URL}")
-
-
-async def _handle_live(phone: str, *, enabled: bool) -> str:
-    """Toggle live race day alerts."""
-    row = await update_subscriber_preferences(phone, live_alerts=enabled)
-    if row is None:
-        return _truncate("Subscribe first: text SUBSCRIBE")
-    if enabled:
-        return _truncate("✅ Race day alerts on. You'll get live updates during Sunday's race.")
-    return _truncate("✅ Race day alerts off. Picks only.")
-
-
-async def _handle_cadence(phone: str, *, mode: str) -> str:
-    """Set notification cadence preference."""
-    row = await update_subscriber_preferences(phone, cadence_preference=mode)
-    if row is None:
-        return _truncate("Subscribe first: text SUBSCRIBE")
-    if mode == "FULL":
-        return _truncate(
-            "✅ Full weekend mode. Practice summary, quali picks, live alerts, post-race recap."
-        )
-    return _truncate("✅ Race day only. Saturday picks and live alerts (if LIVE ON).")
-
 
 def _last_race_key() -> str | None:
     now = datetime.now(tz=UTC)
@@ -209,26 +47,61 @@ def _next_race_key() -> str | None:
     return nxt.race_key if nxt else None
 
 
+async def _handle_delete(phone: str) -> str:
+    deleted = await erase_subscriber_data(phone)
+    pending_timezone.discard(phone)
+    if deleted:
+        logger.bind(phone=mask_phone(phone)).info("Subscriber data erased (DELETE command)")
+    return truncate(
+        "✅ All your data has been deleted. Sorry to see you go. "
+        "Text SUBSCRIBE anytime to rejoin."
+    )
+
+
+def _handle_settings() -> str:
+    return truncate(f"Manage API keys & provider: {_SETTINGS_URL}")
+
+
+async def _handle_live(phone: str, *, enabled: bool) -> str:
+    row = await update_subscriber_preferences(phone, live_alerts=enabled)
+    if row is None:
+        return truncate("Subscribe first: text SUBSCRIBE")
+    if enabled:
+        return truncate("✅ Race day alerts on. You'll get live updates during Sunday's race.")
+    return truncate("✅ Race day alerts off. Picks only.")
+
+
+async def _handle_cadence(phone: str, *, mode: str) -> str:
+    row = await update_subscriber_preferences(phone, cadence_preference=mode)
+    if row is None:
+        return truncate("Subscribe first: text SUBSCRIBE")
+    if mode == "FULL":
+        return truncate(
+            "✅ Full weekend mode. Practice summary, quali picks, live alerts, post-race recap."
+        )
+    return truncate("✅ Race day only. Saturday picks and live alerts (if LIVE ON).")
+
+
 async def _handle_price_report(phone: str, raw_text: str) -> str:
     parts = raw_text.strip().split()
     if len(parts) != 3:
-        return _truncate("Use: PRICE NOR +0.2")
+        return truncate("Use: PRICE NOR +0.2")
     _, code, delta_raw = parts
     code = code.strip().upper()
     try:
         delta = float(delta_raw)
     except ValueError:
-        return _truncate("Use numeric change like +0.2 or -0.1")
+        return truncate("Use numeric change like +0.2 or -0.1")
     race_key = _last_race_key()
     if race_key is None:
-        return _truncate("No completed race found yet for price reports.")
+        return truncate("No completed race found yet for price reports.")
     await add_user_reported_price_change(
         driver_code=code,
         race_key=race_key,
         reported_change=delta,
         reporter_phone=phone,
     )
-    return _truncate("Thanks! Helps improve predictions.")
+    return truncate("Thanks! Helps improve predictions.")
 
 
 async def _handle_why_constructor(code: str) -> str:
@@ -239,16 +112,16 @@ async def _handle_why_constructor(code: str) -> str:
     code = code.strip().upper()
     race_key = _next_race_key()
     if race_key is None:
-        return _truncate("No upcoming race found.")
+        return truncate("No upcoming race found.")
     weekend = get_race_weekend(race_key)
     if weekend is None:
-        return _truncate("No upcoming race found.")
+        return truncate("No upcoming race found.")
     circuit_key = profile_circuit_key(weekend.circuit_key)
     circuit = get_circuit_profile(circuit_key)
     circuit_label = circuit.display_name if circuit else circuit_key.replace("_", " ").title()
     profile = await load_constructor_strategy_profile(code, circuit_key)
     if profile is None:
-        return _truncate(f"No strategy data for {code} at {circuit_label} yet.")
+        return truncate(f"No strategy data for {code} at {circuit_label} yet.")
     early = int(round(profile.early_box_rate * 100))
     undercut = profile.undercut_attempt_rate
     undercut_pct = int(round(undercut * 100)) if undercut is not None else "n/a"
@@ -262,7 +135,7 @@ async def _handle_why_constructor(code: str) -> str:
     )
     if profile.data_quality == "LOW":
         msg += "\n⚠️ Limited data — treat with caution."
-    return _truncate(msg, limit=280)
+    return truncate(msg, limit=280)
 
 
 async def _handle_why(raw_text: str) -> str:
@@ -270,16 +143,16 @@ async def _handle_why(raw_text: str) -> str:
     if len(parts) >= 3 and parts[1].upper() == "CONSTRUCTOR":
         return await _handle_why_constructor(parts[2])
     if len(parts) != 2:
-        return _truncate("Use: WHY NOR or WHY CONSTRUCTOR FER")
+        return truncate("Use: WHY NOR or WHY CONSTRUCTOR FER")
     _, code = parts
     code = code.strip().upper()
     race_key = _next_race_key()
     if race_key is None:
-        return _truncate("No upcoming race found.")
+        return truncate("No upcoming race found.")
     preds = await get_price_prediction_map(race_key)
     pred = preds.get(code)
     if pred is None:
-        return _truncate(f"No prediction yet for {code}.")
+        return truncate(f"No prediction yet for {code}.")
     bd = pred.signal_breakdown or {}
     lines = [
         f"{code}: likely {pred.predicted_direction} (${pred.predicted_magnitude:.1f}M), conf {pred.confidence:.2f}",
@@ -289,14 +162,13 @@ async def _handle_why(raw_text: str) -> str:
         if not seg:
             continue
         lines.append(f"{key}: {seg.get('score', 0):+.2f} × {seg.get('weight', 0):.2f}")
-    return _truncate(" | ".join(lines), limit=300)
+    return truncate(" | ".join(lines), limit=300)
 
 
 def _season_share_secret() -> str:
     from whatsapp.settings import get_whatsapp_settings
 
     settings = get_whatsapp_settings()
-    # Prefer app secret; fallback to verify token for local/dev continuity.
     if settings.whatsapp_app_secret.strip():
         return settings.whatsapp_app_secret.strip()
     if settings.webhook_verify_token.strip():
@@ -322,7 +194,6 @@ async def _handle_season(phone: str, *, compact: bool = False) -> str:
     )
     if not compact:
         return message
-    # "SHARE" returns a cleaner copy-paste block for cross-platform posting.
     return "\n".join(
         [
             "🏁 PitWallAI season recap",
@@ -338,14 +209,9 @@ async def _handle_season(phone: str, *, compact: bool = False) -> str:
 
 async def handle_inbound_text(phone: str, text: str, raw_text: str) -> None:
     """
-    Route an inbound text message to the appropriate command handler.
+    Route inbound WhatsApp text: onboarding flows, legacy commands, then router.
 
     Sends the response via Meta Cloud API. Swallows send errors after logging.
-
-    Args:
-        phone: E.164 sender phone.
-        text: Uppercased message body for command matching.
-        raw_text: Original message body (for timezone capture).
     """
     from onboarding.rehearsal import notify_rehearsal_user_activity
 
@@ -362,14 +228,14 @@ async def handle_inbound_text(phone: str, text: str, raw_text: str) -> None:
             league_state.awaiting_confirm or league_state.step > 0 or league_state.update_mode
         )
 
-        if phone in _pending_timezone and text not in {
+        if phone in pending_timezone and text not in {
             "SUBSCRIBE",
             "UNSUBSCRIBE",
             "HELP",
             "SETTINGS",
             "TEAM",
         }:
-            reply = await _complete_subscribe(phone, raw_text)
+            reply = await complete_subscribe(phone, raw_text)
         elif in_team_flow and text != "TEAM":
             reply = await handle_team_command(phone, text, raw_text)
         elif in_league_flow and text not in {"LEAGUE", "LEAGUE UPDATE"}:
@@ -387,13 +253,11 @@ async def handle_inbound_text(phone: str, text: str, raw_text: str) -> None:
         elif text == "SHARE":
             reply = await _handle_season(phone, compact=True)
         elif text == "SUBSCRIBE":
-            reply = await _handle_subscribe(phone)
+            reply = await handle_subscribe(phone)
         elif text == "UNSUBSCRIBE":
-            reply = await _handle_unsubscribe(phone)
+            reply = await handle_unsubscribe(phone)
         elif text == "DELETE":
             reply = await _handle_delete(phone)
-        elif text == "HELP":
-            reply = _handle_help()
         elif text == "SETTINGS":
             reply = _handle_settings()
         elif text == "LIVE ON":
@@ -404,23 +268,6 @@ async def handle_inbound_text(phone: str, text: str, raw_text: str) -> None:
             reply = await _handle_cadence(phone, mode="FULL")
         elif text in {"CADENCE RACEDAY", "CADENCE RACE_DAY_ONLY"}:
             reply = await _handle_cadence(phone, mode="RACE_DAY_ONLY")
-        elif text == "PICKS":
-            from openf1.client import OpenF1Client
-            from whatsapp.app_runtime import get_pick_runtime
-            from whatsapp.phase7 import send_picks_on_demand
-
-            try:
-                runtime = get_pick_runtime(allow_lazy=True)
-            except Exception:
-                runtime = None
-            if runtime is None:
-                reply = _truncate("PICKS unavailable — service starting up.")
-            else:
-                reply = await send_picks_on_demand(
-                    phone,
-                    client=OpenF1Client(),
-                    runtime=runtime,
-                )
         elif text == "CHIPS":
             from whatsapp.phase7 import send_chips_summary
 
@@ -440,15 +287,15 @@ async def handle_inbound_text(phone: str, text: str, raw_text: str) -> None:
             reply = await send_budget_status(phone)
         elif text == "PRIVATE":
             await set_subscriber_share_private(phone, private=True)
-            reply = _truncate("Share cards set to private. Future recaps won't be public links.")
+            reply = truncate("Share cards set to private. Future recaps won't be public links.")
         else:
-            reply = _truncate("Unknown command. Send HELP for options.")
+            reply = await route(raw_text, phone, get_current_race_key())
     except ValueError as exc:
-        logger.error("Command handler config error phone={}: {}", phone, exc)
-        reply = _truncate("Service unavailable. Try again later.")
+        logger.error("Command handler config error phone={}: {}", mask_phone(phone), exc)
+        reply = truncate("Service unavailable. Try again later.")
     except Exception as exc:
-        logger.exception("Command handler error phone={}: {}", phone, exc)
-        reply = _truncate("Something went wrong. Send HELP or try later.")
+        logger.exception("Command handler error phone={}: {}", mask_phone(phone), exc)
+        reply = truncate("Something went wrong. Send HELP or try later.")
 
     try:
         messages = reply if isinstance(reply, list) else [reply]

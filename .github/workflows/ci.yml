@@ -5,17 +5,23 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Live-server websocket stress test runs on demand and on a weekly schedule,
+  # not on every PR/push (it boots a real uvicorn and is timing-sensitive).
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
 
 jobs:
   language-lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     continue-on-error: true
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -24,12 +30,13 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: pip
@@ -56,8 +63,8 @@ jobs:
 
       - name: Run full test suite
         # Whole suite gates the build. The live-server websocket stress test
-        # boots a uvicorn subprocess and is exercised in a separate,
-        # non-gating job below.
+        # boots a uvicorn subprocess and runs in the separate, non-gating
+        # ws-stress job (manual / scheduled only).
         run: PYTHONPATH=. pytest --ignore=tests/test_ws_stress.py -q
         env:
           HF_HUB_DISABLE_TELEMETRY: "1"
@@ -66,14 +73,17 @@ jobs:
   ws-stress:
     runs-on: ubuntu-latest
     # Live-server websocket load test — informational, does not gate merges
-    # (timing-sensitive; boots a real uvicorn on port 8000).
+    # (timing-sensitive; boots a real uvicorn on port 8000). Only runs on
+    # manual dispatch or the weekly schedule, never on PRs/pushes.
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    timeout-minutes: 15
     continue-on-error: true
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: pip
@@ -89,6 +99,8 @@ jobs:
           HF_HUB_DISABLE_TELEMETRY: "1"
 
       - name: Run websocket stress test
+        # Per-step cap so a hung client can never run to the job ceiling.
+        timeout-minutes: 8
         run: PYTHONPATH=. pytest tests/test_ws_stress.py -q
         env:
           HF_HUB_DISABLE_TELEMETRY: "1"

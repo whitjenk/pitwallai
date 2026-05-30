@@ -10,7 +10,7 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
 from pydantic import BaseModel
@@ -426,6 +426,7 @@ def create_app(
             session=session,
             page_title=title,
             meta_description=description,
+            og_image_url=f"https://pitwallai.app/og/season/{token}.png",
         )
         return HTMLResponse(content=html)
 
@@ -466,6 +467,52 @@ def create_app(
         if html is None:
             raise HTTPException(status_code=404, detail="Recap not found")
         return HTMLResponse(content=html)
+
+    _OG_CACHE_HEADERS = {"Cache-Control": "public, max-age=3600"}
+
+    def _png(data: bytes) -> Response:
+        return Response(content=data, media_type="image/png", headers=_OG_CACHE_HEADERS)
+
+    @app.get("/og/brand.png", include_in_schema=False)
+    async def og_brand() -> Response:
+        """Static brand OG card (homepage / sample / results unfurls)."""
+        from sharing.og_image import brand_og_png
+
+        return _png(brand_og_png())
+
+    @app.get("/og/called/{token}.png", include_in_schema=False)
+    async def og_called(token: str) -> Response:
+        """Per-race 'what we called' OG card. Falls back to brand card on error."""
+        from intelligence.called_recap import load_called_recap
+        from sharing.og_image import brand_og_png, called_recap_og_png
+
+        try:
+            recap = await load_called_recap(token)
+            if recap is not None:
+                return _png(called_recap_og_png(recap))
+        except Exception as exc:  # unfurl must still get an image
+            logger.warning("og_called render failed token={}: {}", token, exc)
+        return _png(brand_og_png())
+
+    @app.get("/og/season/{token}.png", include_in_schema=False)
+    async def og_season(token: str) -> Response:
+        """Season recap OG card. Falls back to brand card on error."""
+        from sharing.og_image import brand_og_png, season_og_png
+
+        try:
+            parsed = parse_share_token(token, _season_share_secret())
+            if parsed is not None:
+                phone, season = parsed
+                recap = await build_season_recap(
+                    phone=phone,
+                    season=season,
+                    share_base_url="https://pitwallai.app",
+                    share_secret=_season_share_secret(),
+                )
+                return _png(season_og_png(recap))
+        except Exception as exc:  # unfurl must still get an image
+            logger.warning("og_season render failed token={}: {}", token, exc)
+        return _png(brand_og_png())
 
     @app.get("/results", include_in_schema=False)
     async def results_page() -> RedirectResponse:

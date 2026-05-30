@@ -137,6 +137,7 @@ def render_season_share_html(
     session: SessionSnapshot | None,
     page_title: str,
     meta_description: str,
+    og_image_url: str | None = None,
 ) -> str:
     """Render full season recap share page HTML."""
     vs_community = int(round(recap.personalized_accuracy_pct - recap.community_accuracy_pct))
@@ -160,6 +161,16 @@ def render_season_share_html(
             0,
             label="Matched community",
             aria_label="Matched community GP pick hit rate",
+        )
+
+    og_image_tags = ""
+    if og_image_url:
+        safe_img = escape(og_image_url)
+        og_image_tags = (
+            f'<meta property="og:image" content="{safe_img}" />'
+            '<meta property="og:image:width" content="1200" />'
+            '<meta property="og:image:height" content="630" />'
+            f'<meta name="twitter:image" content="{safe_img}" />'
         )
 
     session_block = ""
@@ -193,6 +204,7 @@ def render_season_share_html(
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="{escape(page_title)}" />
   <meta name="twitter:description" content="{escape(meta_description)}" />
+  {og_image_tags}
   <style>{_SHARE_PAGE_CSS}</style>
 </head>
 <body>

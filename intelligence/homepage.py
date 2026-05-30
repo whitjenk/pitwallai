@@ -29,7 +29,7 @@ _HOMEPAGE_CSS = """
 :root {
   --black: #0A0A0A;
   --white: #F5F2ED;
-  --red:   #E10600;
+  --accent: #FF8A3D;  /* pit-lane amber — deliberately not Formula 1's signature red */
   --teal:  #00D2BE;
   --muted: #8b949e;
   --border:#2A2A2A;
@@ -52,7 +52,7 @@ body {
   text-transform: uppercase;
   margin-bottom: 48px;
 }
-.brand span { color: var(--red); }
+.brand span { color: var(--accent); }
 .hero {
   font-size: clamp(32px, 6vw, 48px);
   font-weight: 900;
@@ -88,7 +88,7 @@ body {
   letter-spacing: -1px;
   font-variant-numeric: tabular-nums;
 }
-.stat-value .pct { color: var(--red); }
+.stat-value .pct { color: var(--accent); }
 .stat-sub { font-size: 11px; color: var(--muted); margin-top: 4px; }
 .section { margin-bottom: 40px; }
 .section-label {
@@ -103,7 +103,7 @@ p { color: #ccc; font-size: 14px; margin-bottom: 12px; }
 .cta {
   background: var(--mid);
   border: 1px solid var(--border);
-  border-left: 3px solid var(--red);
+  border-left: 3px solid var(--accent);
   padding: 24px;
   margin: 32px 0;
 }
@@ -111,7 +111,7 @@ p { color: #ccc; font-size: 14px; margin-bottom: 12px; }
   font-size: 9px;
   letter-spacing: 2px;
   text-transform: uppercase;
-  color: var(--red);
+  color: var(--accent);
   margin-bottom: 8px;
 }
 .cta-text { font-size: 17px; font-weight: 700; margin-bottom: 6px; }
@@ -141,9 +141,13 @@ _OG = """
 <meta property="og:description" content="F1 fantasy picks on WhatsApp, scored against actual results. Independent, open source, no app." />
 <meta property="og:type" content="website" />
 <meta property="og:url" content="https://pitwallai.app/" />
+<meta property="og:image" content="https://pitwallai.app/og/brand.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
 <meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content="PitWallAI — F1 fantasy intelligence" />
 <meta name="twitter:description" content="F1 fantasy picks on WhatsApp, scored against actual results." />
+<meta name="twitter:image" content="https://pitwallai.app/og/brand.png" />
 """
 
 
@@ -199,8 +203,9 @@ def render_homepage_html(stats: dict[str, int | float]) -> str:
 
   <div class="hero">F1 fantasy intelligence, on WhatsApp.</div>
   <p class="subhero">
-    Personalized picks three hours before lock. Scored against actual results every race.
-    Open source. No app required.
+    Every Sunday, a forwardable recap of the race's strategic moments — timestamped
+    for your league chat. Plus personalized picks before lock, scored against actual
+    results. Open source. No app required.
   </p>
 
   <div class="stats" aria-label="Live season stats">
@@ -229,12 +234,13 @@ def render_homepage_html(stats: dict[str, int | float]) -> str:
 
   <div class="section">
     <div class="section-label">How it works</div>
-    <h2>Three agents across the weekend.</h2>
+    <h2>Receipts on Sunday. Picks all weekend.</h2>
     <p>
-      Thursday context → Friday practice → Saturday quali. Picks land
-      three hours before lock — your team, your budget, your transfers.
-      Sunday's race monitor logs every strategic call-out with timestamps,
-      so you can show your league chat afterward what we saw and when.
+      During the race, PitWallAI logs every strategic call-out — safety cars,
+      retirements, pit windows — each stamped with the source-signal time and our
+      decode time, so you can show your league chat exactly what we saw and when.
+      Across the weekend it also sends personalized picks before lock — your team,
+      your budget, your transfers — and scores each one against the real result.
     </p>
   </div>
 

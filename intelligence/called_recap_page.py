@@ -51,6 +51,7 @@ _LABEL = {
 
 
 def render_called_recap_share_html(recap: CalledRaceRecap) -> str:
+    og_image = f"https://pitwallai.app/og/called/{escape(recap.share_token)}.png"
     rows = ""
     for m in recap.moments:
         glyph = _GLYPH.get(m.event_type.value, "·")
@@ -107,9 +108,13 @@ def render_called_recap_share_html(recap: CalledRaceRecap) -> str:
   <meta property="og:title" content="PitWallAI · {escape(recap.race_label)} — what we called" />
   <meta property="og:description" content="{escape(median_badge)} — strategic call-outs with source-signal and decode timestamps." />
   <meta property="og:type" content="article" />
+  <meta property="og:image" content="{og_image}" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="PitWallAI · {escape(recap.race_label)} — what we called" />
   <meta name="twitter:description" content="{escape(median_badge)} during {escape(recap.race_label)}." />
+  <meta name="twitter:image" content="{og_image}" />
   <style>{_CSS}</style>
 </head>
 <body>

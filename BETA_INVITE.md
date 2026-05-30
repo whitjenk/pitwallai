@@ -19,9 +19,9 @@ python scripts/verify_webhook.py --base-url https://<your-app>
 
 ## What beta includes
 
+- Sunday **CalledRecap** — timestamped race call-outs with a shareable link, forwardable to your league chat (works from race one)
 - Saturday picks ~3 hours before race lock (after **TEAM** setup)
 - On-demand **PICKS** anytime after team is saved
-- Sunday **CalledRecap** with shareable link
 - **HELP**, **UNSUBSCRIBE**, **DELETE** (full data erase)
 
 ## What beta does *not* include
@@ -36,9 +36,9 @@ python scripts/verify_webhook.py --base-url https://<your-app>
 Replace `<number>` with digits-only E.164 (no `+`) for the wa.me link, or send from your saved contact.
 
 ```
-Hey — trying a small closed beta of PitWallAI, an open-source F1 Fantasy picks bot on WhatsApp.
+Hey — trying a small closed beta of PitWallAI, an open-source F1 Fantasy tool on WhatsApp. ~5 testers max.
 
-Scope: personalized Saturday picks before lock + Sunday recap. ~5 testers max.
+What you get: a Sunday "what we called" recap — every safety car, retirement and pit window, timestamped, ready to forward to your league chat. Plus personalized picks before lock once you set up your team.
 
 1. Open: https://wa.me/<number>?text=SUBSCRIBE
 2. Send a screenshot of your F1 Fantasy My Team (or text TEAM)

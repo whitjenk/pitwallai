@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -25,6 +25,9 @@ async def test_subscribe_sets_pending_for_unknown_cc() -> None:
 
     session = AsyncMock()
     session.get = AsyncMock(return_value=None)
+    # SQLAlchemy's Session.add is synchronous — keep it a sync mock so the
+    # production `session.add(...)` call doesn't leave an un-awaited coroutine.
+    session.add = MagicMock()
 
     @asynccontextmanager
     async def _fake_session():

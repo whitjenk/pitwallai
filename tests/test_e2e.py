@@ -71,11 +71,22 @@ async def test_decode_latency_soft_ceiling(
     Not a product contract — the live-race surface earns its value from
     shareable call-outs, not sub-second decode. This assertion exists
     only to catch order-of-magnitude regressions in CI.
+
+    Asserts on the *median* latency rather than every message: the first
+    decode pays a one-time warmup cost and CI runners are contended, so a
+    single cold-start outlier must not fail the suite. A generous absolute
+    cap still catches a genuinely pathological single decode.
     """
+    import statistics
+
+    latencies: list[float] = []
     for message in MONACO_REHEARSAL_SCENARIO.events:
         result = await agent.decode(message, agent_deps)
         assert result.processing_latency_ms is not None
-        assert result.processing_latency_ms < 1500
+        latencies.append(result.processing_latency_ms)
+
+    assert statistics.median(latencies) < 1500
+    assert max(latencies) < 5000
 
 
 @pytest.mark.asyncio

@@ -85,8 +85,13 @@ def _provider_param(provider: str, class_path: str) -> "pytest.ParameterSet":
         _provider_param("ollama", "pydantic_ai.models.openai.OpenAIModel"),
     ],
 )
-def test_get_model_returns_expected_class(provider: str, expected_class_path: str) -> None:
+def test_get_model_returns_expected_class(
+    provider: str, expected_class_path: str, monkeypatch
+) -> None:
     """Each provider maps to the correct Pydantic AI model wrapper."""
+    # This exercises factory wiring for paid providers too — opt out of the
+    # free-models-only guard (no real API calls happen; providers are patched).
+    monkeypatch.setenv("PITWALL_FREE_MODELS_ONLY", "0")
     with patch(expected_class_path) as mock_cls:
         mock_cls.return_value = MagicMock(spec=Model)
         if provider == "gemini":

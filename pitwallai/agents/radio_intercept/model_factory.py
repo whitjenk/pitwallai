@@ -60,6 +60,13 @@ def get_model(
 
     resolved_name = model_name or _DEFAULT_MODELS[normalized]
 
+    # Hard guardrail: never construct a billed model when free-only is on. This
+    # is the single choke point for every LLM call (decode, vision, NL intent,
+    # constructor notes), so this one check covers them all.
+    from pitwallai.free_models import assert_free_model
+
+    assert_free_model(normalized, resolved_name, use_vertex=use_vertex, api_key=api_key)
+
     if normalized == "gemini":
         from pydantic_ai.models.google import GoogleModel
         from pydantic_ai.providers.google import GoogleProvider

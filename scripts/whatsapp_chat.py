@@ -63,6 +63,8 @@ _SIM_FEATURE_FLAGS = {
     "PITWALL_SEASON_RECAP_ENABLED": "1",
     "PITWALL_CONSTRUCTOR_STRATEGY_ENABLED": "1",
     "EXPLANATION_CARDS_ENABLED": "true",
+    # Never call a billed model in local testing (also the production default).
+    "PITWALL_FREE_MODELS_ONLY": "1",
 }
 
 
@@ -159,9 +161,15 @@ async def _bootstrap() -> str | None:
     )
     print(f"  EXPLANATION_CARDS_ENABLED: {'on' if has_explanations else 'off'}")
     print("  Feature flags:             chips, budget/transfers, season ON (simulator)")
+
+    from pitwallai.free_models import free_models_only
+
+    print(
+        f"  Free models only:          {'ON — no billed model calls' if free_models_only() else 'OFF'}"
+    )
     print(
         f"  Natural-language intent:   rules ON"
-        f"{' + Gemini fallback' if nl_llm else ' (set PITWALL_GOOGLE_API_KEY for LLM fallback)'}"
+        f"{' + free Gemini fallback' if nl_llm else ' (set PITWALL_GOOGLE_API_KEY for free Gemini fallback)'}"
     )
     return sim_db_path
 

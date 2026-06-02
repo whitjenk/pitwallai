@@ -112,12 +112,14 @@ def main() -> int:
         prices_trusted,
     )
     from pitwallai.feature_flags import picks_broadcast_enabled
+    from pitwallai.free_models import free_models_only
     from pitwallai.launch_validate import validate_launch_config
 
     load_price_catalog()
     check = validate_launch_config(mode=args.mode)
 
     print(f"Mode: {args.mode}")
+    print(f"Free models only: {'ON (no billed model calls)' if free_models_only() else 'OFF'}")
     print(f"Picks broadcast: {'ON' if picks_broadcast_enabled() else 'OFF (receipts-only)'}")
     print(f"Prices catalog updated_at: {catalog_updated_at() or 'n/a'}")
     print(f"PITWALL_PRICES_VERIFIED: {prices_trusted()}")
@@ -129,6 +131,16 @@ def main() -> int:
             f"prices.json is {age} days old — in-game prices change weekly; "
             "re-sync fantasy/prices.json before trusting transfer-swap values"
         )
+    if free_models_only():
+        import os as _os
+
+        if not _os.getenv("PITWALL_GOOGLE_API_KEY", "").strip():
+            warnings.append(
+                "free-models-only is ON but PITWALL_GOOGLE_API_KEY is unset — "
+                "screenshot (vision) onboarding and the LLM intent fallback are "
+                "disabled. Set a free AI Studio key (aistudio.google.com/apikey) "
+                "or rely on text TEAM entry + rules-based intent."
+            )
 
     if warnings:
         print("\nWarnings:")

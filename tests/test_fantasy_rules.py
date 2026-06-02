@@ -52,7 +52,7 @@ def test_transfer_penalty() -> None:
 
 
 def test_budget_cap_example_squad() -> None:
-    drivers = ["SAR", "LAW", "BOT", "MAG", "BEA"]
+    drivers = ["COL", "LAW", "BOT", "LIN", "BEA"]
     constructors = ["CAD", "SAU"]
     assert validate_driver_codes(drivers) is None
     assert validate_constructor_codes(constructors) is None

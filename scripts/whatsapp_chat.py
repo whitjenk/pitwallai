@@ -25,40 +25,47 @@ if str(PROJECT_ROOT) not in sys.path:
 
 PRACTICE_CHECKLIST = """
 ╔══════════════════════════════════════════════════════════════╗
-║  PitWallAI practice — type these at the You> prompt          ║
+║  PitWallAI practice — talk to it like a friend, not a CLI     ║
 ╠══════════════════════════════════════════════════════════════╣
+║  NATURAL LANGUAGE (no exact syntax needed)                   ║
+║    should i play a chip?           → chip planner            ║
+║    is it worth using my wildcard?  → wildcard detail         ║
+║    who should i pick this week?    → picks                   ║
+║    how am i doing?                 → your history            ║
+║    how accurate are you?           → season hit rate         ║
+║    tell me about verstappen        → driver card            ║
+║    why is norris so cheap?         → price breakdown         ║
+║    turn on race alerts             → LIVE ON                  ║
+║    how much budget do i have?      → budget                  ║
+║    what can you do?                → help                    ║
+║                                                              ║
 ║  ONBOARDING (needs DATABASE_URL in .env)                     ║
-║    1. SUBSCRIBE                                              ║
-║    2. Europe/London          ← your timezone (IANA)          ║
-║    3. TEAM                   ← start team setup              ║
-║    4. 12.5                 ← budget left ($M) example       ║
-║    5. NOR,VER,LEC,ALB,HAM    ← five drivers                 ║
-║    6. MCL,RBR                ← two constructors             ║
-║    7. 2                      ← transfers banked             ║
+║    1. SUBSCRIBE   2. Europe/London   3. TEAM                 ║
+║    4. 12.5  5. NOR,VER,LEC,ALB,HAM  6. MCL,RBR  7. 2         ║
 ║                                                              ║
-║  CORE COMMANDS (what users text on race weekend)             ║
-║    HELP          — full command list                         ║
-║    PICKS         — this weekend's recommendations            ║
-║    NOR           — driver brief (try VER, LEC, BOT too)      ║
-║    STREAK        — public season hit rate                    ║
-║    HISTORY       — your last 3 scored races                  ║
-║                                                              ║
-║  DEEPER QUESTIONS (same as texting WHY / extras)             ║
-║    WHY NOR       — price prediction breakdown                ║
-║    WHY CONSTRUCTOR FER                                       ║
-║    CHIPS         — chip planner summary                      ║
-║    TRANSFERS     — transfers banked                          ║
-║    BUDGET        — team value snapshot                       ║
-║    LIVE ON       — enable Sunday race alerts                 ║
+║  EXACT COMMANDS still work too                                ║
+║    HELP · PICKS · CHIPS · BUDGET · TRANSFERS · STREAK         ║
+║    HISTORY · LIVE ON/OFF · WHY NOR · SEASON · NOR (code)      ║
 ║                                                              ║
 ║  EDGE CASES (judge the bot)                                  ║
-║    hello         — should show HELP, not crash               ║
-║    ZZZZ          — unknown code → HELP                        ║
-║    PICKS         — before team setup vs after                ║
+║    hello   → HELP, not a crash                                ║
+║    ZZZZ    → unknown → HELP                                   ║
 ║                                                              ║
 ║  Simulator shortcuts:  ?  practice  quit                     ║
 ╚══════════════════════════════════════════════════════════════╝
 """
+
+# Off-by-default feature flags the simulator turns ON so every command is
+# explorable locally. A real .env value (loaded first) always wins.
+_SIM_FEATURE_FLAGS = {
+    "PITWALL_CHIPS_ENABLED": "1",
+    "PITWALL_BUDGET_TRANSFERS_ENABLED": "1",
+    "PITWALL_SEASON_RECAP_ENABLED": "1",
+    "PITWALL_CONSTRUCTOR_STRATEGY_ENABLED": "1",
+    "EXPLANATION_CARDS_ENABLED": "true",
+    # Never call a billed model in local testing (also the production default).
+    "PITWALL_FREE_MODELS_ONLY": "1",
+}
 
 
 def _load_env_file() -> None:
@@ -92,36 +99,79 @@ def _patch_outbound() -> None:
     inbound_mod._send_message = _terminal_send
 
 
-async def _bootstrap() -> None:
-    import intelligence.repository as repo
-    from db.session import init_db
+async def _provision_sqlite_db() -> str:
+    """Create an ephemeral SQLite DB with all tables (create_all only).
+
+    Bypasses the production Alembic/Postgres ALTER path (which is Postgres-only)
+    — the current models define every column, so create_all is complete. Lets
+    the simulator exercise DB-backed commands (TEAM, CHIPS, BUDGET, LIVE,
+    HISTORY) with zero setup. Returns the temp file path.
+    """
+    import tempfile
+
+    from db.models import Base
+    from db.session import get_engine
+
+    fd, path = tempfile.mkstemp(prefix="pitwall_sim_", suffix=".sqlite")
+    os.close(fd)
+    os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{path}"
+    engine = get_engine()
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    return path
+
+
+async def _bootstrap() -> str | None:
     from intelligence.context import init_orchestrator_context
 
     _load_env_file()
-    init_orchestrator_context()
-    await init_db()
+    # Real .env values win (loaded above); otherwise enable everything locally.
+    for key, value in _SIM_FEATURE_FLAGS.items():
+        os.environ.setdefault(key, value)
 
-    has_db = bool(os.environ.get("DATABASE_URL", "").strip())
+    init_orchestrator_context()
+
+    sim_db_path: str | None = None
+    if os.environ.get("DATABASE_URL", "").strip():
+        # User-provided DB (Postgres) — use the real init path.
+        from db.session import init_db
+
+        await init_db()
+    else:
+        # No DB configured — spin up a throwaway SQLite so every command works.
+        sim_db_path = await _provision_sqlite_db()
+        from fantasy.price_catalog import load_price_catalog
+
+        load_price_catalog()
+
     has_explanations = os.environ.get("EXPLANATION_CARDS_ENABLED", "").lower() in {
         "1",
         "true",
         "yes",
     }
 
+    from whatsapp.intent import _llm_enabled_with_key
+
+    nl_llm = _llm_enabled_with_key()
+
     print("\nEnvironment:")
-    print(f"  DATABASE_URL:              {'set' if has_db else 'missing (limited flows)'}")
+    print(
+        "  Database:                  "
+        + ("Postgres (.env)" if sim_db_path is None else f"ephemeral SQLite ({sim_db_path})")
+    )
     print(f"  EXPLANATION_CARDS_ENABLED: {'on' if has_explanations else 'off'}")
+    print("  Feature flags:             chips, budget/transfers, season ON (simulator)")
 
-    if not has_db:
-        print(
-            "\nTip: copy .env.example → .env and set DATABASE_URL for SUBSCRIBE/TEAM/HISTORY.\n"
-        )
+    from pitwallai.free_models import free_models_only
 
-        async def _no_db_onboarding(_phone: str):
-            return None
-
-        repo.get_onboarding_state = _no_db_onboarding
-        repo.get_league_onboarding_state = _no_db_onboarding
+    print(
+        f"  Free models only:          {'ON — no billed model calls' if free_models_only() else 'OFF'}"
+    )
+    print(
+        f"  Natural-language intent:   rules ON"
+        f"{' + free Gemini fallback' if nl_llm else ' (set PITWALL_GOOGLE_API_KEY for free Gemini fallback)'}"
+    )
+    return sim_db_path
 
 
 async def _repl(phone: str, *, show_practice: bool) -> None:
@@ -173,9 +223,18 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    asyncio.run(_bootstrap())
-    _patch_outbound()
-    asyncio.run(_repl(args.phone, show_practice=args.practice))
+    async def _run() -> None:
+        # Bootstrap and REPL share one event loop so the async DB engine stays
+        # bound to a live loop for the whole session.
+        sim_db_path = await _bootstrap()
+        _patch_outbound()
+        try:
+            await _repl(args.phone, show_practice=args.practice)
+        finally:
+            if sim_db_path and os.path.exists(sim_db_path):
+                os.remove(sim_db_path)
+
+    asyncio.run(_run())
 
 
 if __name__ == "__main__":

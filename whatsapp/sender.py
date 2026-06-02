@@ -15,6 +15,30 @@ _GRAPH_API_VERSION = "v18.0"
 _MAX_RETRIES = 3
 _RETRYABLE_STATUS = {429, 500, 502, 503, 504}
 
+# Meta error codes meaning the recipient is outside the 24h customer-service
+# window, so a free-form (non-template) message is rejected.
+#   131047 — "Re-engagement message": >24h since the user last messaged.
+#   470    — legacy re-engagement / outside-window code.
+_WINDOW_ERROR_CODES = {131047, 470}
+
+
+class WhatsAppWindowError(RuntimeError):
+    """Send rejected because the recipient is outside the 24h session window.
+
+    A proactive (business-initiated) free-form message can only be delivered
+    within 24h of the user's last inbound message. Outside that window Meta
+    requires a pre-approved template. Raised so broadcast loops can log this
+    distinctly instead of treating it as a generic failure.
+    """
+
+
+def _meta_error_code(exc: httpx.HTTPStatusError) -> int | None:
+    """Extract Meta's numeric error code from a failed response, if present."""
+    try:
+        return int(exc.response.json().get("error", {}).get("code"))
+    except (ValueError, TypeError, AttributeError):
+        return None
+
 
 def mask_phone(phone: str) -> str:
     """
@@ -110,10 +134,24 @@ async def send_message(phone: str, text: str) -> dict[str, Any]:
                     await asyncio.sleep(2.0**attempt)
                     continue
                 latency_ms = (time.perf_counter() - started) * 1000
+                error_code = _meta_error_code(exc)
+                if error_code in _WINDOW_ERROR_CODES:
+                    logger.warning(
+                        "WhatsApp send BLOCKED — outside 24h window phone={} code={}. "
+                        "Proactive free-form messages need the recipient to have texted "
+                        "the bot within 24h (or a pre-approved template). Message NOT "
+                        "delivered.",
+                        mask_phone(phone),
+                        error_code,
+                    )
+                    raise WhatsAppWindowError(
+                        f"recipient outside 24h window (Meta code {error_code})"
+                    ) from exc
                 logger.error(
-                    "WhatsApp send failed phone={} status={} latency_ms={:.0f}",
+                    "WhatsApp send failed phone={} status={} code={} latency_ms={:.0f}",
                     mask_phone(phone),
                     status,
+                    error_code,
                     latency_ms,
                 )
                 raise

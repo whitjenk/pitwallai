@@ -4,9 +4,9 @@
 
 > **Independent fan project.** PitWallAI is not affiliated with, endorsed by, or connected to Formula 1, F1 Fantasy, ESPN, or any F1 team or constructor. All recommendations are informational only and intended for use within the F1 Fantasy game. Nothing here constitutes financial, betting, or investment advice.
 
-PitWallAI is an open-source multi-agent intelligence system that delivers personalized F1 fantasy picks to your WhatsApp — budget-aware, circuit-adjusted, and powered by signals no pundit has access to.
+PitWallAI is an open-source F1 fantasy companion on WhatsApp. Every Sunday it logs the strategic moments of the race — safety cars, retirements, pit windows — each stamped with the source-signal time and our decode time, so you can forward your league chat exactly what we saw and when. Across the weekend it also sends personalized, budget-aware picks before lock, and scores every one against the actual race result.
 
-*[Screenshot placeholder: WhatsApp message showing race picks]*
+![PitWallAI on WhatsApp — the Sunday "what we called" recap](docs/sample-message.png)
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -17,7 +17,11 @@ PitWallAI is an open-source multi-agent intelligence system that delivers person
 
 ## What it does
 
-Three hours before race lock, you get a WhatsApp message. Not generic advice — picks filtered to your actual team, your remaining budget, and your available transfers. Backed by **three agents** that run across the weekend (the pre-lock pipeline is one agent with three stages).
+**The receipts (Sunday).** During the race, **RaceMonitor** logs every strategic moment as PitWallAI sees it — safety cars, retirements, pit windows, weather flips — each saved with its source-signal time and our decode time. After the flag, **CalledRecap** drops a forwardable summary to your WhatsApp with a shareable link (`/called/{token}`), so you can show your league chat exactly what we saw and when. This is the part that works from race one — no track record required to be useful.
+
+**The picks (Thursday → Saturday).** Across the weekend you also get personalized picks before lock — filtered to your actual team, remaining budget, and available transfers — and every pick is scored against the real race result. The model re-weights its own signals each week, so the picks get sharper over the season as results accumulate.
+
+Backed by **three agents** that run across the weekend (the pre-lock pipeline is one agent with three stages).
 
 **PicksAgent (Thursday → Saturday)** — three stages, one versioned pipeline:
 

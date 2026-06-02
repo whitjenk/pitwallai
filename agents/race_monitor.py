@@ -311,11 +311,15 @@ async def run_race_monitor(
         return ctx
 
     client = deps.openf1_client
-    session_key = await client.find_session_key(
-        year=2026,
-        circuit_short_name=ctx.circuit_profile.openf1_circuit_name,
-        session_name="Race",
-    )
+    try:
+        session_key = await client.find_session_key(
+            year=2026,
+            circuit_short_name=ctx.circuit_profile.openf1_circuit_name,
+            session_name="Race",
+        )
+    except Exception as exc:
+        logger.error("Race session lookup failed race_key={}: {}", race_key, exc)
+        return ctx
     if session_key is None:
         logger.error("Race session not found race_key={}", race_key)
         return ctx

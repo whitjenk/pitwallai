@@ -91,6 +91,15 @@ class OpenF1Client:
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
                 response = await client.get(url, params=params)
+                if response.status_code == 404:
+                    # OpenF1 returns 404 ("No results found.") for an empty match
+                    # set. Treat as no rows so find_session_key() returns None and
+                    # the race monitor / scorer degrade instead of crashing.
+                    from openf1.health import record_openf1_success
+
+                    record_openf1_success()
+                    logger.debug("OpenF1 empty (404) endpoint={} params={}", endpoint, params)
+                    return []
                 response.raise_for_status()
                 data = response.json()
                 if not isinstance(data, list):

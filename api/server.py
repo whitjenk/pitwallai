@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -10,7 +12,7 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
 from pydantic import BaseModel
@@ -126,44 +128,14 @@ def create_app(
     """
     pitwall_settings = settings or PitWallSettings.from_env()
 
-    app = FastAPI(title="PitWallAI Radio Intercept Decoder", version="1.0")
-    app.include_router(picks_router)
-    STATIC_DIR.mkdir(parents=True, exist_ok=True)
-    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
-    app.state.mode = mode
-    app.state.rehearsal_speed = rehearsal_speed
-    app.state.settings = pitwall_settings
-    app.state.session = SessionState(mode=mode)
-    app.state.rehearsal_engine = None
-    app.state.pipeline_tasks: list[asyncio.Task[Any]] = []
-    app.state.ws_connections = 0
+    @contextlib.asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        """Initialize pipeline components on startup, tear them down on shutdown.
 
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=list(pitwall_settings.cors_origins),
-        allow_credentials=True,
-        allow_methods=["GET", "POST"],
-        allow_headers=["*"],
-    )
-
-    def _season_share_secret() -> str:
-        from whatsapp.settings import get_whatsapp_settings
-
-        wa_settings = get_whatsapp_settings()
-        if wa_settings.whatsapp_app_secret.strip():
-            return wa_settings.whatsapp_app_secret.strip()
-        if wa_settings.webhook_verify_token.strip():
-            return wa_settings.webhook_verify_token.strip()
-        return "pitwallai-season-share-local-secret"
-
-    @app.on_event("startup")
-    async def on_startup() -> None:
+        Replaces the deprecated ``@app.on_event("startup"/"shutdown")`` hooks.
+        Code before ``yield`` runs on startup; code after runs on shutdown.
         """
-        Initialize pipeline components and start background tasks.
-
-        Starts decoder consumer/emitter, optional live WebSocket producer,
-        session collector, and auto-starts Monaco rehearsal in rehearsal mode.
-        """
+        # ----- startup -----
         log = logger.bind(mode=mode)
         log.info("Initializing PitWallAI components")
 
@@ -291,8 +263,6 @@ def create_app(
         else:
             log.info("Constructor strategy seeder skipped (flag off)")
 
-        from whatsapp.settings import get_whatsapp_settings
-
         if (
             not get_whatsapp_settings().database_url.strip()
             and pitwall_settings.explanation_cards_enabled
@@ -304,22 +274,54 @@ def create_app(
 
         log.info("PitWallAI startup complete")
 
-    @app.on_event("shutdown")
-    async def on_shutdown() -> None:
-        """Stop decoder pipeline and cancel background tasks."""
-        from scheduler.runtime import stop_race_scheduler
+        yield
 
+        # ----- shutdown -----
         await stop_race_scheduler()
         picks_sched = getattr(app.state, "picks_scheduler", None)
         if picks_sched is not None:
             await picks_sched.stop()
-        decoder: RadioInterceptDecoder = app.state.decoder
+        decoder = app.state.decoder
         await decoder.stop()
         for task in app.state.pipeline_tasks:
             task.cancel()
-        engine: RehearsalEngine | None = app.state.rehearsal_engine
+        engine = app.state.rehearsal_engine
         if engine is not None:
             await engine.stop()
+
+    app = FastAPI(
+        title="PitWallAI Radio Intercept Decoder",
+        version="1.0",
+        lifespan=lifespan,
+    )
+    app.include_router(picks_router)
+    STATIC_DIR.mkdir(parents=True, exist_ok=True)
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+    app.state.mode = mode
+    app.state.rehearsal_speed = rehearsal_speed
+    app.state.settings = pitwall_settings
+    app.state.session = SessionState(mode=mode)
+    app.state.rehearsal_engine = None
+    app.state.pipeline_tasks: list[asyncio.Task[Any]] = []
+    app.state.ws_connections = 0
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=list(pitwall_settings.cors_origins),
+        allow_credentials=True,
+        allow_methods=["GET", "POST"],
+        allow_headers=["*"],
+    )
+
+    def _season_share_secret() -> str:
+        from whatsapp.settings import get_whatsapp_settings
+
+        wa_settings = get_whatsapp_settings()
+        if wa_settings.whatsapp_app_secret.strip():
+            return wa_settings.whatsapp_app_secret.strip()
+        if wa_settings.webhook_verify_token.strip():
+            return wa_settings.webhook_verify_token.strip()
+        return "pitwallai-season-share-local-secret"
 
     @app.get("/health")
     async def health() -> dict[str, Any]:
@@ -426,6 +428,7 @@ def create_app(
             session=session,
             page_title=title,
             meta_description=description,
+            og_image_url=f"https://pitwallai.app/og/season/{token}.png",
         )
         return HTMLResponse(content=html)
 
@@ -466,6 +469,52 @@ def create_app(
         if html is None:
             raise HTTPException(status_code=404, detail="Recap not found")
         return HTMLResponse(content=html)
+
+    _OG_CACHE_HEADERS = {"Cache-Control": "public, max-age=3600"}
+
+    def _png(data: bytes) -> Response:
+        return Response(content=data, media_type="image/png", headers=_OG_CACHE_HEADERS)
+
+    @app.get("/og/brand.png", include_in_schema=False)
+    async def og_brand() -> Response:
+        """Static brand OG card (homepage / sample / results unfurls)."""
+        from sharing.og_image import brand_og_png
+
+        return _png(brand_og_png())
+
+    @app.get("/og/called/{token}.png", include_in_schema=False)
+    async def og_called(token: str) -> Response:
+        """Per-race 'what we called' OG card. Falls back to brand card on error."""
+        from intelligence.called_recap import load_called_recap
+        from sharing.og_image import brand_og_png, called_recap_og_png
+
+        try:
+            recap = await load_called_recap(token)
+            if recap is not None:
+                return _png(called_recap_og_png(recap))
+        except Exception as exc:  # unfurl must still get an image
+            logger.warning("og_called render failed token={}: {}", token, exc)
+        return _png(brand_og_png())
+
+    @app.get("/og/season/{token}.png", include_in_schema=False)
+    async def og_season(token: str) -> Response:
+        """Season recap OG card. Falls back to brand card on error."""
+        from sharing.og_image import brand_og_png, season_og_png
+
+        try:
+            parsed = parse_share_token(token, _season_share_secret())
+            if parsed is not None:
+                phone, season = parsed
+                recap = await build_season_recap(
+                    phone=phone,
+                    season=season,
+                    share_base_url="https://pitwallai.app",
+                    share_secret=_season_share_secret(),
+                )
+                return _png(season_og_png(recap))
+        except Exception as exc:  # unfurl must still get an image
+            logger.warning("og_season render failed token={}: {}", token, exc)
+        return _png(brand_og_png())
 
     @app.get("/results", include_in_schema=False)
     async def results_page() -> RedirectResponse:

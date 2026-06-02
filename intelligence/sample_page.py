@@ -146,6 +146,12 @@ def render_sample_page() -> str:
   <meta property="og:title" content="PitWallAI · Sample picks &amp; recap" />
   <meta property="og:description" content="What a weekend on PitWallAI looks like — picks, recap, live call-outs." />
   <meta property="og:type" content="website" />
+  <meta property="og:image" content="https://pitwallai.app/og/brand.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="PitWallAI · Sample picks &amp; recap" />
+  <meta name="twitter:image" content="https://pitwallai.app/og/brand.png" />
   <style>{_CSS}</style>
 </head>
 <body>

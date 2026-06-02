@@ -15,6 +15,17 @@ def _flag(name: str, default: bool = False) -> bool:
     return raw in {"1", "true", "yes", "on"}
 
 
+def picks_broadcast_enabled() -> bool:
+    """Proactive pre-lock pick broadcasts (Thursday context, Friday delta,
+    Saturday pre-lock picks).
+
+    Default ON. Set ``PITWALL_PICKS_BROADCAST_ENABLED=0`` for a *receipts-only*
+    launch — the live race monitor and the Sunday CalledRecap still run, but no
+    proactive pick messages go out (useful before in-game prices are verified
+    or the fantasy-lock time is confirmed)."""
+    return _flag("PITWALL_PICKS_BROADCAST_ENABLED", default=True)
+
+
 def chips_enabled() -> bool:
     """Chip planner WhatsApp commands and /chips page. Bet — later."""
     return _flag("PITWALL_CHIPS_ENABLED")

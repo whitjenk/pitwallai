@@ -142,6 +142,12 @@ class PitWallSettings:
             "true",
             "yes",
         )
+        # Free-models-only mode forbids Vertex (it bills the GCP project): force
+        # the free Google AI Studio path regardless of the env default.
+        from pitwallai.free_models import free_models_only
+
+        if free_models_only():
+            use_vertex = False
 
         return cls(
             decode_backend=backend,

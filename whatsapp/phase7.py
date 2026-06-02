@@ -44,7 +44,10 @@ from whatsapp.counterfactual_format import (
 from whatsapp.sender import mask_phone, send_message
 
 
-def _truncate(text: str, limit: int) -> str:
+def _truncate(text: str, limit: int = 1600) -> str:
+    # Default is a WhatsApp-safe single-message cap so the short status helpers
+    # (CHIPS/TRANSFERS/BUDGET "set up your team first" replies) that call
+    # _truncate(text) without a limit don't raise.
     if len(text) <= limit:
         return text
     return text[: limit - 3] + "…"

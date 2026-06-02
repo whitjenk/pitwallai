@@ -73,11 +73,16 @@ async def cache_get(key: str) -> list[dict[str, Any]] | None:
         Deserialized JSON list or None.
     """
     now = datetime.now(tz=UTC)
-    async with get_session() as session:
-        row = await session.get(OpenF1CacheEntry, key)
-        if row is None or row.expires_at <= now:
-            return None
-        return json.loads(row.payload_json)
+    try:
+        async with get_session() as session:
+            row = await session.get(OpenF1CacheEntry, key)
+            if row is None or row.expires_at <= now:
+                return None
+            return json.loads(row.payload_json)
+    except ValueError:
+        # No DATABASE_URL — treat as a cache miss so the live OpenF1 read path
+        # still works (and a DB blip can't kill race monitoring).
+        return None
 
 
 async def cache_set(
@@ -96,21 +101,25 @@ async def cache_set(
         payload: Raw JSON list to store.
     """
     expires = datetime.now(tz=UTC) + timedelta(seconds=_TTL_SECONDS[tier])
-    async with get_session() as session:
-        row = await session.get(OpenF1CacheEntry, key)
-        if row is None:
-            row = OpenF1CacheEntry(
-                cache_key=key,
-                endpoint=endpoint,
-                tier=tier.value,
-                payload_json=json.dumps(payload, default=str),
-                expires_at=expires,
-            )
-            session.add(row)
-        else:
-            row.payload_json = json.dumps(payload, default=str)
-            row.expires_at = expires
-            row.tier = tier.value
+    try:
+        async with get_session() as session:
+            row = await session.get(OpenF1CacheEntry, key)
+            if row is None:
+                row = OpenF1CacheEntry(
+                    cache_key=key,
+                    endpoint=endpoint,
+                    tier=tier.value,
+                    payload_json=json.dumps(payload, default=str),
+                    expires_at=expires,
+                )
+                session.add(row)
+            else:
+                row.payload_json = json.dumps(payload, default=str)
+                row.expires_at = expires
+                row.tier = tier.value
+    except ValueError:
+        # No DATABASE_URL — skip caching; the API result is still returned.
+        return
 
 
 async def purge_expired_cache() -> int:

@@ -11,36 +11,18 @@ import uvicorn
 from loguru import logger
 
 from api.server import create_app
-from db.session import init_db
-from intelligence.context import init_orchestrator_context
 from pitwallai.agents.radio_intercept.config import DecodeBackend, PitWallSettings
 from whatsapp.webhook import router as whatsapp_router
 
-# ASGI entry for Railway / `uvicorn main:app` (see railway.toml)
+# ASGI entry for Railway / `uvicorn main:app` (see railway.toml).
+# Startup/shutdown (assert_live_ready, init_db, orchestrator context,
+# constructor seeding, pipeline tasks) is handled by create_app's lifespan —
+# no separate on_event handler here.
 app = create_app(
     mode=os.environ.get("PITWALL_MODE", "rehearsal"),
     rehearsal_speed=float(os.environ.get("PITWALL_REHEARSAL_SPEED", "3.0")),
 )
 app.include_router(whatsapp_router)
-
-
-@app.on_event("startup")
-async def _whatsapp_startup() -> None:
-    """Ensure DB tables exist and load circuit profiles into orchestrator context."""
-    import asyncio
-
-    mode = os.environ.get("PITWALL_MODE", "rehearsal")
-    from pitwallai.launch_validate import assert_live_ready
-
-    assert_live_ready(mode=mode)
-    init_orchestrator_context()
-    await init_db()
-    from pitwallai.feature_flags import constructor_strategy_enabled
-
-    if constructor_strategy_enabled():
-        from intelligence.constructor_strategy import seed_constructor_profiles
-
-        asyncio.create_task(seed_constructor_profiles())
 
 
 def parse_args() -> argparse.Namespace:

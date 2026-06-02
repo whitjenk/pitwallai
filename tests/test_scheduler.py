@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -14,11 +14,14 @@ def test_calendar_2026_has_22_races() -> None:
     assert len(CALENDAR_2026) == 22
 
 
-def test_monaco_fantasy_lock_one_hour_before_race() -> None:
+def test_monaco_fantasy_lock_one_hour_before_qualifying() -> None:
+    """F1 Fantasy locks ~1h before qualifying (Saturday), not before the race."""
     monaco = get_race_weekend("2026_monaco")
     assert monaco is not None
-    delta = monaco.race_utc - monaco.fantasy_lock_utc
+    delta = monaco.qualifying_utc - monaco.fantasy_lock_utc
     assert delta.total_seconds() == 3600
+    # And it must be well before the race (Sunday), unlike the old race-1h model.
+    assert monaco.fantasy_lock_utc < monaco.race_utc - timedelta(hours=12)
 
 
 def test_job_ids_are_stable_and_unique_per_weekend() -> None:

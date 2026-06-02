@@ -16,6 +16,7 @@ from pitwallai.agents.radio_intercept.llm_budget import LLMBudgetGuard
 from pitwallai.agents.radio_intercept.llm_decoder import LLMDecoder
 from pitwallai.agents.radio_intercept.models import AgentDependencies, DecodedTransmission, RadioRawMessage
 from pitwallai.agents.radio_intercept.rules_decoder import RulesDecoder
+from pitwallai.free_models import PaidModelBlockedError
 
 # Phrases that turn evidence into strategist directives (forbidden in evidence_summary).
 _DIRECTIVE_PHRASES: tuple[str, ...] = (
@@ -188,19 +189,27 @@ class HybridDecoder:
 
         if effective.decode_backend in (DecodeBackend.LLM, DecodeBackend.HYBRID) and effective.llm_enabled:
             semaphore = asyncio.Semaphore(effective.llm_max_concurrency)
-            self._llm = LLMDecoder(
-                effective,
-                semaphore=semaphore,
-                budget_guard=self._budget,
-            )
-            logger.bind(
-                provider=effective.llm_provider,
-                model=effective.llm_model,
-                vertex=effective.llm_use_vertex,
-                max_session_calls=effective.llm_max_calls_per_session,
-                max_usd_session=effective.llm_max_estimated_usd_per_session,
-                max_usd_day=effective.llm_max_estimated_usd_per_day,
-            ).info("LLM enabled with budget guardrails active")
+            try:
+                self._llm = LLMDecoder(
+                    effective,
+                    semaphore=semaphore,
+                    budget_guard=self._budget,
+                )
+            except PaidModelBlockedError as exc:
+                # Free-models-only blocked this provider — stay rules-only (free)
+                # instead of failing to start.
+                logger.warning("LLM decode disabled (free-models-only): {}", exc)
+                self._settings = replace(effective, decode_backend=DecodeBackend.RULES)
+                self._llm = None
+            else:
+                logger.bind(
+                    provider=effective.llm_provider,
+                    model=effective.llm_model,
+                    vertex=effective.llm_use_vertex,
+                    max_session_calls=effective.llm_max_calls_per_session,
+                    max_usd_session=effective.llm_max_estimated_usd_per_session,
+                    max_usd_day=effective.llm_max_estimated_usd_per_day,
+                ).info("LLM enabled with budget guardrails active")
 
     async def decode(
         self,

@@ -8,6 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 from sqlalchemy import (
+    JSON,
     Boolean,
     DateTime,
     Float,
@@ -18,8 +19,13 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import JSONB as _PG_JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+# Portable JSON column: Postgres keeps native JSONB (indexable, identical to
+# before); other dialects (e.g. SQLite for the local command simulator) fall
+# back to generic JSON. Production behaviour is unchanged.
+JSONB = JSON().with_variant(_PG_JSONB(), "postgresql")
 
 
 class Base(DeclarativeBase):

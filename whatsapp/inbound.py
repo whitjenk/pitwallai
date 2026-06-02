@@ -237,7 +237,20 @@ async def handle_inbound_text(phone: str, text: str, raw_text: str) -> None:
             league_state.awaiting_confirm or league_state.step > 0 or league_state.update_mode
         )
 
-        if await is_pending_timezone(phone) and text not in {
+        pending_tz = await is_pending_timezone(phone)
+
+        # Natural-language intent: let users type "should I play a chip" instead
+        # of CHIPS. Only outside data-entry flows (team/league/timezone), where
+        # free text is structured input rather than a request.
+        if not (in_team_flow or in_league_flow or pending_tz):
+            from whatsapp.intent import resolve_intent_smart
+
+            canonical = await resolve_intent_smart(raw_text)
+            if canonical is not None:
+                text = canonical
+                raw_text = canonical
+
+        if pending_tz and text not in {
             "SUBSCRIBE",
             "UNSUBSCRIBE",
             "DELETE",

@@ -7,10 +7,28 @@ Madrid uses circuit_key ``madrid`` (profile fallback to Barcelona in jobs).
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from utils.race_key import make_race_key
+
+
+def _lock_hours_before_quali() -> float:
+    """Hours the F1 Fantasy deadline sits before qualifying starts.
+
+    The official game locks transfers ~1h before the first qualifying session
+    (Saturday for a standard weekend), NOT an hour before the race. Override
+    with ``PITWALL_FANTASY_LOCK_HOURS_BEFORE_QUALI`` after confirming the exact
+    deadline in the live F1 Fantasy app for the weekend.
+    """
+    raw = os.getenv("PITWALL_FANTASY_LOCK_HOURS_BEFORE_QUALI", "").strip()
+    if raw:
+        try:
+            return max(0.0, float(raw))
+        except ValueError:
+            pass
+    return 1.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,7 +58,8 @@ def _race(
     """
     Build a RaceWeekend from race start (UTC).
 
-    FP1/FP2 on Friday, FP3 + Qualifying on Saturday, fantasy lock 1hr before race.
+    FP1/FP2 on Friday, FP3 + Qualifying on Saturday. Fantasy lock is ~1h before
+    qualifying (the real F1 Fantasy deadline), not 1h before the race.
     """
     race = race_utc.replace(tzinfo=UTC) if race_utc.tzinfo is None else race_utc
     friday = race.date() - timedelta(days=2)
@@ -49,7 +68,9 @@ def _race(
     fp2 = datetime(friday.year, friday.month, friday.day, 15, 0, tzinfo=UTC)
     fp3 = datetime(saturday.year, saturday.month, saturday.day, 11, 0, tzinfo=UTC)
     qualifying = datetime(saturday.year, saturday.month, saturday.day, 14, 0, tzinfo=UTC)
-    fantasy_lock = race - timedelta(hours=1)
+    # NOTE: sprint weekends lock before Friday's sprint qualifying — not modelled
+    # here. Verify per-weekend in the live game; override via env if needed.
+    fantasy_lock = qualifying - timedelta(hours=_lock_hours_before_quali())
     return RaceWeekend(
         race_key=make_race_key(year, circuit_key),
         circuit_key=circuit_key,

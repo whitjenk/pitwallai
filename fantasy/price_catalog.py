@@ -71,6 +71,29 @@ def catalog_updated_at() -> str | None:
     return _updated_at
 
 
+def catalog_age_days() -> int | None:
+    """Days since prices.json ``updated_at``; None if unparseable.
+
+    Used by the launch preflight to warn that in-game prices are stale — they
+    change every weekend, so a months-old catalog makes transfer-swap value
+    framing wrong even when ``PITWALL_PRICES_VERIFIED=1`` is set."""
+    from datetime import UTC, datetime
+
+    raw = (catalog_updated_at() or "").strip()
+    if not raw:
+        return None
+    parsed = None
+    for fmt in ("%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%SZ"):
+        try:
+            parsed = datetime.strptime(raw, fmt).date()
+            break
+        except ValueError:
+            parsed = None
+    if parsed is None:
+        return None
+    return max(0, (datetime.now(tz=UTC).date() - parsed).days)
+
+
 def driver_price_m(code: str) -> float:
     if not _loaded:
         load_price_catalog()

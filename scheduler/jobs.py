@@ -49,7 +49,12 @@ async def job_practice_analysis(race_key: str) -> None:
 
 
 async def job_quali_broadcast(race_key: str) -> None:
-    """PicksAgent stage 3/3 — quali picks + WhatsApp broadcast."""
+    """PicksAgent stage 3/3 — pre-lock picks + WhatsApp broadcast."""
+    from pitwallai.feature_flags import picks_broadcast_enabled
+
+    if not picks_broadcast_enabled():
+        logger.info("quali_broadcast skipped race_key={}: receipts-only mode", race_key)
+        return
     from fantasy.rules import DRIVER_PRICES_M
     from intelligence.cache_health import check_signal_cache_health
     from loguru import logger as log
@@ -77,6 +82,11 @@ async def job_post_race_scorer(race_key: str) -> None:
 
 async def job_thursday_context(race_key: str) -> None:
     """PicksAgent stage 1/3 — context build; sprint weekends use sprint playbook."""
+    from pitwallai.feature_flags import picks_broadcast_enabled
+
+    if not picks_broadcast_enabled():
+        logger.info("thursday_context skipped race_key={}: receipts-only mode", race_key)
+        return
     weekend = get_race_weekend(race_key)
     if weekend is not None and weekend.is_sprint:
         from whatsapp.phase7 import broadcast_sprint_playbook
@@ -91,6 +101,11 @@ async def job_thursday_context(race_key: str) -> None:
 
 async def job_friday_delta(race_key: str) -> None:
     """FP2 delta broadcast (skipped on sprint weekends)."""
+    from pitwallai.feature_flags import picks_broadcast_enabled
+
+    if not picks_broadcast_enabled():
+        logger.info("friday_delta skipped race_key={}: receipts-only mode", race_key)
+        return
     from whatsapp.phase7 import broadcast_friday_delta
 
     _require_ctx()

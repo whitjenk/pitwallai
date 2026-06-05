@@ -101,13 +101,16 @@ def _score_window(
     limitless_mod = 0.0
     if circuit.overtaking_difficulty > 0.55:
         limitless_mod += 0.4
-        reasons.append("high overtaking difficulty")
+        reasons.append(
+            "hardest track to overtake on — grid position decides the race, so a "
+            "one-week premium squad maximises a high-scoring weekend"
+        )
     if circuit.weather_sensitivity > 0.7:
         limitless_mod += 0.3
-        reasons.append("weather-sensitive circuit")
+        reasons.append("high rain risk could scramble the order")
     if weekend.is_sprint:
         limitless_mod += 0.2
-        reasons.append("sprint weekend")
+        reasons.append("sprint weekend — two scoring sessions to cash in")
 
     no_neg_mod = 0.0
     if circuit.weather_sensitivity > 0.8:
@@ -130,7 +133,20 @@ def _score_window(
         if sc > 0.45:
             rec.append(chip)
     priority = "HIGH" if ranked[0][1] > 0.75 else "MEDIUM" if ranked[0][1] > 0.55 else "LOW"
-    reasoning = "; ".join(reasons[:2]) or f"base circuit score {base:.2f}"
+
+    # Reason tied to the top-ranked chip so the explanation matches the advice.
+    top_chip = ranked[0][0]
+    _CHIP_REASON: dict[ChipType, str] = {
+        ChipType.NO_NEGATIVE: "high chaos risk (weather/safety cars) — shields your squad from negative scores",
+        ChipType.WILDCARD: "high tyre-deg tends to shuffle the form book — a good week to rebuild your squad for free",
+        ChipType.EXTRA_DRS: "a strong, predictable scoring weekend to triple-points your best driver",
+        ChipType.FINAL_FIX: "lock in your squad, then fix one slot after qualifying",
+        ChipType.AUTOPILOT: "auto-captain a steady weekend if you're away",
+    }
+    if reasons:
+        reasoning = "; ".join(reasons[:2])
+    else:
+        reasoning = _CHIP_REASON.get(top_chip, "a balanced scoring weekend — no standout chip edge")
     return ranked[0][1], rec, reasoning
 
 

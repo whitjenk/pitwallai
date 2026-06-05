@@ -259,6 +259,18 @@ async def _bootstrap() -> str | None:
         load_price_catalog()
         await _seed_sim_practice_data()
 
+    # Live mode: refresh driver/constructor prices from the official F1 Fantasy
+    # feed so team value and transfer reasoning use current numbers, not a
+    # season-stale catalog.
+    if _sim_live_practice():
+        from fantasy.price_feed import refresh_prices_from_live
+
+        nd, nc = await refresh_prices_from_live(persist=True)
+        if nd or nc:
+            print(f"  ✅ Live prices: {nd} drivers, {nc} constructors (official F1 Fantasy feed)")
+        else:
+            print("  ⚠️  Live price refresh unavailable; using stored catalog.")
+
     has_explanations = os.environ.get("EXPLANATION_CARDS_ENABLED", "").lower() in {
         "1",
         "true",

@@ -271,6 +271,27 @@ async def send_chips_summary(phone: str) -> str:
     plan = generate_chip_plan(team, remaining_races_from_now())
     plan = await persist_chip_plan(phone, plan)
     remaining = len(plan.windows)
+
+    # Lead with THIS weekend's chip suitability — most users asking "should I
+    # play a chip?" mean right now — judged on the weekend's own merits.
+    from intelligence.chip_conviction import ConfidenceTier
+    from scheduler.context import get_current_race_key
+
+    cur_key = get_current_race_key()
+    this_week = next((w for w in plan.windows if w.race_key == cur_key), None)
+    header = ""
+    if (
+        this_week
+        and this_week.recommended_chips
+        and this_week.confidence_tier != ConfidenceTier.LOW
+    ):
+        chip = this_week.recommended_chips[0].value.upper()
+        header = (
+            f"🎯 This weekend — {this_week.race_name}\n"
+            f"*{chip}* is a strong window ({this_week.priority.lower()} conviction): "
+            f"{this_week.reasoning}.\n\n"
+        )
+
     seq_lines = []
     for chip, rk in plan.recommended_sequence[:3]:
         wk = get_race_weekend(rk)
@@ -278,11 +299,11 @@ async def send_chips_summary(phone: str) -> str:
         seq_lines.append(f"{chip} → {label}")
     seq_txt = "\n".join(seq_lines) if seq_lines else "No unused chips scored highly."
     return _with_verify_guard(
-        f"🎴 Chip plan for remaining {remaining} races\n\n"
-        f"📅 Recommended sequence:\n{seq_txt}\n\n"
+        f"{header}🎴 Season plan ({remaining} races left) — best window per chip:\n"
+        f"{seq_txt}\n\n"
         f"Full plan: pitwallai.app/chips/{plan.share_token}\n"
         f"Reply CHIPS LIMITLESS for specific advice",
-        300,
+        400,
     )
 
 

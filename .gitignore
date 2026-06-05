@@ -221,3 +221,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Live F1 Fantasy price overlay (runtime refresh, not the committed baseline)
+fantasy/prices.live.json

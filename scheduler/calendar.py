@@ -17,10 +17,9 @@ from utils.race_key import make_race_key
 def _lock_hours_before_quali() -> float:
     """Hours the F1 Fantasy deadline sits before qualifying starts.
 
-    The official game locks transfers ~1h before the first qualifying session
-    (Saturday for a standard weekend), NOT an hour before the race. Override
-    with ``PITWALL_FANTASY_LOCK_HOURS_BEFORE_QUALI`` after confirming the exact
-    deadline in the live F1 Fantasy app for the weekend.
+    The official game locks transfers at the **start of the first qualifying
+    session** (Saturday for a standard weekend), not an hour before. Override
+    with ``PITWALL_FANTASY_LOCK_HOURS_BEFORE_QUALI`` if a given weekend differs.
     """
     raw = os.getenv("PITWALL_FANTASY_LOCK_HOURS_BEFORE_QUALI", "").strip()
     if raw:
@@ -28,7 +27,7 @@ def _lock_hours_before_quali() -> float:
             return max(0.0, float(raw))
         except ValueError:
             pass
-    return 1.0
+    return 0.0
 
 
 @dataclass(frozen=True, slots=True)

@@ -218,6 +218,18 @@ def _enumerate_transfers(
     options: list[_TransferOption] = []
     pool = set(DRIVER_PRICES_M.keys()) - set(roster)
 
+    # Pre-qualifying there is no grid yet, so project a finishing order from
+    # practice pace. This lets the points delta reflect a realistic weekend
+    # swing (a P2 pace car vs a P15 one) instead of a near-zero score nudge.
+    proj_grid: dict[str, int] = {}
+    if not grid:
+        ranked_codes = sorted(
+            set(roster) | pool,
+            key=lambda c: _driver_score(c, circuit=circuit, signals=signals, grid=grid),
+            reverse=True,
+        )
+        proj_grid = {code: pos for pos, code in enumerate(ranked_codes, start=1)}
+
     for out_code in roster:
         out_price = driver_price_m(out_code)
         for in_code in pool:
@@ -236,7 +248,14 @@ def _enumerate_transfers(
                     + transfer_penalty_points(1, free_allowance)
                 )
             else:
-                expected = round((in_score - out_score) * 0.15, 1)
+                # Projected race-points swing from practice-derived finishing order.
+                proj_in = proj_grid.get(in_code)
+                proj_out = proj_grid.get(out_code)
+                expected = float(
+                    driver_points_race(proj_in)
+                    - driver_points_race(proj_out)
+                    + transfer_penalty_points(1, free_allowance)
+                )
             expected = round(expected, 1)
             in_sig = signals.get(in_code)
             out_sig = signals.get(out_code)
@@ -245,8 +264,13 @@ def _enumerate_transfers(
                 conf -= _ANOMALY_CONFIDENCE_PENALTY
             if out_sig and len(out_sig.anomaly_flags) >= 2:
                 conf += 5.0
+            in_pos_label = (
+                f"grid P{grid[in_code]}"
+                if in_code in grid
+                else f"projected P{proj_grid.get(in_code, '?')} on practice pace"
+            )
             reasoning_parts = [
-                f"{in_code} grid P{grid.get(in_code, '?')}",
+                f"{in_code} {in_pos_label}",
                 "clean practice" if in_sig and len(in_sig.anomaly_flags) < 2 else "practice flags",
             ]
             if out_sig and len(out_sig.anomaly_flags) >= 2:
@@ -347,8 +371,8 @@ def _path_personalized(
                 headline=headline[:200],
                 confidence=opt.confidence,
                 reasoning=(
-                    f"Confidence {opt.confidence:.0f}%. {opt.reasoning}. "
-                    f"{opt.in_code} suits {ctx.circuit.circuit_key} profile."
+                    f"{opt.reasoning}. {opt.in_code} suits {ctx.circuit.circuit_key} profile. "
+                    f"Confidence {opt.confidence:.0f}%."
                 ),
                 driver_code=opt.in_code,
                 predicted_points_delta=opt.expected_delta,

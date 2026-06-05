@@ -11,7 +11,6 @@ from fantasy.rules import (
     DRIVERS_PER_TEAM,
     FREE_TRANSFERS_PER_RACE,
     MAX_TRANSFERS_WITH_BANK,
-    budget_remaining_m,
     team_value_m,
     transfers_configured,
     validate_constructor_codes,
@@ -76,12 +75,11 @@ def _validate_team(team: FantasyTeam) -> str | None:
         total = team_value_m(drivers, constructors)
         return f"Squad ${total:.1f}M exceeds ${BUDGET_CAP_M:.0f}M cap."
     if team.remaining_budget is not None:
-        expected = budget_remaining_m(drivers, constructors)
-        if abs(expected - team.remaining_budget) > 0.15:
-            return (
-                f"Budget mismatch: squad leaves ${expected:.1f}M, "
-                f"you entered ${team.remaining_budget:.1f}M."
-            )
+        # Trust the user's stated budget: our price catalog drifts over the
+        # season, so a catalog-derived "expected" left-over will not match the
+        # real F1 Fantasy / ESPN number. Only reject values that can't be real.
+        if team.remaining_budget < 0 or team.remaining_budget > BUDGET_CAP_M:
+            return f"Budget left should be between $0 and ${BUDGET_CAP_M:.0f}M."
     if not transfers_configured(team.transfers_available):
         return f"Set free transfers (0–{MAX_TRANSFERS_WITH_BANK})."
     if team.transfers_available > MAX_TRANSFERS_WITH_BANK:

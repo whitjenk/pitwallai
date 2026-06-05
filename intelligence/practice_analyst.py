@@ -10,6 +10,7 @@ from loguru import logger
 
 from circuits.profiles import CircuitProfile
 from intelligence.drivers import driver_code_for, team_for_driver
+from intelligence.lap_signals import build_lap_only_signals
 from intelligence.radio_transcribe import transcribe_entries, transcription_enabled
 from intelligence.repository import save_practice_signals
 from intelligence.schemas import PracticeSignal
@@ -348,7 +349,20 @@ async def analyze_practice_weekend(
         all_signals.extend(session_signals)
 
     if not all_signals:
-        return []
+        # No team radio (common before/without published audio) — fall back to a
+        # lap-only signal build so the pick engine still gets real FP1/FP2 pace.
+        if not session_keys:
+            return []
+        lap_signals = await build_lap_only_signals(client, session_keys=session_keys)
+        if not lap_signals:
+            return []
+        if persist:
+            primary_key = next(iter(session_keys.values()))
+            await save_practice_signals(primary_key, circuit.circuit_key, lap_signals)
+        logger.bind(circuit=circuit.circuit_key, signals=len(lap_signals)).info(
+            "Practice analysis complete (lap-only, no radio)"
+        )
+        return lap_signals
 
     all_signals = await _apply_anomalies(
         all_signals,

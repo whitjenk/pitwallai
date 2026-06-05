@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from loguru import logger
+
 from intelligence.explanation_builder import build_explanation
 from intelligence.repository import get_picks_for_race
 from scheduler.calendar import get_race_weekend

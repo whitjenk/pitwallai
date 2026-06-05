@@ -100,14 +100,14 @@ def _patch_outbound() -> None:
 
 
 async def _provision_sqlite_db() -> str:
-    """Create an ephemeral SQLite DB with all tables (create_all only).
+    """Create an ephemeral SQLite DB with all ORM tables.
 
-    Bypasses the production Alembic/Postgres ALTER path (which is Postgres-only)
-    — the current models define every column, so create_all is complete. Lets
-    the simulator exercise DB-backed commands (TEAM, CHIPS, BUDGET, LIVE,
-    HISTORY) with zero setup. Returns the temp file path.
+    Imports every model registered on ``Base.metadata`` (including
+    ``openf1_cache``) before ``create_all``. Returns the temp file path.
     """
     import tempfile
+
+    import openf1.cache  # noqa: F401 — OpenF1CacheEntry on Base.metadata
 
     from db.models import Base
     from db.session import get_engine
@@ -119,6 +119,60 @@ async def _provision_sqlite_db() -> str:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     return path
+
+
+async def _seed_sim_practice_data() -> None:
+    """Load FP1/FP2 signals into the sim DB when empty (rehearsal seed + OpenF1)."""
+    from circuits.profiles import get_circuit_profile
+    from intelligence.practice_analyst import analyze_practice_weekend
+    from intelligence.repository import load_practice_signals_by_circuit
+    from intelligence.rehearsal_cache_seed import seed_rehearsal_practice_signals_if_needed
+    from openf1.client import OpenF1Client
+    from pitwallai.agents.radio_intercept.agent import RadioInterceptAgent
+    from pitwallai.agents.radio_intercept.config import PitWallSettings
+    from pitwallai.agents.radio_intercept.vector_store import MockVectorStore
+    from scheduler.calendar import get_race_weekend, profile_circuit_key
+    from scheduler.context import get_current_race_key
+
+    seeded = await seed_rehearsal_practice_signals_if_needed()
+    if seeded:
+        print(f"  Rehearsal practice seed: {seeded} drivers (monaco demo)")
+
+    race_key = os.environ.get("PITWALL_SIM_RACE_KEY", "").strip() or get_current_race_key()
+    weekend = get_race_weekend(race_key)
+    if weekend is None:
+        return
+    profile_key = profile_circuit_key(weekend.circuit_key)
+    existing = await load_practice_signals_by_circuit(profile_key)
+    if len(existing) >= 5:
+        sessions = sorted({s.session for s in existing})
+        print(
+            f"  Practice signals ready: {len(existing)} drivers on {race_key}"
+            f" ({', '.join(sessions)})"
+        )
+        return
+
+    circuit = get_circuit_profile(profile_key)
+    if circuit is None:
+        return
+    try:
+        settings = PitWallSettings.from_env()
+        signals = await analyze_practice_weekend(
+            client=OpenF1Client(),
+            agent=RadioInterceptAgent(settings=settings),
+            vector_store=MockVectorStore(embedding_cache_size=32),
+            circuit=circuit,
+            year=2026,
+            persist=True,
+        )
+        if signals:
+            sessions = sorted({s.session for s in signals})
+            print(
+                f"  OpenF1 FP ingest: {len(signals)} signals for {race_key}"
+                f" ({', '.join(sessions)})"
+            )
+    except Exception as exc:
+        print(f"  OpenF1 FP ingest skipped ({exc})")
 
 
 async def _bootstrap() -> str | None:
@@ -137,12 +191,14 @@ async def _bootstrap() -> str | None:
         from db.session import init_db
 
         await init_db()
+        await _seed_sim_practice_data()
     else:
         # No DB configured — spin up a throwaway SQLite so every command works.
         sim_db_path = await _provision_sqlite_db()
         from fantasy.price_catalog import load_price_catalog
 
         load_price_catalog()
+        await _seed_sim_practice_data()
 
     has_explanations = os.environ.get("EXPLANATION_CARDS_ENABLED", "").lower() in {
         "1",
@@ -171,14 +227,82 @@ async def _bootstrap() -> str | None:
         f"  Natural-language intent:   rules ON"
         f"{' + free Gemini fallback' if nl_llm else ' (set PITWALL_GOOGLE_API_KEY for free Gemini fallback)'}"
     )
+    await _print_practice_summary()
     return sim_db_path
+
+
+def _apply_sim_race_override() -> str:
+    """Pin the simulator to a race_key (e.g. 2026_montreal when FP data exists there)."""
+    override = os.environ.get("PITWALL_SIM_RACE_KEY", "").strip()
+    if not override:
+        return ""
+    import scheduler.context as ctx_mod
+
+    ctx_mod.get_current_race_key = lambda: override
+    return override
+
+
+async def _print_practice_summary() -> None:
+    """Show FP1/FP2 coverage for calendar weekends."""
+    if not os.environ.get("DATABASE_URL", "").strip():
+        return
+    from datetime import UTC, datetime
+
+    from intelligence.repository import load_practice_signals_by_circuit
+    from scheduler.calendar import CALENDAR_2026, get_race_weekend
+    from scheduler.context import get_current_race_key
+
+    now = datetime.now(tz=UTC)
+    active_key = get_current_race_key()
+    print("\nPractice signal coverage (FP1/FP2 in DB):")
+    # Active weekend first, then most recent completed races with data.
+    keys_to_check: list[str] = [active_key]
+    completed = sorted(
+        (w for w in CALENDAR_2026 if w.race_utc <= now),
+        key=lambda w: w.race_utc,
+        reverse=True,
+    )
+    for w in completed[:3]:
+        if w.race_key not in keys_to_check:
+            keys_to_check.append(w.race_key)
+
+    best_key: str | None = None
+    best_count = 0
+    for rk in keys_to_check:
+        weekend = get_race_weekend(rk)
+        if weekend is None:
+            continue
+        signals = await load_practice_signals_by_circuit(weekend.circuit_key)
+        sessions = sorted({s.session for s in signals})
+        marker = " ← active" if rk == active_key else ""
+        print(
+            f"  {rk}: {len(signals)} drivers"
+            + (f" ({', '.join(sessions)})" if sessions else " (none)")
+            + marker
+        )
+        if len(signals) > best_count:
+            best_count = len(signals)
+            best_key = rk
+
+    if (
+        best_key
+        and best_key != active_key
+        and best_count >= 5
+        and not os.environ.get("PITWALL_SIM_RACE_KEY", "").strip()
+    ):
+        print(
+            f"\nTip: FP data is on {best_key} but the calendar active weekend is "
+            f"{active_key}. Re-run with:\n"
+            f"  PITWALL_SIM_RACE_KEY={best_key} ./scripts/start_simulator.sh"
+        )
 
 
 async def _repl(phone: str, *, show_practice: bool) -> None:
     from scheduler.context import get_current_race_key
     from whatsapp.inbound import handle_inbound_text
 
-    race_key = get_current_race_key()
+    sim_override = _apply_sim_race_override()
+    race_key = sim_override or get_current_race_key()
     if show_practice:
         print(PRACTICE_CHECKLIST)
 

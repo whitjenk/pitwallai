@@ -317,6 +317,10 @@ async def handle_inbound_text(phone: str, text: str, raw_text: str) -> None:
 
             chip = raw_text.strip().split(maxsplit=1)[1] if len(raw_text.split()) > 1 else ""
             reply = await send_chip_detail(phone, chip)
+        elif text == "CHIPS" or text.startswith("CHIPS "):
+            reply = truncate(
+                "Chip planner isn't available yet. Reply HELP for supported commands."
+            )
         elif text == "TRANSFERS" and budget_transfers_enabled():
             from whatsapp.phase7 import send_transfers_status
 

@@ -10,6 +10,7 @@ from loguru import logger
 
 from circuits.profiles import CircuitProfile
 from intelligence.drivers import driver_code_for, team_for_driver
+from intelligence.radio_transcribe import transcribe_entries, transcription_enabled
 from intelligence.repository import save_practice_signals
 from intelligence.schemas import PracticeSignal
 from openf1.client import OpenF1Client
@@ -96,6 +97,10 @@ async def _decode_session_radio(
 ) -> list[PracticeSignal]:
     """Fetch and decode all team radio for one practice session."""
     entries = await client.get_team_radio(session_key)
+    # OpenF1 ships audio (recording_url) but no transcript. When transcription
+    # is enabled, fill transcripts locally so the decoder has text to parse.
+    if transcription_enabled():
+        entries = await transcribe_entries(entries)
     by_driver: dict[int, list] = defaultdict(list)
     for entry in entries:
         if entry.raw_transcript:

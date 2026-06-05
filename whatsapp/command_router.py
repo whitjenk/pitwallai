@@ -31,6 +31,12 @@ async def route(raw_text: str, phone_number: str, race_key: str) -> str:
     Returns the reply string to send back to the user.
     Never raises — unknown input returns HELP text.
     """
+    from whatsapp.intent import resolve_intent
+
+    canonical = resolve_intent(raw_text)
+    if canonical is not None:
+        raw_text = canonical
+
     normalized = raw_text.strip().upper()
     token = normalized.split()[0] if normalized else ""
 

@@ -19,10 +19,15 @@ Note: 2026 practice radio is not yet populated in OpenF1, and Monaco/Barcelona
 profiles use OpenF1 names that differ from the live feed (Monte Carlo /
 Catalunya) — pass --openf1-name to override if you target those.
 
+The radio-sentiment layer needs transcript text, which OpenF1 does not provide
+(audio only). Pass --transcribe to transcribe the clips locally with
+faster-whisper (free, no API key) so the radio path also runs on real data.
+
 Usage:
     python scripts/test_real_practice.py
     python scripts/test_real_practice.py --circuit silverstone --year 2025
     python scripts/test_real_practice.py --circuit barcelona --openf1-name Catalunya
+    python scripts/test_real_practice.py --transcribe --whisper-model base.en
 """
 
 from __future__ import annotations

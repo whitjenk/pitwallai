@@ -261,7 +261,32 @@ async def send_picks_on_demand(
         core = format_personalized_picks(weekend, output, timezone=sub.timezone)
     else:
         core = format_generic_picks(weekend, output, timezone=sub.timezone)
+
+    insight = await _picks_llm_insight(weekend, output)
+    if insight:
+        core = f"{core}\n\n💡 {insight}"
     return core
+
+
+async def _picks_llm_insight(weekend: object, output: object) -> str | None:
+    """Optional BYO-LLM synthesis of the (deterministic) pick facts."""
+    from intelligence.llm_insight import llm_tip
+
+    picks = getattr(output, "picks", None) or []
+    if not picks:
+        return None
+    fact_lines = [f"Race: {getattr(weekend, 'display_name', 'this weekend')}."]
+    for p in picks[:3]:
+        bits = [f"Recommend {p.driver_code}"]
+        if p.transfer_out and p.transfer_in:
+            bits.append(f"as a swap {p.transfer_out} -> {p.transfer_in}")
+        if p.predicted_points_delta is not None:
+            bits.append(f"projected +{p.predicted_points_delta:.0f} fantasy pts")
+        bits.append(f"confidence {p.confidence:.0f}%")
+        if p.reasoning:
+            bits.append(f"({p.reasoning.split('.')[0].strip()})")
+        fact_lines.append("; ".join(bits) + ".")
+    return await llm_tip("\n".join(fact_lines))
 
 
 async def send_chips_summary(phone: str) -> str:

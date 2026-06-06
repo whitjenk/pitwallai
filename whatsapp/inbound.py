@@ -199,7 +199,17 @@ async def _handle_why(raw_text: str) -> str:
         lines.append("Drivers of the move: " + ", ".join(drivers_seg))
     else:
         lines.append("Price-move signals (form, ownership, circuit history) build up over the season.")
-    return truncate("\n".join(lines), limit=400)
+
+    from intelligence.llm_insight import llm_tip
+
+    insight = await llm_tip(
+        f"Driver {code}. {standing or ''} "
+        f"Price outlook: {pred.predicted_direction} (${pred.predicted_magnitude:.1f}M), "
+        f"confidence {pred.confidence:.2f}."
+    )
+    if insight:
+        lines.append(f"💡 {insight}")
+    return truncate("\n".join(lines), limit=500)
 
 
 async def _practice_standing_line(race_key: str, code: str) -> str | None:

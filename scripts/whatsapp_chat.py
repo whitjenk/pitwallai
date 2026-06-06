@@ -294,7 +294,9 @@ async def _bootstrap() -> str | None:
     print("  Feature flags:             chips, budget/transfers, season ON (simulator)")
 
     from pitwallai.free_models import free_models_only
+    from pitwallai.llm_mode import active_llm_label
 
+    print(f"  LLM mode:                  {active_llm_label()}")
     print(
         f"  Free models only:          {'ON — no billed model calls' if free_models_only() else 'OFF'}"
     )

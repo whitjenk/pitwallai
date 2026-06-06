@@ -374,7 +374,7 @@ async def send_budget_status(phone: str, race_key: str | None = None) -> str:
         prior = [x for x in CALENDAR_2026 if x.race_utc < w.race_utc]
         rk = prior[-1].race_key if prior else w.race_key
     snap = await track_team_value(phone, rk)
-    return format_budget_whatsapp(snap)
+    return format_budget_whatsapp(snap, cash_remaining=team.remaining_budget)
 
 
 async def _subscriber_or_default(phone: str) -> Subscriber:

@@ -184,14 +184,21 @@ async def _handle_why(raw_text: str) -> str:
         f"{code}: price likely {pred.predicted_direction} "
         f"(${pred.predicted_magnitude:.1f}M), conf {pred.confidence:.2f}"
     )
+    # Only show the signal breakdown when something actually fired. Early in the
+    # season the price-move signals (form momentum, ownership, circuit history)
+    # have little data, so a wall of "+0.00" reads as broken rather than honest.
     drivers_seg = []
     for key in ("momentum", "value_ratio", "circuit_hist", "practice_align", "ownership_pressure"):
         seg = bd.get(key) or {}
         if not seg:
             continue
-        drivers_seg.append(f"{key}: {seg.get('score', 0):+.2f} × {seg.get('weight', 0):.2f}")
+        if abs(float(seg.get("score", 0))) < 0.01:
+            continue
+        drivers_seg.append(f"{key} {seg.get('score', 0):+.2f}")
     if drivers_seg:
-        lines.append(" | ".join(drivers_seg))
+        lines.append("Drivers of the move: " + ", ".join(drivers_seg))
+    else:
+        lines.append("Price-move signals (form, ownership, circuit history) build up over the season.")
     return truncate("\n".join(lines), limit=400)
 
 

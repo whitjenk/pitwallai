@@ -363,20 +363,36 @@ async def _handle_score(phone: str) -> str:
     model = await score_against_result(
         race_key, locked.model_drivers, locked.model_constructors, locked.chip, locked.model_captain
     )
+    from intelligence.lineup_grader import perfect_lineup_from_positions
+
     you_t = you["total"]
     model_t = model["total"] if model else 0
+    perfect = perfect_lineup_from_positions(you["positions"])
+    perfect_t = perfect["total"] or 1
+    capture = round(100 * you_t / perfect_t)
     verdict = (
         "you beat PitWallAI! 🏆" if you_t > model_t
         else "PitWallAI edged it." if model_t > you_t
         else "dead heat."
     )
+
+    def _pos_label(code: str) -> str:
+        p = you["positions"].get(code)
+        return f"P{p}" if p else "DNF"
+
+    your_drivers = " · ".join(
+        f"{d} {_pos_label(d)} {pts}" for d, pts in you["driver_pts"].items()
+    )
     lines = [
         "🏁 Result is in — your call vs PitWallAI:",
         f"  You:       {you_t} pts (captain {you['captain']} +{you['captain_bonus']})",
         f"  PitWallAI: {model_t} pts",
-        f"→ {verdict}",
+        f"  Perfect:   {perfect_t} pts ({', '.join(perfect['drivers'])})",
+        f"→ {verdict} You captured {capture}% of the ceiling.",
+        "",
+        f"Your drivers: {your_drivers}",
     ]
-    return truncate("\n".join(lines), limit=500)
+    return truncate("\n".join(lines), limit=600)
 
 
 async def _practice_standing_line(race_key: str, code: str) -> str | None:

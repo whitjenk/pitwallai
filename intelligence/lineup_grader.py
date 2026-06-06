@@ -258,6 +258,25 @@ async def score_against_result(
     }
 
 
+def perfect_lineup_from_positions(positions: dict[str, int | None]) -> dict:
+    """Hindsight-optimal lineup and its points from a race's actual positions."""
+    from fantasy.rules import driver_points_race
+
+    pts = {c: driver_points_race(p, classified=p is not None) for c, p in positions.items()}
+    top5 = sorted(pts, key=lambda c: pts[c], reverse=True)[:5]
+    driver_total = sum(pts[c] for c in top5)
+    cap_bonus = max((pts[c] for c in top5), default=0)  # captain the best of the five
+    con_drivers = _constructor_drivers(set(positions))
+    con_pts = {con: sum(pts.get(d, 0) for d in ds[:2]) for con, ds in con_drivers.items()}
+    top_cons = sorted(con_pts, key=lambda c: con_pts[c], reverse=True)[:2]
+    con_total = sum(con_pts[c] for c in top_cons)
+    return {
+        "total": driver_total + con_total + cap_bonus,
+        "drivers": top5,
+        "constructors": top_cons,
+    }
+
+
 async def grade_lineup_facts(
     race_key: str,
     drivers: list[str],

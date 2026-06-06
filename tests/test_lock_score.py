@@ -55,3 +55,15 @@ async def test_score_against_result_math(monkeypatch) -> None:
     assert res["captain"] == "HAM"
     assert res["captain_bonus"] == 25
     assert res["total"] == 25 + 18 + 0 + 25
+
+
+def test_perfect_lineup_from_positions() -> None:
+    from intelligence.lineup_grader import perfect_lineup_from_positions
+
+    # HAM P1=25, RUS P2=18, LEC P3=15, plus filler.
+    positions = {"HAM": 1, "RUS": 2, "LEC": 3, "NOR": 4, "PIA": 5, "ALB": 15}
+    perfect = perfect_lineup_from_positions(positions)
+    assert perfect["drivers"][0] == "HAM"  # top scorer leads
+    assert "ALB" not in perfect["drivers"]  # P15 (0 pts) not in the best five
+    # Captain bonus = best driver's points (HAM, +25); total must beat raw sum.
+    assert perfect["total"] >= 25 + 18 + 15 + 12 + 10 + 25

@@ -297,6 +297,17 @@ def format_personalized_picks(
             ]
         )
 
+    cp = output.constructor_pick
+    if cp is not None and cp.transfer_out and cp.transfer_in:
+        cp_pts = int(round(cp.predicted_points_delta or 0))
+        lines.extend(
+            [
+                "",
+                f"🏭 Constructor: {cp.transfer_out} → {cp.transfer_in} "
+                f"(+{cp_pts} pts · {int(cp.confidence)}%)",
+            ]
+        )
+
     strategy = (best.league_strategy_applied or "").upper()
     if strategy in {"SAFE", "ATTACK", "BALANCED"}:
         lines.extend(["", f"⚔️ {strategy} play:"])

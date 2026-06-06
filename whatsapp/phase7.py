@@ -323,13 +323,37 @@ async def send_chips_summary(phone: str) -> str:
         label = wk.display_name if wk else rk
         seq_lines.append(f"{chip} → {label}")
     seq_txt = "\n".join(seq_lines) if seq_lines else "No unused chips scored highly."
+
+    insight_line = ""
+    insight = await _chips_llm_insight(this_week, plan.recommended_sequence[:3])
+    if insight:
+        insight_line = f"\n\n💡 {insight}"
+
     return _with_verify_guard(
         f"{header}🎴 Season plan ({remaining} races left) — best window per chip:\n"
         f"{seq_txt}\n\n"
         f"Full plan: pitwallai.app/chips/{plan.share_token}\n"
-        f"Reply CHIPS LIMITLESS for specific advice",
-        400,
+        f"Reply CHIPS LIMITLESS for specific advice{insight_line}",
+        500,
     )
+
+
+async def _chips_llm_insight(this_week: object, sequence: list) -> str | None:
+    """Optional BYO-LLM synthesis of the (deterministic) chip facts."""
+    from intelligence.llm_insight import llm_tip
+
+    facts: list[str] = []
+    if this_week is not None and getattr(this_week, "recommended_chips", None):
+        chip = this_week.recommended_chips[0].value
+        facts.append(
+            f"This weekend is {this_week.race_name}; best chip is {chip} "
+            f"({this_week.priority} conviction) because {this_week.reasoning}."
+        )
+    for chip, rk in sequence:
+        facts.append(f"Season-best window for {chip} is {rk}.")
+    if not facts:
+        return None
+    return await llm_tip("\n".join(facts))
 
 
 async def send_chip_detail(phone: str, chip_raw: str) -> str:

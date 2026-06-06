@@ -438,7 +438,13 @@ def _best_constructor_swap(
             delta = con_points(in_con) - out_pts + transfer_penalty_points(1, free_allowance)
             delta = round(delta, 1)
             if best is None or delta > best.expected_delta:
-                conf = min(95.0, max(40.0, 55.0 + delta * 2.0))
+                # A constructor swap rests on TWO drivers both converting their
+                # practice pace, and pre-qualifying that is genuinely uncertain.
+                # So cap confidence well below the driver formula and grow it only
+                # gently with the projected swing; allow more once a real grid is
+                # known (qualifying done).
+                cap = 85.0 if grid else 68.0
+                conf = min(cap, max(40.0, 45.0 + delta * 0.55))
                 best = _TransferOption(
                     out_code=out_con,
                     in_code=in_con,

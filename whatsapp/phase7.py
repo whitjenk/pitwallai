@@ -324,17 +324,18 @@ async def send_chips_summary(phone: str) -> str:
         seq_lines.append(f"{chip} → {label}")
     seq_txt = "\n".join(seq_lines) if seq_lines else "No unused chips scored highly."
 
-    insight_line = ""
+    insight_block = ""
     insight = await _chips_llm_insight(this_week, plan.recommended_sequence[:3])
     if insight:
-        insight_line = f"\n\n💡 {insight}"
+        insight_block = f"💡 {insight}\n\n"
 
     return _with_verify_guard(
-        f"{header}🎴 Season plan ({remaining} races left) — best window per chip:\n"
+        f"{header}{insight_block}"
+        f"🎴 Season plan ({remaining} races left) — best window per chip:\n"
         f"{seq_txt}\n\n"
         f"Full plan: pitwallai.app/chips/{plan.share_token}\n"
-        f"Reply CHIPS LIMITLESS for specific advice{insight_line}",
-        500,
+        f"Reply CHIPS LIMITLESS for specific advice",
+        600,
     )
 
 

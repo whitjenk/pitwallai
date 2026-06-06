@@ -49,6 +49,41 @@ async def test_tip_uses_llm_when_byo(monkeypatch) -> None:
     assert tip == "HAM's P1 practice pace makes the swap the clear play."
 
 
+def test_grounding_allows_facts_and_places() -> None:
+    g = li._is_grounded
+    allowed = {"HAM", "ANT"}
+    assert g("Swap ANT for HAM given HAM's strong practice pace.", allowed) is True
+    assert g("Antonelli is slower than Hamilton on pace.", allowed) is True
+    assert g("HAM's run at Monaco Grand Prix looks strong.", allowed) is True
+
+
+def test_grounding_rejects_offfact_and_fabricated_drivers() -> None:
+    g = li._is_grounded
+    allowed = {"HAM", "ANT"}
+    assert g("Leclerc's pace suggests ANT struggling.", allowed) is False  # LEC not allowed
+    assert g("VER looks strong this weekend.", allowed) is False  # VER not allowed
+    assert g("Swap Antoine Hubert to Lewis Hamilton.", allowed) is False  # fabricated name
+
+
+@pytest.mark.asyncio
+async def test_tip_rejected_when_off_fact_driver(monkeypatch) -> None:
+    from pydantic_ai import Agent
+    from pydantic_ai.models.test import TestModel
+
+    monkeypatch.setenv("PITWALL_LLM_MODE", "byo")
+    monkeypatch.setattr(
+        li,
+        "_build_agent",
+        lambda: Agent(
+            TestModel(custom_output_text="Leclerc will beat ANT easily this weekend."),
+            system_prompt=li._SYSTEM_PROMPT,
+            output_type=str,
+        ),
+    )
+    # LEC is not in allowed -> hallucination guard drops it -> rules fallback.
+    assert await li.llm_tip("HAM vs ANT.", allowed_codes={"HAM", "ANT"}) is None
+
+
 @pytest.mark.asyncio
 async def test_tip_graceful_when_provider_unreachable(monkeypatch) -> None:
     monkeypatch.setenv("PITWALL_LLM_MODE", "byo")

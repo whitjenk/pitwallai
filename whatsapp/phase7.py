@@ -270,23 +270,27 @@ async def send_picks_on_demand(
 
 async def _picks_llm_insight(weekend: object, output: object) -> str | None:
     """Optional BYO-LLM synthesis of the (deterministic) pick facts."""
-    from intelligence.llm_insight import llm_tip
+    from intelligence.llm_insight import driver_name, llm_tip
 
     picks = getattr(output, "picks", None) or []
     if not picks:
         return None
+    allowed: set[str] = set()
     fact_lines = [f"Race: {getattr(weekend, 'display_name', 'this weekend')}."]
     for p in picks[:3]:
-        bits = [f"Recommend {p.driver_code}"]
+        for c in (p.driver_code, p.transfer_out, p.transfer_in):
+            if c:
+                allowed.add(c.upper())
+        bits = [f"Recommend {driver_name(p.driver_code)}"]
         if p.transfer_out and p.transfer_in:
-            bits.append(f"as a swap {p.transfer_out} -> {p.transfer_in}")
+            bits.append(f"as a swap {driver_name(p.transfer_out)} -> {driver_name(p.transfer_in)}")
         if p.predicted_points_delta is not None:
             bits.append(f"projected +{p.predicted_points_delta:.0f} fantasy pts")
         bits.append(f"confidence {p.confidence:.0f}%")
         if p.reasoning:
             bits.append(f"({p.reasoning.split('.')[0].strip()})")
         fact_lines.append("; ".join(bits) + ".")
-    return await llm_tip("\n".join(fact_lines))
+    return await llm_tip("\n".join(fact_lines), allowed_codes=allowed)
 
 
 async def send_chips_summary(phone: str) -> str:
@@ -354,7 +358,8 @@ async def _chips_llm_insight(this_week: object, sequence: list) -> str | None:
         facts.append(f"Season-best window for {chip} is {rk}.")
     if not facts:
         return None
-    return await llm_tip("\n".join(facts))
+    # Chip advice is about race weekends, not drivers — reject any driver mention.
+    return await llm_tip("\n".join(facts), allowed_codes=set())
 
 
 async def send_chip_detail(phone: str, chip_raw: str) -> str:

@@ -200,12 +200,13 @@ async def _handle_why(raw_text: str) -> str:
     else:
         lines.append("Price-move signals (form, ownership, circuit history) build up over the season.")
 
-    from intelligence.llm_insight import llm_tip
+    from intelligence.llm_insight import driver_name, llm_tip
 
     insight = await llm_tip(
-        f"Driver {code}. {standing or ''} "
+        f"Driver {driver_name(code)}. {standing or ''} "
         f"Price outlook: {pred.predicted_direction} (${pred.predicted_magnitude:.1f}M), "
-        f"confidence {pred.confidence:.2f}."
+        f"confidence {pred.confidence:.2f}.",
+        allowed_codes={code.upper()},
     )
     if insight:
         lines.append(f"💡 {insight}")

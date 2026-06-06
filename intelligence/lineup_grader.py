@@ -79,10 +79,12 @@ async def grade_lineup(
     drivers: list[str],
     constructors: list[str],
     chip: str | None,
+    captain: str | None = None,
 ) -> str:
     """Build a graded assessment of a stated lineup vs PitWallAI's top picks."""
     drivers = [d.upper() for d in drivers]
     constructors = [c.upper() for c in constructors]
+    captain = captain.upper() if captain else None
     proj_grid, proj_points, con_points, signals = await _projection(race_key)
     if not signals:
         return (
@@ -107,21 +109,44 @@ async def grade_lineup(
         lines.append(f"  {d:<4} {pos_txt:<4} {pts:.0f} pts")
     lines.append(f"  → drivers project {driver_total:.0f} pts")
 
+    # Captain — doubles one driver's points. DRS Boost chip triples instead.
+    multiplier = 3 if chip == "extra_drs" else 2
+    role = "Triple (DRS Boost)" if multiplier == 3 else "Captain (2x)"
+    best_cap = max(drivers, key=proj_points) if drivers else None
+    cap_bonus = 0.0
+    lines.append("")
+    if best_cap is not None:
+        chosen = captain if captain in drivers else None
+        if chosen:
+            cap_bonus = proj_points(chosen) * (multiplier - 1)
+            verdict = "✅ optimal" if chosen == best_cap else f"🔁 I'd captain {best_cap} (higher ceiling)"
+            lines.append(
+                f"🧢 {role}: you picked {chosen} (+{cap_bonus:.0f} bonus) — {verdict}."
+            )
+        else:
+            cap_bonus = proj_points(best_cap) * (multiplier - 1)
+            lines.append(
+                f"🧢 {role}: captain {best_cap} — highest ceiling "
+                f"(P{proj_grid.get(best_cap, '?')}, +{cap_bonus:.0f} bonus)."
+            )
+
     # Constructors.
+    con_total = 0.0
     if constructors:
         lines.append("")
         lines.append("Constructors:")
-        con_total = 0.0
         for c in constructors:
             cp = con_points(c)
             con_total += cp
             lines.append(f"  {c:<4} {cp:.0f} pts")
         lines.append(f"  → constructors project {con_total:.0f} pts")
-        lines.append("")
-        lines.append(f"📊 Your lineup projects ~{driver_total + con_total:.0f} pts on practice pace.")
-    else:
-        lines.append("")
-        lines.append(f"📊 Your drivers project ~{driver_total:.0f} pts on practice pace.")
+
+    total = driver_total + con_total + cap_bonus
+    lines.append("")
+    lines.append(
+        f"📊 Your lineup projects ~{total:.0f} pts on practice pace "
+        f"(incl. +{cap_bonus:.0f} captain)."
+    )
 
     # Compare to PitWallAI's top-projected lineup (Limitless = ignore budget).
     top_drivers = sorted(
@@ -153,7 +178,11 @@ async def grade_lineup(
 
 
 async def grade_lineup_facts(
-    race_key: str, drivers: list[str], constructors: list[str], chip: str | None
+    race_key: str,
+    drivers: list[str],
+    constructors: list[str],
+    chip: str | None,
+    captain: str | None = None,
 ) -> tuple[str, set[str]]:
     """Compact facts + allowed driver codes for an optional grounded LLM verdict."""
     drivers = [d.upper() for d in drivers]
@@ -163,6 +192,10 @@ async def grade_lineup_facts(
     parts = [f"Race: {_race_name(race_key)}."]
     if chip:
         parts.append(f"Chip: {_CHIP_LABEL.get(chip, chip)}.")
+    best_cap = max(drivers, key=proj_points) if drivers else None
+    if best_cap:
+        cap_txt = f"chose {captain.upper()}" if captain else "none chosen"
+        parts.append(f"Captain: {cap_txt}; model's best captain is {best_cap}.")
     driver_total = sum(proj_points(d) for d in drivers)
     parts.append(
         "Chosen drivers and their practice-projected race points: "

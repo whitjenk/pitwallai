@@ -54,3 +54,21 @@ async def test_grade_lineup_scores_and_compares(monkeypatch) -> None:
     assert "LIMITLESS" in msg
     assert "5/5" in msg  # matches PitWallAI's top-5 drivers
     assert "projects" in msg
+    # No captain stated -> recommends the highest-ceiling driver (HAM).
+    assert "🧢" in msg and "HAM" in msg
+
+    # Suboptimal captain is flagged; optimal captain is endorsed.
+    sub = await lg.grade_lineup("2026_monaco", ["HAM", "LEC", "ANT", "RUS", "VER"], [], "limitless", captain="ANT")
+    assert "I'd captain HAM" in sub
+    opt = await lg.grade_lineup("2026_monaco", ["HAM", "LEC", "ANT", "RUS", "VER"], [], "limitless", captain="HAM")
+    assert "optimal" in opt
+
+
+def test_extract_captain_finds_stated_captain() -> None:
+    from whatsapp.inbound import _extract_captain
+
+    drivers = ["HAM", "LEC", "ANT", "RUS", "VER"]
+    assert _extract_captain("captain HAM", drivers) == "HAM"
+    assert _extract_captain("I'll triple VER", drivers) == "VER"
+    assert _extract_captain("LEC as captain", drivers) == "LEC"
+    assert _extract_captain("no captain mentioned", drivers) is None

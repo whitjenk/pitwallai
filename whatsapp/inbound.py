@@ -245,6 +245,20 @@ def _extract_lineup(raw_text: str) -> tuple[list[str], list[str], str | None]:
     return drivers, constructors, chip
 
 
+def _extract_captain(raw_text: str, drivers: list[str]) -> str | None:
+    """Find a stated captain among the lineup's drivers ('captain HAM', 'HAM (c)')."""
+    upper = raw_text.upper()
+    patterns = [
+        r"(?:CAPTAIN|CAPTAINING|TRIPLE|TRIPLING|\(C\))\s+([A-Z]{2,3})",
+        r"\b([A-Z]{2,3})\s+(?:AS\s+)?(?:CAPTAIN|\(C\))",
+    ]
+    for pat in patterns:
+        for m in re.findall(pat, upper):
+            if m in drivers:
+                return m
+    return None
+
+
 async def _handle_grade(raw_text: str) -> str:
     """Grade a stated lineup (drivers + constructors + chip) vs PitWallAI."""
     body = raw_text
@@ -254,18 +268,19 @@ async def _handle_grade(raw_text: str) -> str:
     if len(drivers) < 1:
         return truncate(
             "Tell me your lineup to grade, e.g.\n"
-            "GRADE HAM, LEC, ANT, RUS, VER and MER, FER with limitless",
+            "GRADE HAM, LEC, ANT, RUS, VER and MER, FER with limitless, captain HAM",
             limit=200,
         )
+    captain = _extract_captain(body, drivers)
     race_key = _next_race_key()
     if race_key is None:
         return truncate("No upcoming race to grade against.")
 
     from intelligence.lineup_grader import grade_lineup, grade_lineup_facts
 
-    msg = await grade_lineup(race_key, drivers, constructors, chip)
+    msg = await grade_lineup(race_key, drivers, constructors, chip, captain)
 
-    facts, allowed = await grade_lineup_facts(race_key, drivers, constructors, chip)
+    facts, allowed = await grade_lineup_facts(race_key, drivers, constructors, chip, captain)
     if facts:
         from intelligence.llm_insight import llm_tip
 

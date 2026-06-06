@@ -224,3 +224,7 @@ __marimo__/
 
 # Live F1 Fantasy price overlay (runtime refresh, not the committed baseline)
 fantasy/prices.live.json
+
+# Editor/backup copies of env files (keep .env.example tracked)
+.env.bak
+*.bak

@@ -161,17 +161,58 @@ async def _handle_why(raw_text: str) -> str:
     preds = await get_price_prediction_map(race_key)
     pred = preds.get(code)
     if pred is None:
+        # No persisted prediction yet (e.g. before the Saturday pipeline, or in
+        # the live simulator) — compute one on the fly from current signals so
+        # each driver gets a real, differentiated breakdown.
+        from intelligence.price_predictor import predict_price_changes
+        from intelligence.signal_cache import circuit_key_for_race
+
+        circuit_key = circuit_key_for_race(race_key)
+        if circuit_key is not None:
+            computed = await predict_price_changes(race_key, circuit_key)
+            pred = next((p for p in computed if p.driver_code == code), None)
+    if pred is None:
         return truncate(f"No prediction yet for {code}.")
+
+    lines: list[str] = []
+    standing = await _practice_standing_line(race_key, code)
+    if standing:
+        lines.append(standing)
+
     bd = pred.signal_breakdown or {}
-    lines = [
-        f"{code}: likely {pred.predicted_direction} (${pred.predicted_magnitude:.1f}M), conf {pred.confidence:.2f}",
-    ]
+    lines.append(
+        f"{code}: price likely {pred.predicted_direction} "
+        f"(${pred.predicted_magnitude:.1f}M), conf {pred.confidence:.2f}"
+    )
+    drivers_seg = []
     for key in ("momentum", "value_ratio", "circuit_hist", "practice_align", "ownership_pressure"):
         seg = bd.get(key) or {}
         if not seg:
             continue
-        lines.append(f"{key}: {seg.get('score', 0):+.2f} × {seg.get('weight', 0):.2f}")
-    return truncate(" | ".join(lines), limit=300)
+        drivers_seg.append(f"{key}: {seg.get('score', 0):+.2f} × {seg.get('weight', 0):.2f}")
+    if drivers_seg:
+        lines.append(" | ".join(drivers_seg))
+    return truncate("\n".join(lines), limit=400)
+
+
+async def _practice_standing_line(race_key: str, code: str) -> str | None:
+    """One-line live practice standing for a driver (rank, pace, flags)."""
+    from intelligence.signal_cache import load_practice_by_driver, circuit_key_for_race
+
+    circuit_key = circuit_key_for_race(race_key)
+    if circuit_key is None:
+        return None
+    by_driver = await load_practice_by_driver(circuit_key)
+    sig = by_driver.get(code.upper())
+    if sig is None:
+        return None
+    # Practice position = rank by pace_satisfaction across all drivers seen.
+    ranked = sorted(by_driver.values(), key=lambda s: s.pace_satisfaction, reverse=True)
+    pos = next((i for i, s in enumerate(ranked, start=1) if s.driver_code == code.upper()), None)
+    pace_pct = int(round(sig.pace_satisfaction * 100))
+    flags = ", ".join(sig.anomaly_flags) if sig.anomaly_flags else "clean run"
+    pos_txt = f"P{pos} on practice pace" if pos else "practice pace"
+    return f"📻 {code}: {sig.session} {pos_txt} ({pace_pct}% pace index) · {flags}"
 
 
 def _season_share_secret() -> str:

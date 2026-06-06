@@ -228,35 +228,18 @@ _GRADE_CHIP_WORDS: dict[str, str] = {
 
 
 def _extract_lineup(raw_text: str) -> tuple[list[str], list[str], str | None]:
-    """Pull driver codes, constructor codes and a chip from free text."""
-    from fantasy.rules import CONSTRUCTOR_PRICES_M, DRIVER_PRICES_M
+    """Pull driver codes, constructor codes and a chip from free text — by code
+    OR by name ('hamilton', 'the antonelli kid', 'ferrari double, limitless')."""
+    from intelligence.lineup_parse import resolve_chip, resolve_constructors, resolve_drivers
 
-    upper = raw_text.upper()
-    tokens = re.findall(r"\b[A-Z]{2,3}\b", upper)
-    drivers: list[str] = []
-    constructors: list[str] = []
-    for tok in tokens:
-        if tok in DRIVER_PRICES_M and tok not in drivers:
-            drivers.append(tok)
-        elif tok in CONSTRUCTOR_PRICES_M and tok not in constructors:
-            constructors.append(tok)
-    low = raw_text.lower()
-    chip = next((c for word, c in _GRADE_CHIP_WORDS.items() if word in low), None)
-    return drivers, constructors, chip
+    return resolve_drivers(raw_text), resolve_constructors(raw_text), resolve_chip(raw_text)
 
 
 def _extract_captain(raw_text: str, drivers: list[str]) -> str | None:
-    """Find a stated captain among the lineup's drivers ('captain HAM', 'HAM (c)')."""
-    upper = raw_text.upper()
-    patterns = [
-        r"(?:CAPTAIN|CAPTAINING|TRIPLE|TRIPLING|\(C\))\s+([A-Z]{2,3})",
-        r"\b([A-Z]{2,3})\s+(?:AS\s+)?(?:CAPTAIN|\(C\))",
-    ]
-    for pat in patterns:
-        for m in re.findall(pat, upper):
-            if m in drivers:
-                return m
-    return None
+    """Find a stated captain among the lineup's drivers, by code or name."""
+    from intelligence.lineup_parse import resolve_captain
+
+    return resolve_captain(raw_text, drivers)
 
 
 async def _handle_grade(raw_text: str) -> str:

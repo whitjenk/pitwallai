@@ -88,8 +88,8 @@ _SYSTEM_PROMPT = (
 )
 
 
-def _build_agent():
-    """Construct a Pydantic AI agent for the configured BYO provider, or None."""
+def _build_agent_for(system_prompt: str):
+    """Construct a Pydantic AI agent for the configured BYO provider + a prompt."""
     from pydantic_ai import Agent
 
     from pitwallai.agents.radio_intercept.config import PitWallSettings
@@ -107,7 +107,12 @@ def _build_agent():
         use_vertex=settings.llm_use_vertex,
         ollama_base_url=settings.ollama_base_url,
     )
-    return Agent(model, system_prompt=_SYSTEM_PROMPT, output_type=str)
+    return Agent(model, system_prompt=system_prompt, output_type=str)
+
+
+def _build_agent():
+    """Insight agent (the grounded F1-analyst prompt)."""
+    return _build_agent_for(_SYSTEM_PROMPT)
 
 
 async def llm_tip(facts: str, *, allowed_codes: set[str] | None = None) -> str | None:

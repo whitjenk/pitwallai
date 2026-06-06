@@ -342,57 +342,89 @@ async def _handle_lock(phone: str, raw_text: str) -> str:
     return truncate("\n".join(lines), limit=500)
 
 
-async def _handle_score(phone: str) -> str:
-    """Score the player's locked lineup vs PitWallAI vs the actual result."""
-    from intelligence.lineup_grader import score_against_result
+def _resolve_race_key(text: str) -> str | None:
+    """Find a race in free text by circuit key or a word from its name."""
+    from scheduler.calendar import CALENDAR_2026
+
+    aliases: dict[str, str] = {}
+    for w in CALENDAR_2026:
+        aliases[w.circuit_key] = w.race_key
+        for word in w.display_name.lower().replace("-", " ").split():
+            if word not in {"grand", "prix"} and len(word) > 3:
+                aliases.setdefault(word, w.race_key)
+    low = text.lower()
+    for alias, rk in aliases.items():
+        if re.search(rf"\b{re.escape(alias)}\b", low):
+            return rk
+    return None
+
+
+async def _handle_score(phone: str, raw_text: str) -> str:
+    """Score a stated or locked lineup vs PitWallAI vs the actual result."""
+    from intelligence.lineup_grader import (
+        model_top_picks,
+        perfect_lineup_from_positions,
+        score_against_result,
+    )
     from intelligence.repository import get_locked_lineup
     from scheduler.calendar import get_race_weekend
 
-    race_key = _next_race_key()
-    locked = await get_locked_lineup(phone, race_key) if race_key else None
-    if locked is None:
-        return truncate("Nothing locked for this race yet. Text LOCK <your lineup> first.")
+    body = raw_text[5:] if raw_text.upper().startswith("SCORE") else raw_text
+    drivers, constructors, chip = _extract_lineup(body)
+    captain = _extract_captain(body, drivers) if drivers else None
+    race_key = _resolve_race_key(body) or _next_race_key()
+    if race_key is None:
+        return truncate("No race to score against.")
 
-    you = await score_against_result(
-        race_key, locked.drivers, locked.constructors, locked.chip, locked.captain
-    )
+    if drivers:
+        m_drivers, m_cons, m_cap = await model_top_picks(race_key)
+    else:
+        locked = await get_locked_lineup(phone, race_key)
+        if locked is None:
+            return truncate(
+                "Nothing locked for this race. Text LOCK <lineup>, or "
+                "SCORE <lineup> at <race> to grade against any past race."
+            )
+        drivers, constructors, chip, captain = (
+            locked.drivers, locked.constructors, locked.chip, locked.captain
+        )
+        m_drivers, m_cons, m_cap = locked.model_drivers, locked.model_constructors, locked.model_captain
+
+    you = await score_against_result(race_key, drivers, constructors, chip, captain)
     if you is None:
         wk = get_race_weekend(race_key)
         name = wk.display_name if wk else race_key
         return truncate(f"{name} hasn't been classified yet — I'll score it after the flag.")
-    model = await score_against_result(
-        race_key, locked.model_drivers, locked.model_constructors, locked.chip, locked.model_captain
-    )
-    from intelligence.lineup_grader import perfect_lineup_from_positions
 
-    you_t = you["total"]
-    model_t = model["total"] if model else 0
+    model = (
+        await score_against_result(race_key, m_drivers, m_cons, chip, m_cap) if m_drivers else None
+    )
     perfect = perfect_lineup_from_positions(you["positions"])
-    perfect_t = perfect["total"] or 1
+    you_t, perfect_t = you["total"], (perfect["total"] or 1)
     capture = round(100 * you_t / perfect_t)
-    verdict = (
-        "you beat PitWallAI! 🏆" if you_t > model_t
-        else "PitWallAI edged it." if model_t > you_t
-        else "dead heat."
-    )
 
-    def _pos_label(code: str) -> str:
+    def _pos(code: str) -> str:
         p = you["positions"].get(code)
         return f"P{p}" if p else "DNF"
 
-    your_drivers = " · ".join(
-        f"{d} {_pos_label(d)} {pts}" for d, pts in you["driver_pts"].items()
-    )
-    lines = [
-        "🏁 Result is in — your call vs PitWallAI:",
-        f"  You:       {you_t} pts (captain {you['captain']} +{you['captain_bonus']})",
-        f"  PitWallAI: {model_t} pts",
-        f"  Perfect:   {perfect_t} pts ({', '.join(perfect['drivers'])})",
-        f"→ {verdict} You captured {capture}% of the ceiling.",
-        "",
-        f"Your drivers: {your_drivers}",
-    ]
-    return truncate("\n".join(lines), limit=600)
+    your_drivers = " · ".join(f"{d} {_pos(d)} {p}" for d, p in you["driver_pts"].items())
+    wk = get_race_weekend(race_key)
+    lines = [f"🏁 {wk.display_name if wk else race_key} — scored:"]
+    lines.append(f"  You:       {you_t} pts (captain {you['captain']} +{you['captain_bonus']})")
+    if model is not None:
+        model_t = model["total"]
+        verdict = (
+            "you beat PitWallAI! 🏆" if you_t > model_t
+            else "PitWallAI edged it." if model_t > you_t else "dead heat."
+        )
+        lines.append(f"  PitWallAI: {model_t} pts")
+    else:
+        verdict = ""
+    lines.append(f"  Perfect:   {perfect_t} pts ({', '.join(perfect['drivers'])})")
+    lines.append(f"→ {verdict} You captured {capture}% of the ceiling.".strip())
+    lines.append("")
+    lines.append(f"Your drivers: {your_drivers}")
+    return truncate("\n".join(lines), limit=650)
 
 
 async def _practice_standing_line(race_key: str, code: str) -> str | None:
@@ -522,8 +554,8 @@ async def handle_inbound_text(phone: str, text: str, raw_text: str) -> None:
             reply = await _handle_grade(raw_text)
         elif text.startswith("LOCK"):
             reply = await _handle_lock(phone, raw_text)
-        elif text == "SCORE" or text.startswith("SCORE"):
-            reply = await _handle_score(phone)
+        elif text.startswith("SCORE"):
+            reply = await _handle_score(phone, raw_text)
         elif text == "SEASON":
             if not season_recap_enabled():
                 reply = truncate("Season recap isn't live yet. Reply HELP for available commands.")

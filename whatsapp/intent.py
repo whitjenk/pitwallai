@@ -100,6 +100,8 @@ def resolve_intent(raw_text: str) -> str | None:
     )
     if len(codes_in_text) >= 3 and "lock" in stripped:
         return f"LOCK {raw_text}"
+    if len(codes_in_text) >= 3 and "score" in stripped:
+        return f"SCORE {raw_text}"
     if len(codes_in_text) >= 3 and (grade_signal or chip_word):
         return f"GRADE {raw_text}"
     if _contains(t, "score my", "score me", "how did i score", "did i beat",

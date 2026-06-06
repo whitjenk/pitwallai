@@ -12,6 +12,18 @@ def test_intent_routes_lock_and_score() -> None:
     assert lock is not None and lock.startswith("LOCK")
     assert resolve_intent("score my lineup") == "SCORE"
     assert resolve_intent("did i beat you?") == "SCORE"
+    # A stated lineup is preserved for the SCORE handler to parse.
+    stated = resolve_intent("score HAM, LEC, ANT, RUS, VER and MER, FER at melbourne")
+    assert stated is not None and stated.startswith("SCORE ")
+
+
+def test_resolve_race_key_from_text() -> None:
+    from whatsapp.inbound import _resolve_race_key
+
+    assert _resolve_race_key("at melbourne") == "2026_melbourne"
+    assert _resolve_race_key("the australian gp") == "2026_melbourne"
+    assert _resolve_race_key("for monaco this week") == "2026_monaco"
+    assert _resolve_race_key("just my lineup") is None
 
 
 @pytest.mark.asyncio

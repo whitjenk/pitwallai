@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass
 
 from circuits.profiles import CircuitProfile
@@ -17,7 +18,9 @@ from intelligence.schemas import (
     WeatherForecast,
 )
 from fantasy.rules import (
+    CONSTRUCTOR_PRICES_M,
     DRIVER_PRICES_M,
+    constructor_price_m,
     driver_points_qualifying,
     driver_points_race,
     driver_price_m,
@@ -26,6 +29,7 @@ from fantasy.rules import (
     transfer_penalty_points,
 )
 from fantasy.price_catalog import prices_trusted
+from intelligence.drivers import team_for_driver
 from openf1.client import OpenF1Client
 
 _ANOMALY_CONFIDENCE_PENALTY = 12.0
@@ -218,6 +222,18 @@ def _enumerate_transfers(
     options: list[_TransferOption] = []
     pool = set(DRIVER_PRICES_M.keys()) - set(roster)
 
+    # Pre-qualifying there is no grid yet, so project a finishing order from
+    # practice pace. This lets the points delta reflect a realistic weekend
+    # swing (a P2 pace car vs a P15 one) instead of a near-zero score nudge.
+    proj_grid: dict[str, int] = {}
+    if not grid:
+        ranked_codes = sorted(
+            set(roster) | pool,
+            key=lambda c: _driver_score(c, circuit=circuit, signals=signals, grid=grid),
+            reverse=True,
+        )
+        proj_grid = {code: pos for pos, code in enumerate(ranked_codes, start=1)}
+
     for out_code in roster:
         out_price = driver_price_m(out_code)
         for in_code in pool:
@@ -236,7 +252,14 @@ def _enumerate_transfers(
                     + transfer_penalty_points(1, free_allowance)
                 )
             else:
-                expected = round((in_score - out_score) * 0.15, 1)
+                # Projected race-points swing from practice-derived finishing order.
+                proj_in = proj_grid.get(in_code)
+                proj_out = proj_grid.get(out_code)
+                expected = float(
+                    _projected_race_points(proj_in)
+                    - _projected_race_points(proj_out)
+                    + transfer_penalty_points(1, free_allowance)
+                )
             expected = round(expected, 1)
             in_sig = signals.get(in_code)
             out_sig = signals.get(out_code)
@@ -245,8 +268,13 @@ def _enumerate_transfers(
                 conf -= _ANOMALY_CONFIDENCE_PENALTY
             if out_sig and len(out_sig.anomaly_flags) >= 2:
                 conf += 5.0
+            in_pos_label = (
+                f"grid P{grid[in_code]}"
+                if in_code in grid
+                else f"projected P{proj_grid.get(in_code, '?')} on practice pace"
+            )
             reasoning_parts = [
-                f"{in_code} grid P{grid.get(in_code, '?')}",
+                f"{in_code} {in_pos_label}",
                 "clean practice" if in_sig and len(in_sig.anomaly_flags) < 2 else "practice flags",
             ]
             if out_sig and len(out_sig.anomaly_flags) >= 2:
@@ -319,6 +347,118 @@ def _team_is_actionable(team: FantasyTeam) -> bool:
     return any(drivers) and team.remaining_budget is not None
 
 
+def _projected_race_points(pos: int | None) -> float:
+    """Race points for a practice-PROJECTED finishing position.
+
+    Unlike driver_points_race (which returns a DNF penalty for positions >20), a
+    driver merely slow in practice scores 0 here, never a DNF penalty — so a
+    pace projection can't manufacture huge swings from the back of the grid.
+    """
+    if pos is None or pos < 1 or pos > 10:
+        return 0.0
+    return float(driver_points_race(pos))
+
+
+# Display team name -> fantasy constructor code (matches CONSTRUCTOR_PRICES_M).
+_TEAM_NAME_TO_CONSTRUCTOR: dict[str, str] = {
+    "McLaren": "MCL",
+    "Mercedes": "MER",
+    "Ferrari": "FER",
+    "Red Bull Racing": "RBR",
+    "Aston Martin": "AM",
+    "Alpine": "ALP",
+    "Williams": "WIL",
+    "Haas": "HAA",
+    "Racing Bulls": "RB",
+    "Audi": "SAU",
+    "Kick Sauber": "SAU",
+    "Cadillac": "CAD",
+}
+
+
+def _constructor_drivers(codes: set[str]) -> dict[str, list[str]]:
+    """Map each fantasy constructor code to its driver codes (from the grid)."""
+    by_con: dict[str, list[str]] = defaultdict(list)
+    for code in codes:
+        con = _TEAM_NAME_TO_CONSTRUCTOR.get(team_for_driver(code))
+        if con:
+            by_con[con].append(code)
+    return by_con
+
+
+def _best_constructor_swap(
+    team: FantasyTeam,
+    *,
+    circuit: CircuitProfile,
+    signals: dict[str, PracticeSignal],
+    grid: dict[str, int],
+) -> _TransferOption | None:
+    """Best legal constructor swap by projected points, or None to hold.
+
+    A constructor scores from its two drivers, so we project each driver's
+    finishing points from practice pace and sum the team's pair.
+    """
+    roster = [c.upper() for c in (team.constructor_1, team.constructor_2) if c]
+    if not roster or team.remaining_budget is None:
+        return None
+    budget = team.remaining_budget
+
+    # Project each driver's race points from practice pace (same basis as driver
+    # swaps), then a constructor's value is its two drivers' projected points.
+    candidates = set(signals) | set(grid)
+    proj_grid: dict[str, int] = {}
+    if not grid and candidates:
+        ranked = sorted(
+            candidates,
+            key=lambda c: _driver_score(c, circuit=circuit, signals=signals, grid=grid),
+            reverse=True,
+        )
+        proj_grid = {code: pos for pos, code in enumerate(ranked, start=1)}
+
+    con_drivers = _constructor_drivers(candidates)
+
+    def con_points(con: str) -> float:
+        total = 0.0
+        for d in con_drivers.get(con, [])[:2]:
+            pos = grid.get(d) or proj_grid.get(d)
+            total += _projected_race_points(pos)
+        return total
+
+    free_allowance = free_transfer_allowance(
+        team.transfers_available,
+        limitless_chip=bool((team.chips_used or {}).get("limitless")),
+    )
+    pool = set(CONSTRUCTOR_PRICES_M) - set(roster)
+    best: _TransferOption | None = None
+    for out_con in roster:
+        out_pts = con_points(out_con)
+        for in_con in pool:
+            if constructor_price_m(in_con) - constructor_price_m(out_con) > budget:
+                continue
+            delta = con_points(in_con) - out_pts + transfer_penalty_points(1, free_allowance)
+            delta = round(delta, 1)
+            if best is None or delta > best.expected_delta:
+                # A constructor swap rests on TWO drivers both converting their
+                # practice pace, and pre-qualifying that is genuinely uncertain.
+                # So cap confidence well below the driver formula and grow it only
+                # gently with the projected swing; allow more once a real grid is
+                # known (qualifying done).
+                cap = 85.0 if grid else 68.0
+                conf = min(cap, max(40.0, 45.0 + delta * 0.55))
+                best = _TransferOption(
+                    out_code=out_con,
+                    in_code=in_con,
+                    budget_saved=round(constructor_price_m(out_con) - constructor_price_m(in_con), 1),
+                    expected_delta=delta,
+                    confidence=round(conf, 1),
+                    reasoning=(
+                        f"{in_con} pair projects "
+                        f"{con_points(in_con):.0f} pts vs {out_con}'s {out_pts:.0f} on practice pace"
+                    ),
+                )
+    return best
+
+
 def _path_personalized(
     ctx: PickGeneratorInput,
     signals: dict[str, PracticeSignal],
@@ -347,8 +487,8 @@ def _path_personalized(
                 headline=headline[:200],
                 confidence=opt.confidence,
                 reasoning=(
-                    f"Confidence {opt.confidence:.0f}%. {opt.reasoning}. "
-                    f"{opt.in_code} suits {ctx.circuit.circuit_key} profile."
+                    f"{opt.reasoning}. {opt.in_code} suits {ctx.circuit.circuit_key} profile. "
+                    f"Confidence {opt.confidence:.0f}%."
                 ),
                 driver_code=opt.in_code,
                 predicted_points_delta=opt.expected_delta,
@@ -366,12 +506,34 @@ def _path_personalized(
     if not picks:
         return _path_generic(ctx, signals, grid)
 
+    # Best constructor swap (recommend only when it's a net gain after the
+    # transfer hit; otherwise None = hold the current pair).
+    con_opt = _best_constructor_swap(
+        ctx.user_team, circuit=ctx.circuit, signals=signals, grid=grid
+    )
+    constructor_pick: PickRecommendation | None = None
+    if con_opt is not None and con_opt.expected_delta > 0:
+        constructor_pick = PickRecommendation(
+            rank=1,
+            headline=(
+                f"Constructor swap {con_opt.out_code} → {con_opt.in_code}. "
+                f"+{con_opt.expected_delta:.0f} expected pts."
+            )[:200],
+            confidence=con_opt.confidence,
+            reasoning=f"{con_opt.reasoning}. Confidence {con_opt.confidence:.0f}%.",
+            driver_code=con_opt.in_code,
+            predicted_points_delta=con_opt.expected_delta,
+            transfer_out=con_opt.out_code,
+            transfer_in=con_opt.in_code,
+        )
+
     return PickOutput(
         picks=picks,
         personalized=True,
         circuit_note=_circuit_note(ctx.circuit),
         confidence_note=_confidence_note(ctx.practice_signals, ctx.weather_forecast),
         generated_by=ctx.generated_by,
+        constructor_pick=constructor_pick,
     )
 
 

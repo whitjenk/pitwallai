@@ -60,8 +60,30 @@ def get_engine() -> AsyncEngine:
         echo=False,
         pool_pre_ping=True,
     )
+    if _normalize_database_url(raw_url).startswith("sqlite"):
+        _apply_sqlite_pragmas(_engine)
     _session_factory = async_sessionmaker(_engine, expire_on_commit=False)
     return _engine
+
+
+def _apply_sqlite_pragmas(engine: AsyncEngine) -> None:
+    """Make local SQLite resilient: WAL for concurrent reads+writes, wait on locks.
+
+    WAL lets the OpenF1 cache writes and team/chip writes proceed concurrently
+    instead of failing with "database is locked"; busy_timeout makes writers
+    wait briefly for a lock rather than erroring immediately.
+    """
+    from sqlalchemy import event
+
+    @event.listens_for(engine.sync_engine, "connect")
+    def _set_pragmas(dbapi_conn, _record):  # type: ignore[no-untyped-def]
+        cur = dbapi_conn.cursor()
+        try:
+            cur.execute("PRAGMA journal_mode=WAL")
+            cur.execute("PRAGMA busy_timeout=5000")
+            cur.execute("PRAGMA synchronous=NORMAL")
+        finally:
+            cur.close()
 
 
 def get_session_factory() -> async_sessionmaker[AsyncSession]:

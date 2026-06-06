@@ -20,6 +20,9 @@ from fantasy.rules import (
 )
 
 _CATALOG_PATH = Path(__file__).resolve().parent / "prices.json"
+# Runtime overlay written by the live F1 Fantasy refresh (gitignored, not the
+# committed baseline). Layered on top of prices.json when present.
+_LIVE_PATH = Path(__file__).resolve().parent / "prices.live.json"
 
 _driver_prices: dict[str, float] = dict(DRIVER_PRICES_M)
 _constructor_prices: dict[str, float] = dict(CONSTRUCTOR_PRICES_M)
@@ -28,31 +31,90 @@ _loaded = False
 
 
 def load_price_catalog() -> None:
-    """Load fantasy/prices.json if present; fall back to rules.py defaults."""
+    """Load the baseline prices.json, then overlay the live refresh if present."""
     global _driver_prices, _constructor_prices, _updated_at, _loaded
     if not _CATALOG_PATH.is_file():
         _loaded = True
         logger.debug("price_catalog: no prices.json — using rules.py defaults")
-        return
-    try:
-        data = json.loads(_CATALOG_PATH.read_text(encoding="utf-8"))
-        drivers = data.get("drivers") or {}
-        constructors = data.get("constructors") or {}
-        if isinstance(drivers, dict) and drivers:
-            _driver_prices = {str(k).upper(): float(v) for k, v in drivers.items()}
-        if isinstance(constructors, dict) and constructors:
-            _constructor_prices = {str(k).upper(): float(v) for k, v in constructors.items()}
-        _updated_at = str(data.get("updated_at") or "")
-        _loaded = True
-        logger.info(
-            "price_catalog loaded {} drivers {} constructors (updated_at={})",
-            len(_driver_prices),
-            len(_constructor_prices),
-            _updated_at or "unknown",
-        )
-    except Exception as exc:
-        logger.warning("price_catalog load failed: {} — using rules.py defaults", exc)
-        _loaded = True
+    else:
+        try:
+            data = json.loads(_CATALOG_PATH.read_text(encoding="utf-8"))
+            drivers = data.get("drivers") or {}
+            constructors = data.get("constructors") or {}
+            if isinstance(drivers, dict) and drivers:
+                _driver_prices = {str(k).upper(): float(v) for k, v in drivers.items()}
+            if isinstance(constructors, dict) and constructors:
+                _constructor_prices = {str(k).upper(): float(v) for k, v in constructors.items()}
+            _updated_at = str(data.get("updated_at") or "")
+            _loaded = True
+            logger.info(
+                "price_catalog loaded {} drivers {} constructors (updated_at={})",
+                len(_driver_prices),
+                len(_constructor_prices),
+                _updated_at or "unknown",
+            )
+        except Exception as exc:
+            logger.warning("price_catalog load failed: {} — using rules.py defaults", exc)
+            _loaded = True
+
+    # Overlay the live refresh (gitignored) on top of the committed baseline.
+    if _LIVE_PATH.is_file():
+        try:
+            live = json.loads(_LIVE_PATH.read_text(encoding="utf-8"))
+            for code, value in (live.get("drivers") or {}).items():
+                _driver_prices[str(code).upper()] = float(value)
+            for code, value in (live.get("constructors") or {}).items():
+                _constructor_prices[str(code).upper()] = float(value)
+            if live.get("updated_at"):
+                _updated_at = str(live["updated_at"])
+            _loaded = True
+            logger.info("price_catalog: applied live overlay (updated_at={})", _updated_at)
+        except Exception as exc:
+            logger.warning("price_catalog: live overlay load failed: {}", exc)
+
+
+def apply_live_prices(
+    drivers: dict[str, float],
+    constructors: dict[str, float],
+    *,
+    persist: bool = True,
+) -> None:
+    """Overlay live prices onto the in-memory catalog and stamp updated_at=today.
+
+    Args:
+        drivers: CODE -> price in M.
+        constructors: CODE -> price in M.
+        persist: Also write fantasy/prices.live.json (gitignored runtime overlay)
+            so the refresh survives restart without touching the committed baseline.
+    """
+    global _driver_prices, _constructor_prices, _updated_at, _loaded
+    from datetime import UTC, datetime
+
+    if not _loaded:
+        load_price_catalog()
+    if drivers:
+        _driver_prices.update({str(k).upper(): float(v) for k, v in drivers.items()})
+    if constructors:
+        _constructor_prices.update({str(k).upper(): float(v) for k, v in constructors.items()})
+    _updated_at = datetime.now(tz=UTC).strftime("%Y-%m-%d")
+    _loaded = True
+    if persist:
+        try:
+            _LIVE_PATH.write_text(
+                json.dumps(
+                    {
+                        "updated_at": _updated_at,
+                        "source": "fantasy.formula1.com live feed",
+                        "drivers": _driver_prices,
+                        "constructors": _constructor_prices,
+                    },
+                    indent=2,
+                    sort_keys=True,
+                ),
+                encoding="utf-8",
+            )
+        except Exception as exc:  # noqa: BLE001 — persistence is best-effort
+            logger.warning("price_catalog: failed to write prices.json: {}", exc)
 
 
 def prices_trusted() -> bool:

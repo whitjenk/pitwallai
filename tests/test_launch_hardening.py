@@ -13,10 +13,11 @@ from scheduler.calendar import get_race_weekend
 
 # ---- Fantasy lock timing ----------------------------------------------------
 
-def test_monaco_lock_is_before_qualifying_not_before_race() -> None:
+def test_monaco_lock_is_at_qualifying_not_before_race() -> None:
     monaco = get_race_weekend("2026_monaco")
     assert monaco is not None
-    assert monaco.fantasy_lock_utc == monaco.qualifying_utc - timedelta(hours=1)
+    # F1 Fantasy locks at the start of qualifying (Saturday), not before the race.
+    assert monaco.fantasy_lock_utc == monaco.qualifying_utc
     # Saturday lock, not Sunday: well before the race.
     assert monaco.fantasy_lock_utc < monaco.race_utc - timedelta(hours=12)
 

@@ -139,7 +139,8 @@ _CIRCUITS: tuple[CircuitProfile, ...] = (
         positions_gained_ceiling=2,
         sector_characteristics=["street_circuit", "low_speed", "qualifying_critical"],
         notes="Qualifying IS the race; SC lottery only real overtaking catalyst.",
-        openf1_circuit_name="Monaco",
+        # OpenF1 labels this circuit "Monte Carlo" (not "Monaco").
+        openf1_circuit_name="Monte Carlo",
     ),
     CircuitProfile(
         circuit_key="barcelona",
@@ -151,7 +152,8 @@ _CIRCUITS: tuple[CircuitProfile, ...] = (
         positions_gained_ceiling=6,
         sector_characteristics=["high_downforce", "front_limited", "wind_sensitive"],
         notes="Historically extreme front-left deg; testing baseline circuit.",
-        openf1_circuit_name="Barcelona",
+        # OpenF1 labels this circuit "Catalunya" (not "Barcelona").
+        openf1_circuit_name="Catalunya",
     ),
     CircuitProfile(
         circuit_key="montreal",

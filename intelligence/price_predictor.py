@@ -182,10 +182,15 @@ async def _practice_signal(codes: list[str], circuit_key: str) -> tuple[dict[str
         r = latest_by_driver.get(code)
         if not r:
             continue
-        if (r.setup_sentiment or 0.0) > 0.6 and not (r.anomaly_flags or []):
-            out[code] = 0.2
-        elif r.anomaly_flags:
-            out[code] = -0.2
+        # Graded score from continuous practice pace + setup sentiment so each
+        # driver differs (a P1 pace car reads stronger than a P5 one), rather
+        # than bucketing every clean/fast driver to the same flat value.
+        pace = float(r.pace_satisfaction or 0.0)  # 0..1
+        sentiment = float(r.setup_sentiment or 0.0)  # -1..1
+        score = (pace - 0.5) * 0.5 + sentiment * 0.1
+        if r.anomaly_flags:
+            score -= 0.08 * min(3, len(r.anomaly_flags))
+        out[code] = round(max(-0.3, min(0.3, score)), 3)
     return out, True
 
 

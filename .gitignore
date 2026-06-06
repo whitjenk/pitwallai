@@ -60,6 +60,11 @@ cover/
 local_settings.py
 db.sqlite3
 db.sqlite3-journal
+*.sqlite
+*.sqlite-journal
+*.sqlite-shm
+*.sqlite-wal
+pitwall_local.sqlite*
 
 # Flask stuff:
 instance/
@@ -216,3 +221,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Live F1 Fantasy price overlay (runtime refresh, not the committed baseline)
+fantasy/prices.live.json
+
+# Editor/backup copies of env files (keep .env.example tracked)
+.env.bak
+*.bak

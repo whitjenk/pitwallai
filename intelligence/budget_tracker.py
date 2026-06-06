@@ -102,14 +102,21 @@ def _prior_race_key(race_key: str) -> str | None:
     return keys[idx - 1]
 
 
-def format_budget_whatsapp(snap: TeamValueSnapshot) -> str:
+def format_budget_whatsapp(snap: TeamValueSnapshot, *, cash_remaining: float | None = None) -> str:
     lines = [f"💰 Team value: ${snap.team_value:.1f}M ({snap.value_delta:+.1f}M this race)"]
-    lines.append(f"Effective budget: ${snap.effective_budget:.1f}M over cap baseline")
-    if snap.effective_budget > 3.0:
-        lines.append("Good transfer window — you have budget headroom.")
-    elif snap.effective_budget < 0.5:
-        lines.append("Tight budget — limited transfer options this weekend.")
+    # Value above the $100M cap is appreciation you bank when you sell — it is
+    # NOT spendable cash. Spendable budget for a transfer is your cash in hand
+    # plus whatever you free up by dropping a driver.
+    if snap.effective_budget > 0:
+        lines.append(f"Appreciation: +${snap.effective_budget:.1f}M above the $100M cap")
+    # Transfer affordability is driven by cash in hand, not appreciation.
+    if cash_remaining is not None:
+        lines.append(f"Cash in hand: ${cash_remaining:.1f}M (plus the sale price of any driver you drop)")
+        if cash_remaining >= 3.0:
+            lines.append("Good headroom — you can reach for a pricier swap.")
+        elif cash_remaining < 0.5:
+            lines.append("Tight on cash — swaps must be roughly price-neutral.")
     text = "\n".join(lines)
-    if len(text) > 200:
-        return text[:197] + "..."
+    if len(text) > 280:
+        return text[:277] + "..."
     return text

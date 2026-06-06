@@ -261,7 +261,36 @@ async def send_picks_on_demand(
         core = format_personalized_picks(weekend, output, timezone=sub.timezone)
     else:
         core = format_generic_picks(weekend, output, timezone=sub.timezone)
+
+    insight = await _picks_llm_insight(weekend, output)
+    if insight:
+        core = f"{core}\n\n💡 {insight}"
     return core
+
+
+async def _picks_llm_insight(weekend: object, output: object) -> str | None:
+    """Optional BYO-LLM synthesis of the (deterministic) pick facts."""
+    from intelligence.llm_insight import driver_name, llm_tip
+
+    picks = getattr(output, "picks", None) or []
+    if not picks:
+        return None
+    allowed: set[str] = set()
+    fact_lines = [f"Race: {getattr(weekend, 'display_name', 'this weekend')}."]
+    for p in picks[:3]:
+        for c in (p.driver_code, p.transfer_out, p.transfer_in):
+            if c:
+                allowed.add(c.upper())
+        bits = [f"Recommend {driver_name(p.driver_code)}"]
+        if p.transfer_out and p.transfer_in:
+            bits.append(f"as a swap {driver_name(p.transfer_out)} -> {driver_name(p.transfer_in)}")
+        if p.predicted_points_delta is not None:
+            bits.append(f"projected +{p.predicted_points_delta:.0f} fantasy pts")
+        bits.append(f"confidence {p.confidence:.0f}%")
+        if p.reasoning:
+            bits.append(f"({p.reasoning.split('.')[0].strip()})")
+        fact_lines.append("; ".join(bits) + ".")
+    return await llm_tip("\n".join(fact_lines), allowed_codes=allowed)
 
 
 async def send_chips_summary(phone: str) -> str:
@@ -271,19 +300,66 @@ async def send_chips_summary(phone: str) -> str:
     plan = generate_chip_plan(team, remaining_races_from_now())
     plan = await persist_chip_plan(phone, plan)
     remaining = len(plan.windows)
+
+    # Lead with THIS weekend's chip suitability — most users asking "should I
+    # play a chip?" mean right now — judged on the weekend's own merits.
+    from intelligence.chip_conviction import ConfidenceTier
+    from scheduler.context import get_current_race_key
+
+    cur_key = get_current_race_key()
+    this_week = next((w for w in plan.windows if w.race_key == cur_key), None)
+    header = ""
+    if (
+        this_week
+        and this_week.recommended_chips
+        and this_week.confidence_tier != ConfidenceTier.LOW
+    ):
+        chip = this_week.recommended_chips[0].value.upper()
+        header = (
+            f"🎯 This weekend — {this_week.race_name}\n"
+            f"*{chip}* is a strong window ({this_week.priority.lower()} conviction): "
+            f"{this_week.reasoning}.\n\n"
+        )
+
     seq_lines = []
     for chip, rk in plan.recommended_sequence[:3]:
         wk = get_race_weekend(rk)
         label = wk.display_name if wk else rk
         seq_lines.append(f"{chip} → {label}")
     seq_txt = "\n".join(seq_lines) if seq_lines else "No unused chips scored highly."
+
+    insight_block = ""
+    insight = await _chips_llm_insight(this_week, plan.recommended_sequence[:3])
+    if insight:
+        insight_block = f"💡 {insight}\n\n"
+
     return _with_verify_guard(
-        f"🎴 Chip plan for remaining {remaining} races\n\n"
-        f"📅 Recommended sequence:\n{seq_txt}\n\n"
+        f"{header}{insight_block}"
+        f"🎴 Season plan ({remaining} races left) — best window per chip:\n"
+        f"{seq_txt}\n\n"
         f"Full plan: pitwallai.app/chips/{plan.share_token}\n"
         f"Reply CHIPS LIMITLESS for specific advice",
-        300,
+        600,
     )
+
+
+async def _chips_llm_insight(this_week: object, sequence: list) -> str | None:
+    """Optional BYO-LLM synthesis of the (deterministic) chip facts."""
+    from intelligence.llm_insight import llm_tip
+
+    facts: list[str] = []
+    if this_week is not None and getattr(this_week, "recommended_chips", None):
+        chip = this_week.recommended_chips[0].value
+        facts.append(
+            f"This weekend is {this_week.race_name}; best chip is {chip} "
+            f"({this_week.priority} conviction) because {this_week.reasoning}."
+        )
+    for chip, rk in sequence:
+        facts.append(f"Season-best window for {chip} is {rk}.")
+    if not facts:
+        return None
+    # Chip advice is about race weekends, not drivers — reject any driver mention.
+    return await llm_tip("\n".join(facts), allowed_codes=set())
 
 
 async def send_chip_detail(phone: str, chip_raw: str) -> str:
@@ -353,7 +429,7 @@ async def send_budget_status(phone: str, race_key: str | None = None) -> str:
         prior = [x for x in CALENDAR_2026 if x.race_utc < w.race_utc]
         rk = prior[-1].race_key if prior else w.race_key
     snap = await track_team_value(phone, rk)
-    return format_budget_whatsapp(snap)
+    return format_budget_whatsapp(snap, cash_remaining=team.remaining_budget)
 
 
 async def _subscriber_or_default(phone: str) -> Subscriber:

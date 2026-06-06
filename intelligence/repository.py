@@ -19,6 +19,7 @@ from db.models import (
     DriverPrice,
     FantasyTeam,
     LeagueOnboardingState,
+    LockedLineup,
     LiveAlertDelivery,
     PickRow,
     PendingScreenshotState,
@@ -166,6 +167,86 @@ async def get_fantasy_team(phone: str) -> FantasyTeam | None:
     """Load fantasy team profile."""
     async with get_session() as session:
         return await session.get(FantasyTeam, phone)
+
+
+async def save_locked_lineup(
+    *,
+    phone: str,
+    race_key: str,
+    drivers: list[str],
+    constructors: list[str],
+    chip: str | None,
+    captain: str | None,
+    model_drivers: list[str],
+    model_constructors: list[str],
+    model_captain: str | None,
+) -> None:
+    """Insert/replace a player's committed lineup for a race."""
+    async with get_session() as session:
+        row = await session.get(LockedLineup, (phone, race_key))
+        if row is None:
+            row = LockedLineup(phone=phone, race_key=race_key)
+            session.add(row)
+        row.drivers = list(drivers)
+        row.constructors = list(constructors)
+        row.chip = chip
+        row.captain = captain
+        row.model_drivers = list(model_drivers)
+        row.model_constructors = list(model_constructors)
+        row.model_captain = model_captain
+
+
+async def get_locked_lineup(phone: str, race_key: str) -> LockedLineup | None:
+    """Load a player's committed lineup for a race, if any."""
+    async with get_session() as session:
+        return await session.get(LockedLineup, (phone, race_key))
+
+
+async def record_lineup_score(
+    *,
+    phone: str,
+    race_key: str,
+    drivers: list[str],
+    constructors: list[str],
+    chip: str | None,
+    captain: str | None,
+    your_points: int,
+    model_points: int | None,
+    perfect_points: int,
+    capture_pct: int,
+) -> None:
+    """Persist a scored result for the season scorecard (creates the row for an
+    ad-hoc backtest, updates it for a previously-locked lineup)."""
+    async with get_session() as session:
+        row = await session.get(LockedLineup, (phone, race_key))
+        if row is None:
+            row = LockedLineup(
+                phone=phone,
+                race_key=race_key,
+                drivers=list(drivers),
+                constructors=list(constructors),
+                chip=chip,
+                captain=captain,
+                model_drivers=[],
+                model_constructors=[],
+            )
+            session.add(row)
+        row.your_points = your_points
+        row.model_points = model_points
+        row.perfect_points = perfect_points
+        row.capture_pct = capture_pct
+        row.scored_at = datetime.now(tz=UTC)
+
+
+async def list_scored_lineups(phone: str) -> list[LockedLineup]:
+    """All of a player's scored races (for the RECORD scorecard)."""
+    async with get_session() as session:
+        result = await session.execute(
+            select(LockedLineup)
+            .where(LockedLineup.phone == phone, LockedLineup.scored_at.is_not(None))
+            .order_by(LockedLineup.race_key)
+        )
+        return list(result.scalars().all())
 
 
 async def upsert_fantasy_team_fields(phone: str, **fields: Any) -> FantasyTeam:

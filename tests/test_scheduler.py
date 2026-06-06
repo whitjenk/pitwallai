@@ -14,12 +14,13 @@ def test_calendar_2026_has_22_races() -> None:
     assert len(CALENDAR_2026) == 22
 
 
-def test_monaco_fantasy_lock_one_hour_before_qualifying() -> None:
-    """F1 Fantasy locks ~1h before qualifying (Saturday), not before the race."""
+def test_monaco_fantasy_lock_at_qualifying_start() -> None:
+    """F1 Fantasy locks at the start of qualifying (Saturday), not before the race."""
     monaco = get_race_weekend("2026_monaco")
     assert monaco is not None
-    delta = monaco.qualifying_utc - monaco.fantasy_lock_utc
-    assert delta.total_seconds() == 3600
+    # The official game deadline is the start of qualifying (verified against the
+    # live F1 Fantasy countdown), not an hour before.
+    assert monaco.fantasy_lock_utc == monaco.qualifying_utc
     # And it must be well before the race (Sunday), unlike the old race-1h model.
     assert monaco.fantasy_lock_utc < monaco.race_utc - timedelta(hours=12)
 

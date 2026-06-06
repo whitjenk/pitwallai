@@ -111,7 +111,9 @@ def hours_until_lock(fantasy_lock_utc: datetime, timezone: str) -> int:
     now_local = datetime.now(tz=tz)
     lock_local = fantasy_lock_utc.astimezone(tz)
     delta = lock_local - now_local
-    return max(0, int(delta.total_seconds() // 3600))
+    # Round to nearest hour to match the official F1 Fantasy countdown (which
+    # shows 17h with ~16h45m left, not 16h).
+    return max(0, round(delta.total_seconds() / 3600))
 
 
 def _short_reason(pick: PickRecommendation, max_len: int = 72) -> str:
@@ -292,6 +294,17 @@ def format_personalized_picks(
             [
                 "",
                 f"2️⃣ Alt: {alt_out} → {alt_in} (+{alt_pts} pts · {int(alt.confidence)}%)",
+            ]
+        )
+
+    cp = output.constructor_pick
+    if cp is not None and cp.transfer_out and cp.transfer_in:
+        cp_pts = int(round(cp.predicted_points_delta or 0))
+        lines.extend(
+            [
+                "",
+                f"🏭 Constructor: {cp.transfer_out} → {cp.transfer_in} "
+                f"(+{cp_pts} pts · {int(cp.confidence)}%)",
             ]
         )
 

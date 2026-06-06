@@ -94,6 +94,8 @@ class PickOutput(BaseModel):
     circuit_note: str
     confidence_note: str
     generated_by: str
+    # Best constructor swap for the user's team (None = hold / not personalized).
+    constructor_pick: PickRecommendation | None = None
 
 
 class PickGeneratorInput(BaseModel):

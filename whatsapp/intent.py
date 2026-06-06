@@ -80,6 +80,35 @@ def resolve_intent(raw_text: str) -> str | None:
 
     t = f" {stripped} "
 
+    # --- Grade a stated lineup ("I chose HAM, LEC, ANT, RUS, VER and MER, FER
+    #     with limitless") → hand the whole message to the GRADE handler so it
+    #     can score the picks. Must precede the chip block (a stated chip + a
+    #     lineup is a grade request, not a chip-detail lookup).
+    from intelligence.lineup_parse import resolve_drivers
+
+    codes_in_text = set(resolve_drivers(raw_text))
+    grade_signal = _contains(
+        t, "i chose", "i picked", "i'm playing", "i am playing", "im playing",
+        "i'm running", "im running", "i selected", "i went with", "my team is",
+        "my lineup is", "grade my", "rate my", "what do you think", "how's my team",
+        "hows my team", "i'm going with", "im going with", "i'm going to play",
+    )
+    chip_word = _contains(
+        t, "limitless", "wildcard", "autopilot", "final fix", "no negative", "extra drs"
+    )
+    if len(codes_in_text) >= 3 and "lock" in stripped:
+        return f"LOCK {raw_text}"
+    if len(codes_in_text) >= 3 and "score" in stripped:
+        return f"SCORE {raw_text}"
+    if len(codes_in_text) >= 3 and (grade_signal or chip_word):
+        return f"GRADE {raw_text}"
+    if _contains(t, "score my", "score me", "how did i score", "did i beat",
+                 "how did my pick", "how did my lineup", "score my lineup"):
+        return "SCORE"
+    if _contains(t, "scorecard", "my record vs", "record vs you", "record vs pitwall",
+                 "season tally", "how am i doing vs", "my backtest"):
+        return "RECORD"
+
     # --- Chips (highest priority — strong, unambiguous keywords) ---
     if _contains(t, "chip", "wildcard", "limitless", "autopilot", "final fix",
                  "no negative", "extra drs", "power up", "powerup", "power-up"):
@@ -186,44 +215,66 @@ def _llm_enabled_with_key() -> bool:
 
 
 _LLM_SYSTEM_PROMPT = (
-    "You route an F1 fantasy WhatsApp user's message to exactly one command. "
-    "Reply with ONLY one of these tokens, nothing else:\n"
-    "PICKS, TEAM, HISTORY, STREAK, HELP, CHIPS, BUDGET, TRANSFERS, SEASON, "
-    "SETTINGS, SUBSCRIBE, UNSUBSCRIBE, DELETE, LIVE_ON, LIVE_OFF, "
-    "CADENCE_FULL, CADENCE_RACEDAY, NONE.\n"
-    "Use CHIPS for any chip strategy question (wildcard, limitless, etc.). "
-    "Use PICKS for who-to-pick/transfer-in questions. Reply NONE if unclear."
+    "You route a casual F1 Fantasy WhatsApp message to ONE command token. "
+    "Users are informal and imprecise — infer intent from how they think. "
+    "Reply with ONLY the token (no punctuation, no explanation):\n"
+    "PICKS  - who to pick / transfer in / who's good / best driver this week\n"
+    "GRADE  - they propose/state their OWN lineup of drivers and want your take\n"
+    "SCORE  - they want a lineup scored or backtested against a race result\n"
+    "RECORD - their track record / scorecard / how often they beat you\n"
+    "CHIPS  - chip strategy (wildcard, limitless, etc.) with NO full lineup\n"
+    "WHY    - why a driver's price / is one driver worth it\n"
+    "BUDGET, TRANSFERS, TEAM, HISTORY, STREAK, SEASON, LIVE_ON, LIVE_OFF, "
+    "HELP, SUBSCRIBE, UNSUBSCRIBE, DELETE, NONE.\n"
+    "Examples:\n"
+    "'who's looking quick this weekend' -> PICKS\n"
+    "'thinking ham lec russ piastri ver, ferrari double, going limitless' -> GRADE\n"
+    "'would nor pia ver have scored well in japan' -> SCORE\n"
+    "'how often do you actually beat me' -> RECORD\n"
+    "'is norris even worth it rn' -> WHY\n"
+    "'should i wildcard this week' -> CHIPS\n"
+    "Reply NONE only if truly unclear."
 )
+
+# Tokens the LLM may emit that carry a lineup — keep the original text so the
+# handler can parse the drivers/captain/chip/race from it.
+_LINEUP_TOKENS = frozenset({"GRADE", "SCORE", "LOCK"})
+
+
+def _llm_intent_available() -> bool:
+    if os.getenv("PITWALL_NL_INTENT_LLM", "1").strip().lower() in {"0", "false", "no", "off"}:
+        return False
+    from pitwallai.llm_mode import byo_llm_enabled
+
+    return byo_llm_enabled() or _llm_enabled_with_key()
 
 
 async def _llm_classify(raw_text: str) -> str | None:
-    """Optional Gemini-backed classifier; returns a canonical token or None."""
-    if not _llm_enabled_with_key():
+    """LLM intent classifier — uses the BYO provider (Ollama etc.) or a key."""
+    if not _llm_intent_available():
         return None
     try:
         from pydantic_ai import Agent
 
-        from pitwallai.agents.radio_intercept.config import PitWallSettings
-        from pitwallai.agents.radio_intercept.model_factory import get_model
+        from intelligence.llm_insight import _build_agent_for  # shared model builder
 
-        settings = PitWallSettings.from_env()
-        model = get_model(
-            settings.llm_provider,
-            settings.llm_api_key(),
-            model_name=settings.llm_model,
-            use_vertex=settings.llm_use_vertex,
-            vertex_project=settings.vertex_project or None,
-            vertex_location=settings.vertex_location or None,
-        )
-        agent = Agent(model, system_prompt=_LLM_SYSTEM_PROMPT, output_type=str)
+        agent = _build_agent_for(_LLM_SYSTEM_PROMPT)
         result = await agent.run(raw_text)
-        token = (result.output or "").strip().upper().replace("_", " ")
-        if token == "NONE":
-            return None
-        return token if token in _CANONICAL_COMMANDS else None
+        token = (result.output or "").strip().upper().replace("-", " ").split()[0]
     except Exception as exc:  # never block inbound on the LLM
         logger.debug("nl_intent_llm_failed: {}", exc)
         return None
+    if not token or token == "NONE":
+        return None
+    canon = token.replace(" ", "_")
+    if token in _LINEUP_TOKENS:
+        return f"{token} {raw_text}"
+    display = token.replace("_", " ")
+    if display in _CANONICAL_COMMANDS:
+        return display
+    if canon in {"RECORD", "WHY", "GRADE", "SCORE"}:
+        return canon
+    return None
 
 
 async def resolve_intent_smart(raw_text: str) -> str | None:

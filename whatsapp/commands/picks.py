@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from loguru import logger
+
 from intelligence.explanation_builder import build_explanation
 from intelligence.repository import get_picks_for_race
 from scheduler.calendar import get_race_weekend
@@ -13,6 +15,7 @@ from whatsapp.commands._utils import (
     pick_row_to_recommendation,
 )
 from whatsapp.message_format import format_explanation_card
+from whatsapp.sender import mask_phone
 
 _FOOTER = (
     "──────────────────\n"
@@ -39,7 +42,8 @@ async def handle_picks(phone_number: str, race_key: str) -> str:
                 client=OpenF1Client(),
                 runtime=runtime,
             )
-        except Exception:
+        except Exception as exc:
+            logger.warning("on_demand_picks_failed phone={}: {}", mask_phone(phone_number), exc)
             return (
                 "No picks available yet for this race weekend.\n\n"
                 "Picks are sent Saturday morning after qualifying.\n"

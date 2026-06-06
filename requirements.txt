@@ -36,3 +36,8 @@ anthropic>=0.40,<0.70
 
 # Optional extras if you prefer slim installs:
 # pip install "pydantic-ai-slim[google,openai,anthropic]"
+
+# Optional: local team-radio transcription so the radio-sentiment pipeline runs
+# on real OpenF1 FP1/FP2 audio (free, no API key). Enable with
+# PITWALL_RADIO_TRANSCRIBE=true. Bundles PyAV for decoding (no ffmpeg CLI).
+# pip install faster-whisper

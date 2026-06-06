@@ -76,7 +76,14 @@ async def cache_get(key: str) -> list[dict[str, Any]] | None:
     try:
         async with get_session() as session:
             row = await session.get(OpenF1CacheEntry, key)
-            if row is None or row.expires_at <= now:
+            if row is None:
+                return None
+            # SQLite stores DateTime(timezone=True) without tzinfo, so the value
+            # comes back naive — normalize to UTC before comparing with `now`.
+            expires_at = row.expires_at
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=UTC)
+            if expires_at <= now:
                 return None
             return json.loads(row.payload_json)
     except ValueError:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 
 from loguru import logger
@@ -161,17 +162,325 @@ async def _handle_why(raw_text: str) -> str:
     preds = await get_price_prediction_map(race_key)
     pred = preds.get(code)
     if pred is None:
+        # No persisted prediction yet (e.g. before the Saturday pipeline, or in
+        # the live simulator) — compute one on the fly from current signals so
+        # each driver gets a real, differentiated breakdown.
+        from intelligence.price_predictor import predict_price_changes
+        from intelligence.signal_cache import circuit_key_for_race
+
+        circuit_key = circuit_key_for_race(race_key)
+        if circuit_key is not None:
+            computed = await predict_price_changes(race_key, circuit_key)
+            pred = next((p for p in computed if p.driver_code == code), None)
+    if pred is None:
         return truncate(f"No prediction yet for {code}.")
+
+    lines: list[str] = []
+    standing = await _practice_standing_line(race_key, code)
+    if standing:
+        lines.append(standing)
+
     bd = pred.signal_breakdown or {}
-    lines = [
-        f"{code}: likely {pred.predicted_direction} (${pred.predicted_magnitude:.1f}M), conf {pred.confidence:.2f}",
-    ]
+    lines.append(
+        f"{code}: price likely {pred.predicted_direction} "
+        f"(${pred.predicted_magnitude:.1f}M), conf {pred.confidence:.2f}"
+    )
+    # Only show the signal breakdown when something actually fired. Early in the
+    # season the price-move signals (form momentum, ownership, circuit history)
+    # have little data, so a wall of "+0.00" reads as broken rather than honest.
+    drivers_seg = []
     for key in ("momentum", "value_ratio", "circuit_hist", "practice_align", "ownership_pressure"):
         seg = bd.get(key) or {}
         if not seg:
             continue
-        lines.append(f"{key}: {seg.get('score', 0):+.2f} × {seg.get('weight', 0):.2f}")
-    return truncate(" | ".join(lines), limit=300)
+        if abs(float(seg.get("score", 0))) < 0.01:
+            continue
+        drivers_seg.append(f"{key} {seg.get('score', 0):+.2f}")
+    if drivers_seg:
+        lines.append("Drivers of the move: " + ", ".join(drivers_seg))
+    else:
+        lines.append("Price-move signals (form, ownership, circuit history) build up over the season.")
+
+    from intelligence.llm_insight import driver_name, llm_tip
+
+    insight = await llm_tip(
+        f"Driver {driver_name(code)}. {standing or ''} "
+        f"Price outlook: {pred.predicted_direction} (${pred.predicted_magnitude:.1f}M), "
+        f"confidence {pred.confidence:.2f}.",
+        allowed_codes={code.upper()},
+    )
+    if insight:
+        lines.append(f"💡 {insight}")
+    return truncate("\n".join(lines), limit=500)
+
+
+_GRADE_CHIP_WORDS: dict[str, str] = {
+    "limitless": "limitless",
+    "wildcard": "wildcard",
+    "no negative": "no_negative",
+    "no_negative": "no_negative",
+    "nonegative": "no_negative",
+    "extra drs": "extra_drs",
+    "3x": "extra_drs",
+    "final fix": "final_fix",
+    "autopilot": "autopilot",
+}
+
+
+def _extract_lineup(raw_text: str) -> tuple[list[str], list[str], str | None]:
+    """Pull driver codes, constructor codes and a chip from free text — by code
+    OR by name ('hamilton', 'the antonelli kid', 'ferrari double, limitless')."""
+    from intelligence.lineup_parse import resolve_chip, resolve_constructors, resolve_drivers
+
+    return resolve_drivers(raw_text), resolve_constructors(raw_text), resolve_chip(raw_text)
+
+
+def _extract_captain(raw_text: str, drivers: list[str]) -> str | None:
+    """Find a stated captain among the lineup's drivers, by code or name."""
+    from intelligence.lineup_parse import resolve_captain
+
+    return resolve_captain(raw_text, drivers)
+
+
+async def _handle_grade(raw_text: str) -> str:
+    """Grade a stated lineup (drivers + constructors + chip) vs PitWallAI."""
+    body = raw_text
+    if body.upper().startswith("GRADE"):
+        body = body[5:]
+    drivers, constructors, chip = _extract_lineup(body)
+    if len(drivers) < 1:
+        return truncate(
+            "Tell me your lineup to grade, e.g.\n"
+            "GRADE HAM, LEC, ANT, RUS, VER and MER, FER with limitless, captain HAM",
+            limit=200,
+        )
+    captain = _extract_captain(body, drivers)
+    race_key = _next_race_key()
+    if race_key is None:
+        return truncate("No upcoming race to grade against.")
+
+    from intelligence.lineup_grader import grade_lineup, grade_lineup_facts
+
+    msg = await grade_lineup(race_key, drivers, constructors, chip, captain)
+
+    facts, allowed = await grade_lineup_facts(race_key, drivers, constructors, chip, captain)
+    if facts:
+        from intelligence.llm_insight import llm_tip
+
+        verdict = await llm_tip(
+            facts + " In one sentence, judge how this lineup compares to the model's top picks.",
+            allowed_codes=allowed,
+        )
+        if verdict:
+            msg = f"{msg}\n\n💡 {verdict}"
+    return truncate(msg, limit=900)
+
+
+async def _handle_lock(phone: str, raw_text: str) -> str:
+    """Commit a stated lineup for the upcoming race so it can be scored later."""
+    body = raw_text
+    for prefix in ("LOCK IN", "LOCK"):
+        if body.upper().startswith(prefix):
+            body = body[len(prefix):]
+            break
+    drivers, constructors, chip = _extract_lineup(body)
+    if len(drivers) < 1:
+        return truncate(
+            "Tell me the lineup to lock, e.g.\n"
+            "LOCK HAM, LEC, ANT, RUS, VER and MER, FER with limitless, captain HAM",
+            limit=200,
+        )
+    captain = _extract_captain(body, drivers)
+    race_key = _next_race_key()
+    if race_key is None:
+        return truncate("No upcoming race to lock for.")
+
+    from intelligence.lineup_grader import model_top_picks
+    from intelligence.repository import save_locked_lineup
+    from scheduler.calendar import get_race_weekend
+
+    m_drivers, m_cons, m_cap = await model_top_picks(race_key)
+    await save_locked_lineup(
+        phone=phone,
+        race_key=race_key,
+        drivers=drivers,
+        constructors=constructors,
+        chip=chip,
+        captain=captain,
+        model_drivers=m_drivers,
+        model_constructors=m_cons,
+        model_captain=m_cap,
+    )
+    wk = get_race_weekend(race_key)
+    name = wk.display_name if wk else race_key
+    cap_txt = f" · captain {captain}" if captain else ""
+    chip_txt = f" · {chip}" if chip else ""
+    lines = [
+        f"🔒 Locked your {name} call.",
+        f"You: {', '.join(drivers)} | {', '.join(constructors)}{cap_txt}{chip_txt}",
+        f"🤖 My pick: {', '.join(m_drivers)} | {', '.join(m_cons)} · captain {m_cap or '—'}",
+        "",
+        "I'll score both against the result. Text SCORE after the race.",
+    ]
+    return truncate("\n".join(lines), limit=500)
+
+
+def _resolve_race_key(text: str) -> str | None:
+    """Find a race in free text by circuit key or a word from its name."""
+    from scheduler.calendar import CALENDAR_2026
+
+    aliases: dict[str, str] = {}
+    for w in CALENDAR_2026:
+        aliases[w.circuit_key] = w.race_key
+        for word in w.display_name.lower().replace("-", " ").split():
+            if word not in {"grand", "prix"} and len(word) > 3:
+                aliases.setdefault(word, w.race_key)
+    low = text.lower()
+    for alias, rk in aliases.items():
+        if re.search(rf"\b{re.escape(alias)}\b", low):
+            return rk
+    return None
+
+
+async def _handle_score(phone: str, raw_text: str) -> str:
+    """Score a stated or locked lineup vs PitWallAI vs the actual result."""
+    from intelligence.lineup_grader import (
+        model_top_picks,
+        perfect_lineup_from_positions,
+        score_against_result,
+    )
+    from intelligence.repository import get_locked_lineup
+    from scheduler.calendar import get_race_weekend
+
+    body = raw_text[5:] if raw_text.upper().startswith("SCORE") else raw_text
+    drivers, constructors, chip = _extract_lineup(body)
+    captain = _extract_captain(body, drivers) if drivers else None
+    race_key = _resolve_race_key(body) or _next_race_key()
+    if race_key is None:
+        return truncate("No race to score against.")
+
+    if drivers:
+        m_drivers, m_cons, m_cap = await model_top_picks(race_key)
+    else:
+        locked = await get_locked_lineup(phone, race_key)
+        if locked is None:
+            return truncate(
+                "Nothing locked for this race. Text LOCK <lineup>, or "
+                "SCORE <lineup> at <race> to grade against any past race."
+            )
+        drivers, constructors, chip, captain = (
+            locked.drivers, locked.constructors, locked.chip, locked.captain
+        )
+        m_drivers, m_cons, m_cap = locked.model_drivers, locked.model_constructors, locked.model_captain
+
+    you = await score_against_result(race_key, drivers, constructors, chip, captain)
+    if you is None:
+        wk = get_race_weekend(race_key)
+        name = wk.display_name if wk else race_key
+        return truncate(f"{name} hasn't been classified yet — I'll score it after the flag.")
+
+    model = (
+        await score_against_result(race_key, m_drivers, m_cons, chip, m_cap) if m_drivers else None
+    )
+    perfect = perfect_lineup_from_positions(you["positions"])
+    you_t, perfect_t = you["total"], (perfect["total"] or 1)
+    capture = round(100 * you_t / perfect_t)
+
+    def _pos(code: str) -> str:
+        p = you["positions"].get(code)
+        return f"P{p}" if p else "DNF"
+
+    from intelligence.repository import record_lineup_score
+
+    await record_lineup_score(
+        phone=phone,
+        race_key=race_key,
+        drivers=drivers,
+        constructors=constructors,
+        chip=chip,
+        captain=you["captain"],
+        your_points=you_t,
+        model_points=(model["total"] if model is not None else None),
+        perfect_points=perfect["total"],
+        capture_pct=capture,
+    )
+
+    your_drivers = " · ".join(f"{d} {_pos(d)} {p}" for d, p in you["driver_pts"].items())
+    wk = get_race_weekend(race_key)
+    lines = [f"🏁 {wk.display_name if wk else race_key} — scored:"]
+    lines.append(f"  You:       {you_t} pts (captain {you['captain']} +{you['captain_bonus']})")
+    if model is not None:
+        model_t = model["total"]
+        verdict = (
+            "you beat PitWallAI! 🏆" if you_t > model_t
+            else "PitWallAI edged it." if model_t > you_t else "dead heat."
+        )
+        lines.append(f"  PitWallAI: {model_t} pts")
+    else:
+        verdict = ""
+    lines.append(f"  Perfect:   {perfect_t} pts ({', '.join(perfect['drivers'])})")
+    lines.append(f"→ {verdict} You captured {capture}% of the ceiling.".strip())
+    lines.append("")
+    lines.append(f"Your drivers: {your_drivers}")
+    return truncate("\n".join(lines), limit=650)
+
+
+async def _handle_record(phone: str) -> str:
+    """Season scorecard: your record vs PitWallAI and avg ceiling capture."""
+    from intelligence.repository import list_scored_lineups
+    from scheduler.calendar import get_race_weekend
+
+    rows = await list_scored_lineups(phone)
+    if not rows:
+        return truncate(
+            "No scored races yet. Try `SCORE <lineup> at <race>` to backtest, "
+            "or LOCK a lineup and SCORE it after the race."
+        )
+
+    def _name(rk: str) -> str:
+        wk = get_race_weekend(rk)
+        return wk.display_name.replace(" Grand Prix", "") if wk else rk
+
+    caps = [r.capture_pct for r in rows if r.capture_pct is not None]
+    avg_cap = round(sum(caps) / len(caps)) if caps else 0
+    vs_model = [(r.your_points, r.model_points) for r in rows if r.model_points is not None]
+    wins = sum(1 for y, m in vs_model if y > m)
+    losses = sum(1 for y, m in vs_model if m > y)
+    ties = sum(1 for y, m in vs_model if y == m)
+    best = max(rows, key=lambda r: r.capture_pct or 0)
+    worst = min(rows, key=lambda r: r.capture_pct or 0)
+
+    lines = [
+        f"📈 Your PitWallAI scorecard — {len(rows)} race(s)",
+        f"🎯 Avg ceiling capture: {avg_cap}%",
+    ]
+    if vs_model:
+        rec = f"{wins}-{losses}" + (f"-{ties}" if ties else "")
+        lines.append(f"🤖 vs PitWallAI: {rec}")
+    lines.append(f"🏆 Best: {_name(best.race_key)} {best.capture_pct}%")
+    if worst.race_key != best.race_key:
+        lines.append(f"🧊 Worst: {_name(worst.race_key)} {worst.capture_pct}%")
+    return truncate("\n".join(lines), limit=400)
+
+
+async def _practice_standing_line(race_key: str, code: str) -> str | None:
+    """One-line live practice standing for a driver (rank, pace, flags)."""
+    from intelligence.signal_cache import load_practice_by_driver, circuit_key_for_race
+
+    circuit_key = circuit_key_for_race(race_key)
+    if circuit_key is None:
+        return None
+    by_driver = await load_practice_by_driver(circuit_key)
+    sig = by_driver.get(code.upper())
+    if sig is None:
+        return None
+    # Practice position = rank by pace_satisfaction across all drivers seen.
+    ranked = sorted(by_driver.values(), key=lambda s: s.pace_satisfaction, reverse=True)
+    pos = next((i for i, s in enumerate(ranked, start=1) if s.driver_code == code.upper()), None)
+    pace_pct = int(round(sig.pace_satisfaction * 100))
+    flags = ", ".join(sig.anomaly_flags) if sig.anomaly_flags else "clean run"
+    pos_txt = f"P{pos} on practice pace" if pos else "practice pace"
+    return f"📻 {code}: {sig.session} {pos_txt} ({pace_pct}% pace index) · {flags}"
 
 
 def _season_share_secret() -> str:
@@ -277,6 +586,14 @@ async def handle_inbound_text(phone: str, text: str, raw_text: str) -> None:
             reply = await _handle_price_report(phone, raw_text)
         elif text.startswith("WHY "):
             reply = await _handle_why(raw_text)
+        elif text.startswith("GRADE"):
+            reply = await _handle_grade(raw_text)
+        elif text.startswith("LOCK"):
+            reply = await _handle_lock(phone, raw_text)
+        elif text.startswith("SCORE"):
+            reply = await _handle_score(phone, raw_text)
+        elif text == "RECORD":
+            reply = await _handle_record(phone)
         elif text == "SEASON":
             if not season_recap_enabled():
                 reply = truncate("Season recap isn't live yet. Reply HELP for available commands.")
@@ -317,6 +634,10 @@ async def handle_inbound_text(phone: str, text: str, raw_text: str) -> None:
 
             chip = raw_text.strip().split(maxsplit=1)[1] if len(raw_text.split()) > 1 else ""
             reply = await send_chip_detail(phone, chip)
+        elif text == "CHIPS" or text.startswith("CHIPS "):
+            reply = truncate(
+                "Chip planner isn't available yet. Reply HELP for supported commands."
+            )
         elif text == "TRANSFERS" and budget_transfers_enabled():
             from whatsapp.phase7 import send_transfers_status
 

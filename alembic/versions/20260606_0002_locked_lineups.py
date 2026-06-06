@@ -58,6 +58,11 @@ def upgrade() -> None:
             server_default=sa.text("now()"),
             nullable=False,
         ),
+        sa.Column("your_points", sa.Integer(), nullable=True),
+        sa.Column("model_points", sa.Integer(), nullable=True),
+        sa.Column("perfect_points", sa.Integer(), nullable=True),
+        sa.Column("capture_pct", sa.Integer(), nullable=True),
+        sa.Column("scored_at", sa.DateTime(timezone=True), nullable=True),
         sa.ForeignKeyConstraint(["phone"], ["subscribers.phone"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("phone", "race_key"),
     )

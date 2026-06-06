@@ -32,6 +32,8 @@ PRACTICE_CHECKLIST = """
 ║    is it worth using my wildcard?  → wildcard detail         ║
 ║    who should i pick this week?    → picks                   ║
 ║    i'm playing limitless w/ HAM…   → grade my lineup         ║
+║    score HAM,LEC,… at melbourne     → backtest vs real result ║
+║    my scorecard                    → record vs PitWallAI      ║
 ║    how am i doing?                 → your history            ║
 ║    how accurate are you?           → season hit rate         ║
 ║    tell me about verstappen        → driver card            ║

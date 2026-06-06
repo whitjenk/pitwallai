@@ -407,6 +407,21 @@ async def _handle_score(phone: str, raw_text: str) -> str:
         p = you["positions"].get(code)
         return f"P{p}" if p else "DNF"
 
+    from intelligence.repository import record_lineup_score
+
+    await record_lineup_score(
+        phone=phone,
+        race_key=race_key,
+        drivers=drivers,
+        constructors=constructors,
+        chip=chip,
+        captain=you["captain"],
+        your_points=you_t,
+        model_points=(model["total"] if model is not None else None),
+        perfect_points=perfect["total"],
+        capture_pct=capture,
+    )
+
     your_drivers = " · ".join(f"{d} {_pos(d)} {p}" for d, p in you["driver_pts"].items())
     wk = get_race_weekend(race_key)
     lines = [f"🏁 {wk.display_name if wk else race_key} — scored:"]
@@ -425,6 +440,44 @@ async def _handle_score(phone: str, raw_text: str) -> str:
     lines.append("")
     lines.append(f"Your drivers: {your_drivers}")
     return truncate("\n".join(lines), limit=650)
+
+
+async def _handle_record(phone: str) -> str:
+    """Season scorecard: your record vs PitWallAI and avg ceiling capture."""
+    from intelligence.repository import list_scored_lineups
+    from scheduler.calendar import get_race_weekend
+
+    rows = await list_scored_lineups(phone)
+    if not rows:
+        return truncate(
+            "No scored races yet. Try `SCORE <lineup> at <race>` to backtest, "
+            "or LOCK a lineup and SCORE it after the race."
+        )
+
+    def _name(rk: str) -> str:
+        wk = get_race_weekend(rk)
+        return wk.display_name.replace(" Grand Prix", "") if wk else rk
+
+    caps = [r.capture_pct for r in rows if r.capture_pct is not None]
+    avg_cap = round(sum(caps) / len(caps)) if caps else 0
+    vs_model = [(r.your_points, r.model_points) for r in rows if r.model_points is not None]
+    wins = sum(1 for y, m in vs_model if y > m)
+    losses = sum(1 for y, m in vs_model if m > y)
+    ties = sum(1 for y, m in vs_model if y == m)
+    best = max(rows, key=lambda r: r.capture_pct or 0)
+    worst = min(rows, key=lambda r: r.capture_pct or 0)
+
+    lines = [
+        f"📈 Your PitWallAI scorecard — {len(rows)} race(s)",
+        f"🎯 Avg ceiling capture: {avg_cap}%",
+    ]
+    if vs_model:
+        rec = f"{wins}-{losses}" + (f"-{ties}" if ties else "")
+        lines.append(f"🤖 vs PitWallAI: {rec}")
+    lines.append(f"🏆 Best: {_name(best.race_key)} {best.capture_pct}%")
+    if worst.race_key != best.race_key:
+        lines.append(f"🧊 Worst: {_name(worst.race_key)} {worst.capture_pct}%")
+    return truncate("\n".join(lines), limit=400)
 
 
 async def _practice_standing_line(race_key: str, code: str) -> str | None:
@@ -556,6 +609,8 @@ async def handle_inbound_text(phone: str, text: str, raw_text: str) -> None:
             reply = await _handle_lock(phone, raw_text)
         elif text.startswith("SCORE"):
             reply = await _handle_score(phone, raw_text)
+        elif text == "RECORD":
+            reply = await _handle_record(phone)
         elif text == "SEASON":
             if not season_recap_enabled():
                 reply = truncate("Season recap isn't live yet. Reply HELP for available commands.")

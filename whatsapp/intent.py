@@ -107,6 +107,9 @@ def resolve_intent(raw_text: str) -> str | None:
     if _contains(t, "score my", "score me", "how did i score", "did i beat",
                  "how did my pick", "how did my lineup", "score my lineup"):
         return "SCORE"
+    if _contains(t, "scorecard", "my record vs", "record vs you", "record vs pitwall",
+                 "season tally", "how am i doing vs", "my backtest"):
+        return "RECORD"
 
     # --- Chips (highest priority — strong, unambiguous keywords) ---
     if _contains(t, "chip", "wildcard", "limitless", "autopilot", "final fix",

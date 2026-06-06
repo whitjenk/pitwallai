@@ -128,6 +128,12 @@ class LockedLineup(Base):
     locked_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+    # Filled when the race is scored (also used by ad-hoc backtests).
+    your_points: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    model_points: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    perfect_points: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    capture_pct: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    scored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class TeamOnboardingState(Base):

@@ -45,10 +45,48 @@ def _race_name(race_key: str) -> str:
     return wk.display_name if wk else race_key
 
 
+async def _live_lap_signals(race_key: str) -> dict:
+    """Build lap-only practice signals for a race directly from OpenF1.
+
+    Used when the DB has no persisted signals (e.g. grading/scoring a past race
+    that the simulator never ingested). Returns {code: PracticeSignal} or {}.
+    """
+    from openf1.client import OpenF1Client
+    from intelligence.lap_signals import build_lap_only_signals
+    from utils.race_key import parse_race_key
+
+    parsed = parse_race_key(race_key)
+    weekend = get_race_weekend(race_key)
+    if parsed is None or weekend is None:
+        return {}
+    year, _ = parsed
+    circuit = get_circuit_profile(profile_circuit_key(weekend.circuit_key))
+    if circuit is None:
+        return {}
+    client = OpenF1Client()
+    keys: dict[str, int] = {}
+    for label, name in (("FP1", "Practice 1"), ("FP2", "Practice 2")):
+        sk = await client.find_session_key(
+            year=year, circuit_short_name=circuit.openf1_circuit_name, session_name=name
+        )
+        if sk is not None:
+            keys[label] = sk
+    if not keys:
+        return {}
+    signals = await build_lap_only_signals(client, session_keys=keys)
+    out: dict = {}
+    for s in signals:
+        if s.driver_code not in out or s.session == "FP2":
+            out[s.driver_code] = s
+    return out
+
+
 async def _projection(race_key: str):
     """Return (proj_grid, proj_points fn, con_points fn, signals) for a race."""
     circuit_key = circuit_key_for_race(race_key)
     by_driver = await load_practice_by_driver(circuit_key) if circuit_key else {}
+    if not by_driver:
+        by_driver = await _live_lap_signals(race_key)
     profile_key = profile_circuit_key(get_race_weekend(race_key).circuit_key) if get_race_weekend(race_key) else circuit_key
     circuit = get_circuit_profile(profile_key) if profile_key else None
     signals = by_driver

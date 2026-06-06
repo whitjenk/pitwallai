@@ -17,6 +17,35 @@ def test_intent_routes_lock_and_score() -> None:
     assert stated is not None and stated.startswith("SCORE ")
 
 
+def test_intent_routes_record() -> None:
+    assert resolve_intent("show my scorecard") == "RECORD"
+    assert resolve_intent("what's my record vs you") == "RECORD"
+
+
+@pytest.mark.asyncio
+async def test_record_aggregates_scored_lineups(monkeypatch) -> None:
+    import whatsapp.inbound as ib
+
+    class _Row:
+        def __init__(self, rk, y, m, cap):
+            self.race_key, self.your_points, self.model_points, self.capture_pct = rk, y, m, cap
+
+    rows = [_Row("2026_melbourne", 173, 58, 99), _Row("2026_suzuka", 116, 163, 68)]
+
+    async def _fake_list(_phone):
+        return rows
+
+    monkeypatch.setattr(ib, "_handle_record", ib._handle_record)  # keep reference
+    import intelligence.repository as repo
+
+    monkeypatch.setattr(repo, "list_scored_lineups", _fake_list)
+    msg = await ib._handle_record("+1")
+    assert "2 race(s)" in msg
+    assert "84%" in msg  # avg of 99 and 68
+    assert "1-1" in msg  # one win, one loss vs the model
+    assert "99%" in msg  # best
+
+
 def test_resolve_race_key_from_text() -> None:
     from whatsapp.inbound import _resolve_race_key
 

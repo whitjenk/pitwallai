@@ -293,6 +293,92 @@ async def _handle_grade(raw_text: str) -> str:
     return truncate(msg, limit=900)
 
 
+async def _handle_lock(phone: str, raw_text: str) -> str:
+    """Commit a stated lineup for the upcoming race so it can be scored later."""
+    body = raw_text
+    for prefix in ("LOCK IN", "LOCK"):
+        if body.upper().startswith(prefix):
+            body = body[len(prefix):]
+            break
+    drivers, constructors, chip = _extract_lineup(body)
+    if len(drivers) < 1:
+        return truncate(
+            "Tell me the lineup to lock, e.g.\n"
+            "LOCK HAM, LEC, ANT, RUS, VER and MER, FER with limitless, captain HAM",
+            limit=200,
+        )
+    captain = _extract_captain(body, drivers)
+    race_key = _next_race_key()
+    if race_key is None:
+        return truncate("No upcoming race to lock for.")
+
+    from intelligence.lineup_grader import model_top_picks
+    from intelligence.repository import save_locked_lineup
+    from scheduler.calendar import get_race_weekend
+
+    m_drivers, m_cons, m_cap = await model_top_picks(race_key)
+    await save_locked_lineup(
+        phone=phone,
+        race_key=race_key,
+        drivers=drivers,
+        constructors=constructors,
+        chip=chip,
+        captain=captain,
+        model_drivers=m_drivers,
+        model_constructors=m_cons,
+        model_captain=m_cap,
+    )
+    wk = get_race_weekend(race_key)
+    name = wk.display_name if wk else race_key
+    cap_txt = f" · captain {captain}" if captain else ""
+    chip_txt = f" · {chip}" if chip else ""
+    lines = [
+        f"🔒 Locked your {name} call.",
+        f"You: {', '.join(drivers)} | {', '.join(constructors)}{cap_txt}{chip_txt}",
+        f"🤖 My pick: {', '.join(m_drivers)} | {', '.join(m_cons)} · captain {m_cap or '—'}",
+        "",
+        "I'll score both against the result. Text SCORE after the race.",
+    ]
+    return truncate("\n".join(lines), limit=500)
+
+
+async def _handle_score(phone: str) -> str:
+    """Score the player's locked lineup vs PitWallAI vs the actual result."""
+    from intelligence.lineup_grader import score_against_result
+    from intelligence.repository import get_locked_lineup
+    from scheduler.calendar import get_race_weekend
+
+    race_key = _next_race_key()
+    locked = await get_locked_lineup(phone, race_key) if race_key else None
+    if locked is None:
+        return truncate("Nothing locked for this race yet. Text LOCK <your lineup> first.")
+
+    you = await score_against_result(
+        race_key, locked.drivers, locked.constructors, locked.chip, locked.captain
+    )
+    if you is None:
+        wk = get_race_weekend(race_key)
+        name = wk.display_name if wk else race_key
+        return truncate(f"{name} hasn't been classified yet — I'll score it after the flag.")
+    model = await score_against_result(
+        race_key, locked.model_drivers, locked.model_constructors, locked.chip, locked.model_captain
+    )
+    you_t = you["total"]
+    model_t = model["total"] if model else 0
+    verdict = (
+        "you beat PitWallAI! 🏆" if you_t > model_t
+        else "PitWallAI edged it." if model_t > you_t
+        else "dead heat."
+    )
+    lines = [
+        "🏁 Result is in — your call vs PitWallAI:",
+        f"  You:       {you_t} pts (captain {you['captain']} +{you['captain_bonus']})",
+        f"  PitWallAI: {model_t} pts",
+        f"→ {verdict}",
+    ]
+    return truncate("\n".join(lines), limit=500)
+
+
 async def _practice_standing_line(race_key: str, code: str) -> str | None:
     """One-line live practice standing for a driver (rank, pace, flags)."""
     from intelligence.signal_cache import load_practice_by_driver, circuit_key_for_race
@@ -418,6 +504,10 @@ async def handle_inbound_text(phone: str, text: str, raw_text: str) -> None:
             reply = await _handle_why(raw_text)
         elif text.startswith("GRADE"):
             reply = await _handle_grade(raw_text)
+        elif text.startswith("LOCK"):
+            reply = await _handle_lock(phone, raw_text)
+        elif text == "SCORE" or text.startswith("SCORE"):
+            reply = await _handle_score(phone)
         elif text == "SEASON":
             if not season_recap_enabled():
                 reply = truncate("Season recap isn't live yet. Reply HELP for available commands.")

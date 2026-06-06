@@ -19,6 +19,7 @@ from db.models import (
     DriverPrice,
     FantasyTeam,
     LeagueOnboardingState,
+    LockedLineup,
     LiveAlertDelivery,
     PickRow,
     PendingScreenshotState,
@@ -166,6 +167,39 @@ async def get_fantasy_team(phone: str) -> FantasyTeam | None:
     """Load fantasy team profile."""
     async with get_session() as session:
         return await session.get(FantasyTeam, phone)
+
+
+async def save_locked_lineup(
+    *,
+    phone: str,
+    race_key: str,
+    drivers: list[str],
+    constructors: list[str],
+    chip: str | None,
+    captain: str | None,
+    model_drivers: list[str],
+    model_constructors: list[str],
+    model_captain: str | None,
+) -> None:
+    """Insert/replace a player's committed lineup for a race."""
+    async with get_session() as session:
+        row = await session.get(LockedLineup, (phone, race_key))
+        if row is None:
+            row = LockedLineup(phone=phone, race_key=race_key)
+            session.add(row)
+        row.drivers = list(drivers)
+        row.constructors = list(constructors)
+        row.chip = chip
+        row.captain = captain
+        row.model_drivers = list(model_drivers)
+        row.model_constructors = list(model_constructors)
+        row.model_captain = model_captain
+
+
+async def get_locked_lineup(phone: str, race_key: str) -> LockedLineup | None:
+    """Load a player's committed lineup for a race, if any."""
+    async with get_session() as session:
+        return await session.get(LockedLineup, (phone, race_key))
 
 
 async def upsert_fantasy_team_fields(phone: str, **fields: Any) -> FantasyTeam:

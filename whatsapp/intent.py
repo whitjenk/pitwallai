@@ -98,8 +98,13 @@ def resolve_intent(raw_text: str) -> str | None:
     chip_word = _contains(
         t, "limitless", "wildcard", "autopilot", "final fix", "no negative", "extra drs"
     )
+    if len(codes_in_text) >= 3 and "lock" in stripped:
+        return f"LOCK {raw_text}"
     if len(codes_in_text) >= 3 and (grade_signal or chip_word):
         return f"GRADE {raw_text}"
+    if _contains(t, "score my", "score me", "how did i score", "did i beat",
+                 "how did my pick", "how did my lineup", "score my lineup"):
+        return "SCORE"
 
     # --- Chips (highest priority — strong, unambiguous keywords) ---
     if _contains(t, "chip", "wildcard", "limitless", "autopilot", "final fix",

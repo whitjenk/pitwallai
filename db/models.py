@@ -106,6 +106,30 @@ class FantasyTeam(Base):
     )
 
 
+class LockedLineup(Base):
+    """A player's committed lineup for one race, plus PitWallAI's pick at lock
+    time — so the call can be scored against the actual result afterward."""
+
+    __tablename__ = "locked_lineups"
+
+    phone: Mapped[str] = mapped_column(
+        String(20),
+        ForeignKey("subscribers.phone", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    race_key: Mapped[str] = mapped_column(String(32), primary_key=True)
+    drivers: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    constructors: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    chip: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    captain: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    model_drivers: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    model_constructors: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    model_captain: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    locked_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class TeamOnboardingState(Base):
     """Persisted TEAM command conversation state."""
 

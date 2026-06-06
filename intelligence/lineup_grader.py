@@ -177,6 +177,87 @@ async def grade_lineup(
     return "\n".join(lines)
 
 
+async def model_top_picks(race_key: str) -> tuple[list[str], list[str], str | None]:
+    """PitWallAI's top-5 drivers, top-2 constructors and best captain by practice."""
+    proj_grid, proj_points, con_points, signals = await _projection(race_key)
+    if not signals:
+        return [], [], None
+    top_drivers = sorted(
+        (c for c in signals if proj_grid.get(c)), key=lambda c: proj_points(c), reverse=True
+    )[:5]
+    con_scores = {con: con_points(con) for con in CONSTRUCTOR_PRICES_M}
+    top_cons = sorted(con_scores, key=lambda c: con_scores[c], reverse=True)[:2]
+    return top_drivers, top_cons, (top_drivers[0] if top_drivers else None)
+
+
+async def score_against_result(
+    race_key: str,
+    drivers: list[str],
+    constructors: list[str],
+    chip: str | None,
+    captain: str | None,
+) -> dict | None:
+    """Actual fantasy points for a lineup from the real race result, or None.
+
+    Returns None when the race has not been classified yet (no result).
+    """
+    from openf1.client import OpenF1Client
+    from utils.race_key import parse_race_key
+
+    parsed = parse_race_key(race_key)
+    weekend = get_race_weekend(race_key)
+    if parsed is None or weekend is None:
+        return None
+    year, _ = parsed
+    circuit = get_circuit_profile(profile_circuit_key(weekend.circuit_key))
+    if circuit is None:
+        return None
+    client = OpenF1Client()
+    sk = await client.find_session_key(
+        year=year, circuit_short_name=circuit.openf1_circuit_name, session_name="Race"
+    )
+    if sk is None:
+        return None
+    rows = await client.get_session_results(sk)
+    if not rows:
+        return None
+    roster = {r.driver_number: (r.name_acronym or "") for r in await client.get_drivers(sk)}
+    pos_by_code: dict[str, int | None] = {}
+    for r in rows:
+        code = roster.get(r.driver_number, "").upper()
+        if not code:
+            continue
+        pos_by_code[code] = None if (r.dnf or r.dns or r.dsq) else r.position
+
+    from fantasy.rules import driver_points_race
+
+    def d_pts(code: str) -> int:
+        if code not in pos_by_code:
+            return 0
+        pos = pos_by_code[code]
+        return driver_points_race(pos, classified=pos is not None)
+
+    con_drivers = _constructor_drivers(set(pos_by_code))
+    multiplier = 3 if chip == "extra_drs" else 2
+    drivers = [d.upper() for d in drivers]
+    captain = captain.upper() if captain else (max(drivers, key=d_pts) if drivers else None)
+
+    driver_pts = {d: d_pts(d) for d in drivers}
+    cap_bonus = driver_pts.get(captain, 0) * (multiplier - 1) if captain else 0
+    con_pts = {
+        c.upper(): sum(d_pts(x) for x in con_drivers.get(c.upper(), [])[:2]) for c in constructors
+    }
+    total = sum(driver_pts.values()) + sum(con_pts.values()) + cap_bonus
+    return {
+        "total": total,
+        "driver_pts": driver_pts,
+        "constructor_pts": con_pts,
+        "captain": captain,
+        "captain_bonus": cap_bonus,
+        "positions": pos_by_code,
+    }
+
+
 async def grade_lineup_facts(
     race_key: str,
     drivers: list[str],

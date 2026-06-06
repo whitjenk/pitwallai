@@ -80,6 +80,27 @@ def resolve_intent(raw_text: str) -> str | None:
 
     t = f" {stripped} "
 
+    # --- Grade a stated lineup ("I chose HAM, LEC, ANT, RUS, VER and MER, FER
+    #     with limitless") → hand the whole message to the GRADE handler so it
+    #     can score the picks. Must precede the chip block (a stated chip + a
+    #     lineup is a grade request, not a chip-detail lookup).
+    from fantasy.rules import DRIVER_PRICES_M
+
+    codes_in_text = {
+        tok for tok in re.findall(r"[A-Z]{2,3}", raw_text.upper()) if tok in DRIVER_PRICES_M
+    }
+    grade_signal = _contains(
+        t, "i chose", "i picked", "i'm playing", "i am playing", "im playing",
+        "i'm running", "im running", "i selected", "i went with", "my team is",
+        "my lineup is", "grade my", "rate my", "what do you think", "how's my team",
+        "hows my team", "i'm going with", "im going with", "i'm going to play",
+    )
+    chip_word = _contains(
+        t, "limitless", "wildcard", "autopilot", "final fix", "no negative", "extra drs"
+    )
+    if len(codes_in_text) >= 3 and (grade_signal or chip_word):
+        return f"GRADE {raw_text}"
+
     # --- Chips (highest priority — strong, unambiguous keywords) ---
     if _contains(t, "chip", "wildcard", "limitless", "autopilot", "final fix",
                  "no negative", "extra drs", "power up", "powerup", "power-up"):

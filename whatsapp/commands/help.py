@@ -33,6 +33,7 @@ async def handle_help(phone_number: str, race_key: str) -> str:
     return (
         "🏎 *PitWallAI Commands*\n\n"
         "*PICKS*       → This weekend's recommended picks\n"
+        "*GRADE …*     → Grade your lineup, e.g. GRADE HAM,LEC,ANT,RUS,VER MER,FER limitless\n"
         "*[CODE]*      → Driver card e.g. NOR, VER, LEC\n"
         "*SHARE [CODE]* → Forwardable card for your league chat\n"
         "*TEAM*        → Your fantasy team + budget\n"

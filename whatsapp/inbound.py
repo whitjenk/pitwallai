@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 
 from loguru import logger
@@ -213,6 +214,70 @@ async def _handle_why(raw_text: str) -> str:
     return truncate("\n".join(lines), limit=500)
 
 
+_GRADE_CHIP_WORDS: dict[str, str] = {
+    "limitless": "limitless",
+    "wildcard": "wildcard",
+    "no negative": "no_negative",
+    "no_negative": "no_negative",
+    "nonegative": "no_negative",
+    "extra drs": "extra_drs",
+    "3x": "extra_drs",
+    "final fix": "final_fix",
+    "autopilot": "autopilot",
+}
+
+
+def _extract_lineup(raw_text: str) -> tuple[list[str], list[str], str | None]:
+    """Pull driver codes, constructor codes and a chip from free text."""
+    from fantasy.rules import CONSTRUCTOR_PRICES_M, DRIVER_PRICES_M
+
+    upper = raw_text.upper()
+    tokens = re.findall(r"\b[A-Z]{2,3}\b", upper)
+    drivers: list[str] = []
+    constructors: list[str] = []
+    for tok in tokens:
+        if tok in DRIVER_PRICES_M and tok not in drivers:
+            drivers.append(tok)
+        elif tok in CONSTRUCTOR_PRICES_M and tok not in constructors:
+            constructors.append(tok)
+    low = raw_text.lower()
+    chip = next((c for word, c in _GRADE_CHIP_WORDS.items() if word in low), None)
+    return drivers, constructors, chip
+
+
+async def _handle_grade(raw_text: str) -> str:
+    """Grade a stated lineup (drivers + constructors + chip) vs PitWallAI."""
+    body = raw_text
+    if body.upper().startswith("GRADE"):
+        body = body[5:]
+    drivers, constructors, chip = _extract_lineup(body)
+    if len(drivers) < 1:
+        return truncate(
+            "Tell me your lineup to grade, e.g.\n"
+            "GRADE HAM, LEC, ANT, RUS, VER and MER, FER with limitless",
+            limit=200,
+        )
+    race_key = _next_race_key()
+    if race_key is None:
+        return truncate("No upcoming race to grade against.")
+
+    from intelligence.lineup_grader import grade_lineup, grade_lineup_facts
+
+    msg = await grade_lineup(race_key, drivers, constructors, chip)
+
+    facts, allowed = await grade_lineup_facts(race_key, drivers, constructors, chip)
+    if facts:
+        from intelligence.llm_insight import llm_tip
+
+        verdict = await llm_tip(
+            facts + " In one sentence, judge how this lineup compares to the model's top picks.",
+            allowed_codes=allowed,
+        )
+        if verdict:
+            msg = f"{msg}\n\n💡 {verdict}"
+    return truncate(msg, limit=900)
+
+
 async def _practice_standing_line(race_key: str, code: str) -> str | None:
     """One-line live practice standing for a driver (rank, pace, flags)."""
     from intelligence.signal_cache import load_practice_by_driver, circuit_key_for_race
@@ -336,6 +401,8 @@ async def handle_inbound_text(phone: str, text: str, raw_text: str) -> None:
             reply = await _handle_price_report(phone, raw_text)
         elif text.startswith("WHY "):
             reply = await _handle_why(raw_text)
+        elif text.startswith("GRADE"):
+            reply = await _handle_grade(raw_text)
         elif text == "SEASON":
             if not season_recap_enabled():
                 reply = truncate("Season recap isn't live yet. Reply HELP for available commands.")

@@ -31,6 +31,7 @@ PRACTICE_CHECKLIST = """
 ║    should i play a chip?           → chip planner            ║
 ║    is it worth using my wildcard?  → wildcard detail         ║
 ║    who should i pick this week?    → picks                   ║
+║    i'm playing limitless w/ HAM…   → grade my lineup         ║
 ║    how am i doing?                 → your history            ║
 ║    how accurate are you?           → season hit rate         ║
 ║    tell me about verstappen        → driver card            ║

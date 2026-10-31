@@ -92,8 +92,8 @@ def _build_agent_for(system_prompt: str):
     """Construct a Pydantic AI agent for the configured BYO provider + a prompt."""
     from pydantic_ai import Agent
 
-    from pitwallai.agents.radio_intercept.config import PitWallSettings
-    from pitwallai.agents.radio_intercept.model_factory import get_model
+    from pitwallai.llm.model_factory import get_model
+    from pitwallai.llm.settings import PitWallSettings
 
     settings = PitWallSettings.from_env()
     provider = os.getenv("PITWALL_LLM_PROVIDER", "ollama").strip().lower() or "ollama"

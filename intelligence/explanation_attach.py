@@ -7,7 +7,7 @@ from loguru import logger
 from intelligence.explanation_builder import ExplanationBuildContext, build_explanation
 from intelligence.schemas import PickOutput, PracticeSignal
 from models.pick_explanation import PickExplanation
-from pitwallai.agents.radio_intercept.config import PitWallSettings
+from pitwallai.llm.settings import PitWallSettings
 
 
 def practice_map_from_sessions(

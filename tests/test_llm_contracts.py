@@ -29,14 +29,12 @@ def _adapter_importable(class_path: str) -> bool:
         return False
     return True
 
-from pitwallai.agents.radio_intercept.config import PitWallSettings
-from pitwallai.agents.radio_intercept.decoder_factory import (
-    _sanitise_evidence_summary,
-    apply_llm_output_guards,
-)
+from pitwallai.agents.radio_intercept.decoder_factory import apply_llm_output_guards
 from pitwallai.agents.radio_intercept.enums import RadioIntent, StrategicSignal, UrgencyLevel
 from pitwallai.agents.radio_intercept.llm_decoder import LLMDecoder, _create_llm_agent
-from pitwallai.agents.radio_intercept.model_factory import get_model
+from pitwallai.llm.model_factory import get_model
+from pitwallai.llm.sanitize import sanitise_evidence_summary
+from pitwallai.llm.settings import PitWallSettings
 from pitwallai.agents.radio_intercept.models import AgentDependencies, DecodedTransmission
 from pitwallai.agents.radio_intercept.seed_data import MONACO_REHEARSAL_SCENARIO
 
@@ -173,7 +171,7 @@ def test_sanitise_evidence_summary_strips_directives(
     expected_fragment: str | None,
 ) -> None:
     """Directive phrases and imperative sentences are removed from evidence."""
-    result = _sanitise_evidence_summary(raw)
+    result = sanitise_evidence_summary(raw)
     if expected_fragment is None:
         assert result is None
     else:

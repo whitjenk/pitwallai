@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 from pitwallai.agents.radio_intercept.agent import RadioInterceptAgent
-from pitwallai.agents.radio_intercept.config import PitWallSettings
+from pitwallai.llm.settings import PitWallSettings
 from pitwallai.agents.radio_intercept.vector_store import MockVectorStore
 
 if TYPE_CHECKING:

@@ -203,7 +203,7 @@ def _llm_enabled_with_key() -> bool:
     if os.getenv("PITWALL_NL_INTENT_LLM", "1").strip().lower() in {"0", "false", "no", "off"}:
         return False
     try:
-        from pitwallai.agents.radio_intercept.config import PitWallSettings
+        from pitwallai.llm.settings import PitWallSettings
 
         settings = PitWallSettings.from_env()
     except Exception:

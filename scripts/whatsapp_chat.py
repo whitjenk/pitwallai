@@ -151,7 +151,7 @@ async def _ingest_openf1_practice(race_key: str) -> int:
     from intelligence.practice_analyst import analyze_practice_weekend
     from openf1.client import OpenF1Client
     from pitwallai.agents.radio_intercept.agent import RadioInterceptAgent
-    from pitwallai.agents.radio_intercept.config import PitWallSettings
+    from pitwallai.llm.settings import PitWallSettings
     from pitwallai.agents.radio_intercept.vector_store import MockVectorStore
     from scheduler.calendar import get_race_weekend, profile_circuit_key
 

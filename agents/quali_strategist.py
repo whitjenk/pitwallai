@@ -43,7 +43,7 @@ from orchestrator.race_context import (
     evolve_race_context,
     RaceContext,
 )
-from pitwallai.agents.radio_intercept.config import PitWallSettings
+from pitwallai.llm.settings import PitWallSettings
 from intelligence.explanation_attach import attach_explanations_from_db
 from whatsapp.message_format import format_generic_picks, format_personalized_picks
 from whatsapp.sender import mask_phone, send_message

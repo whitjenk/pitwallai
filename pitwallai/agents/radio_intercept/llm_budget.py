@@ -10,7 +10,7 @@ from typing import Any
 
 from loguru import logger
 
-from pitwallai.agents.radio_intercept.config import DecodeBackend, PitWallSettings
+from pitwallai.llm.settings import DecodeBackend, PitWallSettings
 
 
 @dataclass(frozen=True, slots=True)

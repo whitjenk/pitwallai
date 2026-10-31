@@ -197,6 +197,6 @@ class PitWallSettings:
 
     def llm_api_key(self) -> str:
         """Resolve BYOK API key for the configured provider."""
-        from pitwallai.agents.radio_intercept.model_factory import resolve_api_key
+        from pitwallai.llm.model_factory import resolve_api_key
 
         return resolve_api_key(self.llm_provider)

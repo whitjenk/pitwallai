@@ -228,18 +228,17 @@ _GRADE_CHIP_WORDS: dict[str, str] = {
 
 
 def _extract_lineup(raw_text: str) -> tuple[list[str], list[str], str | None]:
-    """Pull driver codes, constructor codes and a chip from free text — by code
-    OR by name ('hamilton', 'the antonelli kid', 'ferrari double, limitless')."""
-    from intelligence.lineup_parse import resolve_chip, resolve_constructors, resolve_drivers
+    """Shim for :func:`core.parse.extract_lineup` (moved there in brief 006)."""
+    from core.parse import extract_lineup
 
-    return resolve_drivers(raw_text), resolve_constructors(raw_text), resolve_chip(raw_text)
+    return extract_lineup(raw_text)
 
 
 def _extract_captain(raw_text: str, drivers: list[str]) -> str | None:
-    """Find a stated captain among the lineup's drivers, by code or name."""
-    from intelligence.lineup_parse import resolve_captain
+    """Shim for :func:`core.parse.extract_captain` (moved there in brief 006)."""
+    from core.parse import extract_captain
 
-    return resolve_captain(raw_text, drivers)
+    return extract_captain(raw_text, drivers)
 
 
 async def _handle_grade(raw_text: str) -> str:

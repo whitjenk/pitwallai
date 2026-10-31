@@ -22,7 +22,10 @@ Remaining 2026 races: São Paulo Nov 6–8 · Las Vegas Nov 19–21 · Qatar Nov
 | 005 | SQLite store keyed by Slack user |
 | 006 | Slack: team + picks (private) |
 | 007 | Slack: grade, lock, score, record (channel) |
-| 008 | Production switched to Slack (needs my decision first) |
+| 008 | Production switched to Slack (WhatsApp off, Railway Hobby) |
+| 009 | Prices stay current automatically (bot was on January prices) |
+| 010 | Bot proven to run with all legacy packages absent |
+| 011 | Legacy code, database layer and public-product docs deleted (~25k → ~5k lines) |
 
 ## Next: what makes people use it (write briefs after dogfooding 006/007)
 Ordered by expected value; re-rank after the beta.
@@ -32,7 +35,6 @@ Ordered by expected value; re-rank after the beta.
 4. **League-relative advice:** in `picks`, "You're 12 behind Sam; Sam owns NOR, you don't". Uses everyone's saved teams (only shared at league level, never another person's full team unprompted).
 5. **Chips for the run-in:** "you still have Limitless and No Negative; here's where each fits in the races left".
 6. **Weekly channel posts:** Friday "what changed after practice", Monday leaderboard and the bot's best/worst call.
-7. **Retire legacy:** delete `whatsapp/`, `agents/`, `orchestrator/`, `scheduler/`, `db/`, `api/`, shims, Postgres/Alembic, public-product docs.
 
 ## Later / maybe
 - @-mention questions answered by an LLM calling `core.api` as tools.

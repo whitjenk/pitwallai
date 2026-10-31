@@ -46,7 +46,7 @@ One GitHub issue per brief, titled with its outcome line, linking to the brief f
 
 ## Parallel lanes for the current plan
 ```
-000 ─┬─ 001 ── 002 ── 003 ── 004 ─┬─ 006 ── 007 ── 008
+000 ─┬─ 001 ── 002 ── 003 ── 004 ─┬─ 006 ── 007 ── 008 ── 009 ── 010 ── 011
      └────────── 005 ─────────────┘
 ```
 005 can run alongside any of 001–004.

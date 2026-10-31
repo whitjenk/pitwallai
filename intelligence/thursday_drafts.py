@@ -36,8 +36,6 @@ async def generate_thursday_draft_picks(race_key: str, deps: AgentRunDependencie
             await generate_picks_for_weekend(
                 weekend,
                 client=deps.openf1_client,
-                agent=deps.radio_agent,
-                vector_store=deps.vector_store,
                 settings=deps.settings,
                 phone=sub.phone,
                 persist_picks=True,

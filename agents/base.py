@@ -12,9 +12,7 @@ from pydantic import BaseModel, ConfigDict
 
 from openf1.client import OpenF1Client
 from orchestrator.race_context import RaceContext
-from pitwallai.agents.radio_intercept.agent import RadioInterceptAgent
 from pitwallai.llm.settings import PitWallSettings
-from pitwallai.agents.radio_intercept.vector_store import MockVectorStore
 
 T = TypeVar("T")
 
@@ -32,15 +30,9 @@ class AgentOutput(BaseModel):
 
 @dataclass(frozen=True, slots=True)
 class AgentRunDependencies:
-    """
-    Typed dependency injection for Phase 6 agents.
-
-    Mirrors RadioIntercept ``AgentDependencies`` pattern at orchestration layer.
-    """
+    """Typed dependency injection for Phase 6 agents."""
 
     openf1_client: OpenF1Client
-    radio_agent: RadioInterceptAgent
-    vector_store: MockVectorStore
     settings: PitWallSettings
 
 

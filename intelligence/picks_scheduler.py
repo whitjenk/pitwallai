@@ -100,8 +100,6 @@ class PicksScheduler:
         client = OpenF1Client()
         result = await run_picks_pipeline(
             client=client,
-            agent=self._app.state.agent,
-            vector_store=self._app.state.vector_store,
             settings=self._app.state.settings,
             ctx=self._app.state.orchestrator_context,
             year=year or self._settings.race_year,

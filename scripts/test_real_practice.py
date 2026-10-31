@@ -2,39 +2,31 @@
 """
 Run the Practice Analyst against REAL OpenF1 FP1/FP2 data.
 
-This is the unmocked path: it hits the live OpenF1 REST API, decodes every
-team-radio transmission through the rules-path decoder (free, no API key, no
-LLM), runs the lap-based anomaly rules, and prints the resulting
-PracticeSignals per session plus the Thursday practice summary.
+This is the unmocked path: it hits the live OpenF1 REST API, builds lap-only
+PracticeSignals from real lap times, and prints them per session alongside a
+lap/pace report.
 
 No DATABASE_URL needed — the OpenF1 cache degrades to a no-op and we pass
 persist=False so nothing is written to Postgres.
 
-Good real-data targets (verified to have FP1+FP2 radio AND laps in OpenF1):
-    2025 spielberg      (radio 12/13, laps 639/664)   <-- default
-    2025 silverstone    (radio 17/9,  laps 506/536)
-    2025 barcelona      (radio  9/9,  laps 515/582)   (OpenF1 name: Catalunya)
+Good real-data targets (verified to have FP1+FP2 laps in OpenF1):
+    2025 spielberg      (laps 639/664)   <-- default
+    2025 silverstone    (laps 506/536)
+    2025 barcelona      (laps 515/582)   (OpenF1 name: Catalunya)
 
-Note: 2026 practice radio is not yet populated in OpenF1, and Monaco/Barcelona
-profiles use OpenF1 names that differ from the live feed (Monte Carlo /
-Catalunya) — pass --openf1-name to override if you target those.
-
-The radio-sentiment layer needs transcript text, which OpenF1 does not provide
-(audio only). Pass --transcribe to transcribe the clips locally with
-faster-whisper (free, no API key) so the radio path also runs on real data.
+Note: Monaco/Barcelona profiles use OpenF1 names that differ from the live feed
+(Monte Carlo / Catalunya) — pass --openf1-name to override if you target those.
 
 Usage:
     python scripts/test_real_practice.py
     python scripts/test_real_practice.py --circuit silverstone --year 2025
     python scripts/test_real_practice.py --circuit barcelona --openf1-name Catalunya
-    python scripts/test_real_practice.py --transcribe --whisper-model base.en
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
-import os
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -52,8 +44,6 @@ from intelligence.practice_analyst import (  # noqa: E402
 )
 from intelligence.schemas import PracticeSignal  # noqa: E402
 from openf1.client import OpenF1Client  # noqa: E402
-from pitwallai.agents.radio_intercept.agent import RadioInterceptAgent  # noqa: E402
-from pitwallai.agents.radio_intercept.vector_store import MockVectorStore  # noqa: E402
 
 _SESSION_REGRESSION_S = 0.3
 _TEAMMATE_GAP_THRESHOLD = 0.5
@@ -62,7 +52,7 @@ _TEAMMATE_GAP_THRESHOLD = 0.5
 def _print_session(label: str, signals: list[PracticeSignal]) -> None:
     print(f"\n=== {label}  ({len(signals)} drivers) ===")
     if not signals:
-        print("  (no radio-derived signals)")
+        print("  (no lap-derived signals)")
         return
     for s in sorted(signals, key=lambda x: x.driver_number):
         flags = ", ".join(s.anomaly_flags) if s.anomaly_flags else "-"
@@ -167,22 +157,7 @@ async def main() -> int:
         default=None,
         help="override OpenF1 circuit_short_name (e.g. Catalunya, 'Monte Carlo')",
     )
-    parser.add_argument(
-        "--transcribe",
-        action="store_true",
-        help="transcribe team-radio .mp3s locally (faster-whisper) so the radio path runs on real data",
-    )
-    parser.add_argument(
-        "--whisper-model",
-        default=None,
-        help="faster-whisper model size (tiny.en | base.en | small.en …); default base.en",
-    )
     args = parser.parse_args()
-
-    if args.transcribe:
-        os.environ["PITWALL_RADIO_TRANSCRIBE"] = "true"
-        if args.whisper_model:
-            os.environ["PITWALL_WHISPER_MODEL"] = args.whisper_model
 
     circuit = get_circuit_profile(args.circuit)
     if circuit is None:
@@ -192,9 +167,6 @@ async def main() -> int:
         circuit = circuit.model_copy(update={"openf1_circuit_name": args.openf1_name})
 
     client = OpenF1Client()
-    # Force the rules backend explicitly: free, no API key, no billed LLM.
-    agent = RadioInterceptAgent(backend="rules")
-    vector_store = MockVectorStore()
 
     print(
         f"Fetching REAL FP1/FP2 from OpenF1 — "
@@ -205,26 +177,17 @@ async def main() -> int:
     print("\n" + "#" * 64 + "\n#  LAP / PACE ANALYSIS (real data)\n" + "#" * 64)
     await _lap_report(client, circuit, args.year)
 
-    # 2) Radio-sentiment layer — driven by team_radio TRANSCRIPTS.
-    #    OpenF1 only exposes recording_url (.mp3), never transcript text, so on
-    #    real data this yields zero signals unless a transcription step is added.
-    print("\n" + "#" * 64 + "\n#  RADIO SENTIMENT ANALYSIS (real data)\n" + "#" * 64)
+    # 2) PracticeSignal layer — synthesised from lap/pace data (no team radio).
+    print("\n" + "#" * 64 + "\n#  PRACTICE SIGNALS (lap-only, real data)\n" + "#" * 64)
     signals = await analyze_practice_weekend(
         client=client,
-        agent=agent,
-        vector_store=vector_store,
         circuit=circuit,
         year=args.year,
         persist=False,
     )
 
     if not signals:
-        print(
-            "\n0 radio signals. OpenF1 team_radio returns audio recording_url only — "
-            "no transcript text — so the rules decoder has nothing to parse.\n"
-            "Re-run with --transcribe to transcribe the .mp3s locally (faster-whisper, "
-            "free) and exercise the radio path on real data."
-        )
+        print("\n0 practice signals — no timed FP1/FP2 laps found in OpenF1 for this weekend.")
         return 0
 
     by_session: dict[str, list[PracticeSignal]] = defaultdict(list)
@@ -235,7 +198,7 @@ async def main() -> int:
         _print_session(label, by_session.get(label, []))
 
     flagged = [s for s in signals if s.anomaly_flags]
-    print(f"\nTotal radio signals: {len(signals)}  |  with anomaly flags: {len(flagged)}")
+    print(f"\nTotal practice signals: {len(signals)}  |  with anomaly flags: {len(flagged)}")
     return 0
 
 

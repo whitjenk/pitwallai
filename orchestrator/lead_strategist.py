@@ -45,8 +45,6 @@ class LeadStrategist:
         return cls(
             AgentRunDependencies(
                 openf1_client=OpenF1Client(),
-                radio_agent=app.state.agent,
-                vector_store=app.state.vector_store,
                 settings=app.state.settings,
             )
         )

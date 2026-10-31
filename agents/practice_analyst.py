@@ -203,8 +203,6 @@ async def run_practice_analyst(
     client = deps.openf1_client
     base_signals = await analyze_practice_weekend(
         client=client,
-        agent=deps.radio_agent,
-        vector_store=deps.vector_store,
         circuit=circuit,
         year=2026,
         persist=True,

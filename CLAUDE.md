@@ -8,6 +8,14 @@ An F1 Fantasy companion delivered over WhatsApp. Python 3.11, FastAPI, Pydantic 
 pydantic-ai, SQLAlchemy (async; SQLite locally, Postgres in prod via Alembic), APScheduler,
 OpenF1 data. Deployed on Railway.
 
+## Direction (read this first)
+PitWallAI is moving from a public WhatsApp product to a **Slack app for one friends' league**.
+Target shape: `core/` (fantasy logic, no I/O beyond the OpenF1 client) → `store/` (one SQLite file)
+→ `slack_app/` (Bolt, Socket Mode). Briefs live in `docs/delegation/briefs/`.
+- Don't extend `whatsapp/`, `agents/`, `orchestrator/`, `scheduler/`, `db/`, or the radio
+  intercept code. They're being removed or replaced. Fix them only if a brief says to.
+- Prefer deleting code to adding abstraction. This is a for-fun app with a handful of users.
+
 ## Environment and tests
 ```bash
 python3.11 -m venv venv && source venv/bin/activate
@@ -23,22 +31,21 @@ python tools/language_linter.py                                                 
 1. **Evidence, not instructions.** User-facing copy states observations, never orders.
    No "box now", "you should", "guaranteed", "use your chip". `tools/language_linter.py`
    enforces this in `whatsapp/`, `intelligence/`, `agents/`, `orchestrator/`.
-2. **Three agents only** (PicksAgent, RaceMonitor, ScorerLearner). Extend a stage or agent
-   before proposing a new top-level agent.
-3. **Version bumps.** Change user-facing or pipeline behaviour → bump `PROMPT_VERSION` /
-   `PIPELINE_VERSION` in `pitwallai/version.py`.
-4. **Schema changes** need an Alembic migration under `alembic/` (Postgres) — see the
-   `locked_lineups` migration for the pattern.
-5. **Privacy.** Anything that stores subscriber data must be covered by DELETE
-   (`tests/test_erase_subscriber.py`) and phone masking (`tests/test_mask_phone_audit.py`).
-6. **Latency.** The rules decode path has an 800 ms P50 contract. Don't add blocking I/O to it.
-7. No affiliation claims with F1 / F1 Fantasy, and no betting or financial framing (see `DISCLAIMER.md`).
+2. **`core/` stays pure.** No imports of the database, Slack, WhatsApp or the old agent layer
+   (`tests/test_core_boundary.py` enforces this once brief 002 lands). Don't change scoring maths
+   unless the brief asks for it.
+3. **Personal data.** Anything new that stores per-user data must be removed by
+   `store.forget_user`, and its test must prove it.
+4. **Slack reply visibility.** Personal info (a user's team, budget, picks) goes in replies only
+   that user can see. League banter (grades, scores, records) goes in the channel.
+5. **Tests never hit the network**: no OpenF1, Slack or LLM calls. Use `tests/fixtures_signal_cache.py` and mocks.
+6. No affiliation claims with F1 / F1 Fantasy, and no betting or financial framing (see `DISCLAIMER.md`).
 
 ## Where things live
-`agents/` weekend agents · `intelligence/` picks, scoring, pages · `whatsapp/` webhook,
-commands, intent · `openf1/` data client + cache · `db/` models · `scheduler/` race calendar jobs ·
-`api/` FastAPI routers · `fantasy/` rules and prices · `pitwallai/agents/radio_intercept/` radio decoder.
-New WhatsApp commands go through `whatsapp/command_router.py` and get a test in `tests/test_command_router.py`.
+New code: `core/` fantasy logic and public API (`core/api.py`) · `store/` SQLite persistence ·
+`slack_app/` Slack handlers (plain async functions, Bolt wiring on top) · `openf1/` data client.
+Legacy, being retired: `whatsapp/`, `agents/`, `orchestrator/`, `scheduler/`, `db/`, `api/`.
+`intelligence/` and `fantasy/` are being moved into `core/`, with shims left at the old paths.
 
 ## How to finish a task
 - Work on a branch named `agent/<brief-number>-<slug>`; one brief = one PR.

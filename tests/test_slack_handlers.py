@@ -11,9 +11,10 @@ from __future__ import annotations
 import pytest
 
 import store
+from core.types import Lineup as CoreLineup
 from core.types import Team as CoreTeam
 from slack_app import handlers
-from slack_app.reply import EPHEMERAL
+from slack_app.reply import EPHEMERAL, IN_CHANNEL
 from store import db as store_db
 
 _GOOD_TEAM = "team HAM LEC NOR PIA VER MCL FER budget 2.5 transfers 2"
@@ -170,6 +171,156 @@ async def test_forget_erases_team(tmp_db):
     reply = await _call("forget")
     assert reply.visibility == EPHEMERAL
     assert await store.get_team("U1") is None
+
+
+# ── league commands (brief 007): grade / lock / score / record ────────────────
+_LINEUP = "HAM LEC ANT RUS VER MER FER captain HAM 3x"
+
+# A model pick with no HAM, so a HAM-containing lineup can be scored as beating
+# it deterministically in the fakes below.
+_FAKE_PROJECTION = {
+    "race_key": "x",
+    "top_drivers": ["LEC", "NOR", "PIA", "RUS", "ANT"],
+    "top_constructors": ["MCL", "FER"],
+    "captain": "LEC",
+}
+
+
+async def _fake_project_race(race_key, client):
+    return dict(_FAKE_PROJECTION, race_key=race_key)
+
+
+async def _fake_grade(lineup, race_key, client):
+    _fake_grade.seen = lineup  # type: ignore[attr-defined]
+    return {
+        "race_key": race_key,
+        "driver_points": {d: 20.0 for d in lineup.drivers},
+        "constructor_points": {},
+        "captain": lineup.captain,
+        "captain_bonus": 18.0,
+        "projected_total": 140.0,
+        "model_top_drivers": ["LEC", "NOR", "PIA", "VER", "HAM"],
+        "drivers_matching_model": [d for d in lineup.drivers if d in {"LEC", "VER", "HAM"}],
+    }
+
+
+async def _fake_score(lineup, race_key, client):
+    # A HAM lineup outscores the HAM-less model pick, so `score`/`record` have a
+    # deterministic winner without any network.
+    total = 90 if "HAM" in lineup.drivers else 70
+    return {
+        "race_key": race_key,
+        "total": total,
+        "driver_points": {d: total / max(len(lineup.drivers), 1) for d in lineup.drivers},
+        "constructor_points": {},
+        "captain": lineup.captain,
+        "captain_bonus": 12,
+        "positions": {"HAM": 1, "VER": 2},
+        "perfect": {"total": 120, "drivers": ["VER", "HAM"], "constructors": ["MER", "FER"]},
+    }
+
+
+async def test_grade_posts_to_channel_with_chip_and_captain(tmp_db, monkeypatch):
+    await store.init_db()
+    monkeypatch.setattr(handlers, "grade_lineup", _fake_grade)
+    reply = await _call(f"grade {_LINEUP}")
+    assert reply.visibility == IN_CHANNEL
+    # The handler parsed the chip and captain out of the free text.
+    seen = _fake_grade.seen  # type: ignore[attr-defined]
+    assert isinstance(seen, CoreLineup)
+    assert seen.captain == "HAM"
+    assert seen.chip == "extra_drs"  # "3x"
+    assert seen.drivers == ["HAM", "LEC", "ANT", "RUS", "VER"]
+    assert "graded" in reply.text.lower()
+
+
+async def test_grade_without_lineup_hints_privately(tmp_db):
+    await store.init_db()
+    reply = await _call("grade")
+    assert reply.visibility == EPHEMERAL  # an input error is personal
+    assert "lineup" in reply.text.lower()
+
+
+async def test_lock_is_private_plus_a_channel_line_that_hides_the_lineup(tmp_db, monkeypatch):
+    await store.init_db()
+    monkeypatch.setattr(handlers, "project_race", _fake_project_race)
+    replies = await _call(f"lock {_LINEUP}")
+    assert isinstance(replies, list) and len(replies) == 2
+
+    confirm, channel = replies
+    # Confirmation is private and shows the lineup back to the user.
+    assert confirm.visibility == EPHEMERAL
+    assert "HAM" in confirm.text and "Locked" in confirm.text
+    # The channel line is public, names the user, and reveals no picks.
+    assert channel.visibility == IN_CHANNEL
+    assert "<@U1>" in channel.text and "locked in" in channel.text.lower()
+    for code in ("HAM", "LEC", "ANT", "RUS", "VER", "MER", "FER"):
+        assert code not in channel.text
+
+
+async def test_lock_twice_replaces(tmp_db, monkeypatch):
+    await store.init_db()
+    monkeypatch.setattr(handlers, "project_race", _fake_project_race)
+    await _call(f"lock {_LINEUP}")
+    race_key = handlers._next_race_key()
+    first = await store.get_locked("U1", race_key)
+    assert first is not None and first.drivers == ["HAM", "LEC", "ANT", "RUS", "VER"]
+
+    # Lock a different squad for the same race — it replaces, not duplicates.
+    await _call("lock NOR PIA ALO SAI VER MCL RBR captain NOR")
+    locked = [
+        lk
+        for w in handlers.race_calendar()
+        if (lk := await store.get_locked("U1", w.race_key)) is not None
+    ]
+    assert len(locked) == 1
+    assert locked[0].drivers == ["NOR", "PIA", "ALO", "SAI", "VER"]
+
+
+async def test_score_with_nothing_locked_hints(tmp_db):
+    await store.init_db()
+    reply = await _call("score")
+    assert reply.visibility == EPHEMERAL  # personal: nothing to post publicly
+    assert "lock" in reply.text.lower()
+
+
+async def test_score_posts_result_with_bot_and_perfect(tmp_db, monkeypatch):
+    await store.init_db()
+    monkeypatch.setattr(handlers, "project_race", _fake_project_race)
+    monkeypatch.setattr(handlers, "score_lineup", _fake_score)
+    await _call(f"lock {_LINEUP}")
+
+    reply = await _call("score")
+    assert reply.visibility == IN_CHANNEL
+    assert "90" in reply.text  # your total
+    assert "70" in reply.text  # the bot's total
+    assert "120" in reply.text  # the perfect lineup's total
+    assert "beat me" in reply.text.lower()
+
+
+async def test_record_with_zero_races_hints(tmp_db):
+    await store.init_db()
+    reply = await _call("record")
+    assert reply.visibility == EPHEMERAL  # nothing to post to the channel yet
+    assert "lock" in reply.text.lower()
+
+
+async def test_record_tallies_wins_against_the_bot(tmp_db, monkeypatch):
+    await store.init_db()
+    monkeypatch.setattr(handlers, "project_race", _fake_project_race)
+    monkeypatch.setattr(handlers, "score_lineup", _fake_score)
+    await _call(f"lock {_LINEUP}")
+
+    reply = await _call("record")
+    assert reply.visibility == IN_CHANNEL
+    assert "1-0" in reply.text  # one race locked and won against the bot
+
+
+async def test_help_lists_league_commands():
+    reply = await _call("help")
+    assert reply.visibility == EPHEMERAL
+    for cmd in ("grade", "lock", "score", "record"):
+        assert cmd in reply.text
 
 
 def _fake_pick_output():

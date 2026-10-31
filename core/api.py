@@ -17,6 +17,7 @@ from core.calendar import (
 from core.chip_planner import ChipPlan, generate_chip_plan
 from core.circuits import CircuitProfile, get_circuit_profile
 from core.lap_signals import build_lap_only_signals
+from core.lineup_grader import perfect_lineup_from_positions
 from core.pick_generator import (
     _constructor_drivers,
     _driver_score,
@@ -246,9 +247,12 @@ async def score_lineup(lineup: Lineup, race_key: str, client: OpenF1Client) -> d
     """Actual fantasy points for a lineup from the finished race, or ``None``.
 
     ``None`` when the race hasn't been classified yet (no result from OpenF1).
+    Also returns the race's finishing ``positions`` (code -> finishing slot, or
+    ``None`` for a DNF/DNS/DSQ) and the hindsight-``perfect`` lineup for the
+    race, so a caller can show a lineup against the best that was on the table.
 
     >>> await score_lineup(lineup, "2026_monaco", client)
-    {'race_key': '2026_monaco', 'total': 112, ...}
+    {'race_key': '2026_monaco', 'total': 112, 'perfect': {...}, ...}
     """
     weekend = get_race_weekend(race_key)
     parsed = parse_race_key(race_key)
@@ -301,4 +305,6 @@ async def score_lineup(lineup: Lineup, race_key: str, client: OpenF1Client) -> d
         "constructor_points": constructor_points,
         "captain": captain,
         "captain_bonus": cap_bonus,
+        "positions": pos_by_code,
+        "perfect": perfect_lineup_from_positions(pos_by_code),
     }

@@ -36,13 +36,17 @@ def build_app():
     @app.command("/pitwall")
     async def pitwall_command(ack, command, respond):  # type: ignore[no-untyped-def]
         await ack()
-        reply = await handle(
+        result = await handle(
             text=command.get("text", ""),
             user_id=command["user_id"],
             team_id=command.get("team_id", ""),
             display_name=command.get("user_name"),
         )
-        await respond(text=reply.text, response_type=reply.visibility)
+        # A handler returns one Reply, or several (e.g. `lock`: a private
+        # confirmation plus a public one-liner). Post each in order.
+        replies = result if isinstance(result, list) else [result]
+        for reply in replies:
+            await respond(text=reply.text, response_type=reply.visibility)
 
     return app
 

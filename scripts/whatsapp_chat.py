@@ -150,9 +150,6 @@ async def _ingest_openf1_practice(race_key: str) -> int:
     from circuits.profiles import get_circuit_profile
     from intelligence.practice_analyst import analyze_practice_weekend
     from openf1.client import OpenF1Client
-    from pitwallai.agents.radio_intercept.agent import RadioInterceptAgent
-    from pitwallai.llm.settings import PitWallSettings
-    from pitwallai.agents.radio_intercept.vector_store import MockVectorStore
     from scheduler.calendar import get_race_weekend, profile_circuit_key
 
     weekend = get_race_weekend(race_key)
@@ -161,27 +158,21 @@ async def _ingest_openf1_practice(race_key: str) -> int:
     circuit = get_circuit_profile(profile_circuit_key(weekend.circuit_key))
     if circuit is None:
         return 0
-    settings = PitWallSettings.from_env()
     signals = await analyze_practice_weekend(
         client=OpenF1Client(),
-        agent=RadioInterceptAgent(settings=settings),
-        vector_store=MockVectorStore(embedding_cache_size=32),
         circuit=circuit,
         year=2026,
         persist=True,
     )
     if signals:
-        radio = any(s.mechanical_flags or not s.raw_evidence[0].startswith("lap-only") for s in signals)
         sessions = ", ".join(sorted({s.session for s in signals}))
-        kind = "radio+laps" if radio else "lap-only (no radio published yet)"
-        print(f"  ✅ Live OpenF1 FP ingest: {len(signals)} signals for {race_key} [{sessions}] — {kind}")
+        print(f"  ✅ Live OpenF1 FP ingest: {len(signals)} lap-only signals for {race_key} [{sessions}]")
     return len(signals)
 
 
 async def _seed_sim_practice_data() -> None:
-    """Load FP1/FP2 signals into the sim DB when empty (rehearsal seed + OpenF1)."""
+    """Load FP1/FP2 lap-only signals into the sim DB when empty (OpenF1)."""
     from intelligence.repository import load_practice_signals_by_circuit
-    from intelligence.rehearsal_cache_seed import seed_rehearsal_practice_signals_if_needed
     from scheduler.calendar import get_race_weekend, profile_circuit_key
     from scheduler.context import get_current_race_key
 
@@ -189,7 +180,7 @@ async def _seed_sim_practice_data() -> None:
     weekend = get_race_weekend(race_key)
     profile_key = profile_circuit_key(weekend.circuit_key) if weekend else None
 
-    # Live mode: pull REAL OpenF1 FP1/FP2 for this weekend, bypassing the mock.
+    # Live mode: pull REAL OpenF1 FP1/FP2 for this weekend.
     if _sim_live_practice() and profile_key:
         existing = await load_practice_signals_by_circuit(profile_key)
         is_real = existing and all(
@@ -202,13 +193,9 @@ async def _seed_sim_practice_data() -> None:
         try:
             if await _ingest_openf1_practice(race_key):
                 return
-            print(f"  ⚠️  No live OpenF1 practice data yet for {race_key}; using mock.")
+            print(f"  ⚠️  No live OpenF1 practice data yet for {race_key}.")
         except Exception as exc:
-            print(f"  ⚠️  Live OpenF1 ingest failed ({exc}); using mock.")
-
-    seeded = await seed_rehearsal_practice_signals_if_needed()
-    if seeded:
-        print(f"  Rehearsal practice seed: {seeded} drivers (monaco demo)")
+            print(f"  ⚠️  Live OpenF1 ingest failed ({exc}); no practice data.")
 
     if weekend is None or profile_key is None:
         return

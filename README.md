@@ -11,7 +11,7 @@ PitWallAI is an open-source F1 fantasy companion on WhatsApp. Every Sunday it lo
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![CI](https://github.com/whitjenk/f1-tactical-intelligence-hive/actions/workflows/ci.yml/badge.svg)](https://github.com/whitjenk/f1-tactical-intelligence-hive/actions/workflows/ci.yml)
-[![OpenF1](https://img.shields.io/badge/OpenF1-WebSocket-red)](https://openf1.org/)
+[![OpenF1](https://img.shields.io/badge/OpenF1-REST-red)](https://openf1.org/)
 
 ---
 
@@ -26,7 +26,7 @@ Backed by **three agents** that run across the weekend (the pre-lock pipeline is
 **PicksAgent (Thursday → Saturday)** — three stages, one versioned pipeline:
 
 - **Thursday (context)** — circuit history, championship pressure per driver, weather forecast, FIA directives.
-- **Friday (practice)** — FP1/FP2 telemetry, team radio decode, statistical anomalies (e.g. a driver 0.8s off FP1 pace on used rubber).
+- **Friday (practice)** — FP1/FP2 lap pace and statistical anomalies (e.g. a driver 0.8s off teammate pace, or slower in FP2 than FP1).
 - **Saturday (quali)** — your team, budget, and qualifying result; models legal transfer combinations and sends the swap that pencils out.
 
 **Sunday (race)** — **RaceMonitor** watches the OpenF1 stream and timestamps every strategic moment as PitWallAI sees it: safety cars, retirements, pit windows, weather flips. The picks are already locked — the value here is *receipts*. Each call-out is saved with its source-signal time and our decode time so you can show your league chat afterward what we saw and when.
@@ -55,20 +55,25 @@ Picks are scored against **Grand Prix race results** using the official F1 Fanta
 
 ## Run it yourself
 
-No API key required for the Monaco rehearsal demo:
+No API key required to boot the server locally:
 
 ```bash
 git clone https://github.com/whitjenk/f1-tactical-intelligence-hive.git
 cd f1-tactical-intelligence-hive
 python3.11 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
-python main.py --mode rehearsal --speed 3.0
-# Dashboard → http://localhost:8000/dashboard
+python main.py
+# PitWallAI → http://localhost:8000/
 ```
 
-What you'll see: Lap 37, Ferrari boxes. PitWallAI logs the pit-window event with two timestamps — the OpenF1 source signal and our decode time — so the Sunday-night recap can show your league chat exactly what we saw, when. Lap 38, Norris reports his fronts are gone — CRITICAL tire complaint, decoded by the rules path in milliseconds and added to the recap.
+To try the WhatsApp commands without a phone number, use the terminal simulator:
 
-*The full rehearsal runs on local mock data. No live connection needed.*
+```bash
+python scripts/whatsapp_chat.py
+# then type: PICKS
+```
+
+Picks are built from real OpenF1 FP1/FP2 lap data — no live WhatsApp connection needed.
 
 ---
 
@@ -89,19 +94,18 @@ Thursday–Saturday (PicksAgent)          Sunday              Post-race
                   WhatsApp → Fan
 ```
 
-The radio pipeline (practice + live race) uses the **Radio Intercept Decoder** — rules-first with optional LLM escalation, sub-100ms on the default path:
+Practice signals come from real OpenF1 FP1/FP2 lap data (OpenF1 never publishes
+radio transcripts), synthesised into a `PracticeSignal` per driver per session:
 
 ```
-OpenF1 WebSocket → asyncio.Queue → RadioInterceptDecoder
-  ├── rules path    ~5–80ms   vector vote + pattern match
-  └── LLM path      ~300ms    Pydantic AI + ChromaDB retrieval
+OpenF1 REST (/v1/laps, /v1/drivers) → build_lap_only_signals
         │
         ▼
-DecodedTransmission (Pydantic v2, frozen)
-  ├── decoded_intent: RadioIntent
-  ├── strategic_signal: StrategicSignal
-  ├── evidence_summary: str     ← observation only, never directive
-  └── processing_latency_ms: float
+PracticeSignal (Pydantic v2)
+  ├── pace_satisfaction: float   ← gap to session leader
+  ├── setup_sentiment: float     ← pace standing + FP1→FP2 improvement
+  ├── tire_confidence: float     ← timed-lap count vs the field
+  └── anomaly_flags: list[str]   ← teammate_gap_*, session_regression, short_long_run_count
 ```
 
 → Deeper architecture, CLI, tests, and data-science notes: **[TECHNICAL.md](TECHNICAL.md)**
@@ -110,11 +114,9 @@ DecodedTransmission (Pydantic v2, frozen)
 
 ## Design principles
 
-**Evidence, not instructions.** The output field is `evidence_summary`, not `recommended_action`. The system tells you what it heard and what history says about it. You decide. A fan who second-guesses their read because an AI gave a conflicting instruction has lost something. That is not a tool — that is a liability.
+**Evidence, not instructions.** Signals carry a `raw_evidence` trail (e.g. "lap-only: best 78.4s, +0.3s to leader"), not a `recommended_action`. The system tells you what it saw and what history says about it. You decide. A fan who second-guesses their read because an AI gave a conflicting instruction has lost something. That is not a tool — that is a liability.
 
-**Human confirmation gate.** Any CompetitorIntel object carries a ConfirmationState: UNCONFIRMED → ACKNOWLEDGED → ACTED_ON. The pipeline earns trust through provenance — every output shows the evidence that drove it.
-
-**800ms is the contract.** The value of a decoded signal is in the window before it's confirmed on broadcast. After that, it's noise. Every DecodedTransmission carries an `exceeds_latency_target` flag. `bench.py` profiles each pipeline stage independently.
+**Provenance over assertion.** Every pick and recap shows the evidence that drove it — lap gaps, anomaly flags, qualifying grid — so you can check the reasoning rather than take it on faith.
 
 ---
 
@@ -125,10 +127,8 @@ DecodedTransmission (Pydantic v2, frozen)
 | Agent orchestration | PydanticAI (model-agnostic) |
 | Default LLM | Gemini 2.0 Flash via Vertex AI |
 | BYOK | Claude / GPT-4o-mini / Ollama |
-| Vector store | ChromaDB |
-| Embeddings | sentence-transformers (all-MiniLM-L6-v2) |
-| Live data | OpenF1 API (WebSocket + REST) |
-| Async runtime | asyncio + websockets |
+| Live data | OpenF1 API (REST) |
+| Async runtime | asyncio |
 | API server | FastAPI + uvicorn |
 | Database | Postgres (Railway) |
 | Delivery | WhatsApp Cloud API |
@@ -143,7 +143,7 @@ Contributions are open. The **3-agent** topology (`PicksAgent`, `RaceMonitor`, `
 
 PitWallAI is an independent open-source fan project. It is **not** affiliated with, endorsed by, or sponsored by Formula One Licensing B.V., the FIA, or the official [F1 Fantasy](https://fantasy.formula1.com/) game. F1, Formula 1, and related marks are trademarks of their respective owners.
 
-**AI-generated intelligence.** Picks, recaps, radio decoding, and other outputs may use rules engines, statistical models, and large language models. They can be wrong, incomplete, or out of date — especially when data is missing, sessions change, or the official game applies penalties after the fact. PitWallAI is **not** financial or betting advice. You are responsible for your own fantasy decisions; always verify lineup, budget, transfers, and lock time in the official F1 Fantasy app.
+**AI-generated intelligence.** Picks, recaps, and other outputs may use rules engines, statistical models, and large language models. They can be wrong, incomplete, or out of date — especially when data is missing, sessions change, or the official game applies penalties after the fact. PitWallAI is **not** financial or betting advice. You are responsible for your own fantasy decisions; always verify lineup, budget, transfers, and lock time in the official F1 Fantasy app.
 
 Fantasy scoring and prices in this repo are simplified approximations of published game rules — always confirm transfers and points in the official app before lock.
 

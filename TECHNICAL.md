@@ -1,6 +1,6 @@
 # PitWallAI — Technical Reference
 
-Developer-facing documentation for the radio intercept pipeline, WhatsApp integration, testing, and deployment. For the product overview, see [README.md](README.md).
+Developer-facing documentation for the weekend picks pipeline, WhatsApp integration, testing, and deployment. For the product overview, see [README.md](README.md).
 
 ---
 
@@ -8,8 +8,6 @@ Developer-facing documentation for the radio intercept pipeline, WhatsApp integr
 
 | Component | Status |
 |-----------|--------|
-| Radio Intercept Decoder + dashboard | Shipped |
-| Monaco rehearsal scenario | Shipped |
 | WhatsApp webhook, command router, `send_message` | Shipped |
 | Postgres subscriber schema + Fernet BYOK | Shipped |
 | **3-agent weekend pipeline** (`PIPELINE_VERSION=3-agent-v1`) | Shipped |
@@ -27,38 +25,29 @@ Developer-facing documentation for the radio intercept pipeline, WhatsApp integr
 
 ---
 
-## Full pipeline (queue depths and fan-out)
+## Full pipeline
 
-*For strategists: radio in, structured intelligence out, under 800ms. For engineers: OpenF1 WebSocket → asyncio queue → rules-first decoder with ChromaDB retrieval (optional Pydantic AI escalation) → validated struct → FastAPI WebSocket → React dashboard → WhatsApp.*
+*For engineers: OpenF1 REST (laps + drivers) → lap-only practice signals → pick generator → FastAPI `/api/picks` + WhatsApp broadcast.*
 
 ```
-OpenF1 WebSocket  (/v1/team_radio)
+OpenF1 REST  (/v1/laps, /v1/drivers)
         │
         ▼
-  asyncio.Queue  ←── backpressure guard (max depth 50)
+  build_lap_only_signals  (intelligence/lap_signals.py)
         │
         ▼
-Radio Intercept Decoder
-  ├── rules path (default)     →  vector vote + pattern match  (~5–80ms)
-  └── optional LLM path      →  Pydantic AI + provider tool calls
-        ├── query_historical_context  →  ChromaDB  (sentence-transformers embeddings)
-        ├── lookup_jargon             →  40-term F1 glossary
-        └── get_driver_context        →  driver communication profiles
+  PracticeSignal  (Pydantic v2)
+  ├── pace_satisfaction: float   ← gap to session leader
+  ├── setup_sentiment: float     ← pace standing + FP1→FP2 improvement
+  ├── tire_confidence: float     ← timed-lap count vs the field
+  └── anomaly_flags: list[str]   ← teammate_gap_*, session_regression, short_long_run_count
         │
         ▼
-  DecodedTransmission  (Pydantic v2, frozen)
-  ├── decoded_intent: RadioIntent
-  ├── strategic_signal: StrategicSignal
-  ├── urgency_level: UrgencyLevel
-  ├── competitor_intel: CompetitorIntel | None  ← requires human confirmation
-  ├── evidence_summary: str | None              ← observation, never instruction
-  └── processing_latency_ms: float
+  pick generator (PATH A/B)  →  PickOutput
         │
-        ├──► FastAPI WebSocket  →  React dashboard
-        └──► WhatsApp broadcast (subscriber fan-out foundation)
+        ├──► FastAPI /api/picks
+        └──► WhatsApp broadcast (subscriber fan-out)
 ```
-
-Per-message `AgentDependencies` are **not** mutated in the hot path — `dataclasses.replace()` passes an isolated `session_key` per decode to avoid races between producer and consumer coroutines.
 
 ---
 
@@ -66,31 +55,23 @@ Per-message `AgentDependencies` are **not** mutated in the hot path — `datacla
 
 ### Evidence, not instructions
 
-The output field is called `evidence_summary`, not `recommended_action`. It is a factual observation connecting what the system heard to historical precedent: *"Transcript matches 3 of 4 pre-box indicators observed at Bahrain 2023 lap 31. Gap to leader is 2.1s and closing."* Never: *"Box Lando now."*
+Signals carry a factual `raw_evidence` trail connecting an observation to its source — *"lap-only: best 78.4s (+0.3s to leader), 9 timed laps in FP2"* — never a directive like *"Box Lando now."*
 
-The strategist (or fan) decides. The system informs. Post-LLM, `_sanitise_evidence_summary()` strips directive language at the decoder boundary so schema-valid but badly worded model output cannot reach clients.
+The strategist (or fan) decides; the system informs. On the optional LLM path (explanation cards), `sanitise_evidence_summary()` (`pitwallai/llm/sanitize.py`) strips directive language so schema-valid but badly worded model output cannot reach clients.
 
-### Human confirmation gate
+### Provenance over assertion
 
-Any `CompetitorIntel` carries `ConfirmationState`: `UNCONFIRMED → ACKNOWLEDGED → ACTED_ON`. Unconfirmed intel renders behind an amber gate on the dashboard until acknowledged. Every intel card shows the evidence transcript and retrieval provenance (`context_doc_ids` on the decode).
-
-### 800ms is the contract
-
-The value of a decoded signal is in the window before the call is confirmed on broadcast. `exceeds_latency_target` is set when `processing_latency_ms > 800`. The dashboard latency gauge and `bench.py` stage breakdown (embedding, vector query, rules/LLM inference, validation) make regressions diagnosable.
-
-**Targets:** P50 end-to-end &lt; 800ms, P95 &lt; 1200ms on the rules path (see `latency_report.json` from `python bench.py --runs 20 --backend rules`).
+Every pick and recap shows the evidence that drove it — lap gaps, anomaly flags, qualifying grid — so the reasoning is checkable rather than taken on faith.
 
 ---
 
 ## For F1 data scientists
 
-The system ingests from OpenF1's `/v1/team_radio` WebSocket endpoint. Rehearsal mode uses a hardcoded scenario with `session_key=9158` (Monaco 2024): 12 sequential events across laps 34–40. The vector store is ChromaDB in-memory, seeded with 22 hand-crafted historical transcripts. The intended production path is PostgreSQL + pgvector with real historical radio indexed from past sessions via FastF1.
+Practice signals are synthesised from real OpenF1 lap data (`/v1/laps` + `/v1/drivers`) by `intelligence/lap_signals.py` — OpenF1 never publishes team-radio transcripts, so there is no radio-decode path. Per driver per session it derives `pace_satisfaction` (gap to session leader), `setup_sentiment` (pace standing nudged by FP1→FP2 improvement), `tire_confidence` (timed-lap count vs the field) and `anomaly_flags` (teammate gaps, FP1→FP2 regression, short long-run counts) from the real `/drivers` roster (no hardcoded driver numbers).
 
-Transcripts are embedded using `sentence-transformers` (`all-MiniLM-L6-v2`). On the default **rules** path, retrieval runs on every decode via vector similarity and weighted intent voting. On the optional **LLM** path, the agent calls `query_historical_context` as an explicit tool — retrieval sits inside the model's reasoning chain, not as a blind pre-fetch.
+The LLM is used only for the optional explanation-card layer. Hard budget caps (`PITWALL_LLM_BUDGET_ACK`, per-session call limits, daily spend ceiling) prevent runaway API cost.
 
-Set `PITWALL_DECODE_BACKEND=hybrid` to escalate only low-confidence decodes. Hard budget caps (`PITWALL_LLM_BUDGET_ACK`, per-session call limits, daily spend ceiling) prevent runaway API cost during a race.
-
-**LLM providers** (same prompt and `DecodedTransmission` schema for all):
+**LLM providers** (shared factory and output schema):
 
 | Provider | Config | Default model |
 |----------|--------|----------------|
@@ -99,7 +80,7 @@ Set `PITWALL_DECODE_BACKEND=hybrid` to escalate only low-confidence decodes. Har
 | `openai` | `PITWALL_OPENAI_API_KEY` | `gpt-4o-mini` |
 | `ollama` | `PITWALL_OLLAMA_BASE_URL` | `llama3.2` |
 
-Factory: `pitwallai/agents/radio_intercept/model_factory.py` → `get_model(provider, api_key)`.
+Factory: `pitwallai/llm/model_factory.py` → `get_model(provider, api_key)`.
 
 Weekend orchestration uses **three named agents** (`agents/__init__.py`, `agents/picks_agent.py`):
 
@@ -111,7 +92,7 @@ Weekend orchestration uses **three named agents** (`agents/__init__.py`, `agents
 
 `LeadStrategist` (`orchestrator/lead_strategist.py`) coordinates all three. Bump `PIPELINE_VERSION` in `pitwallai/version.py` when topology or stage behaviour changes.
 
-Radio decode uses typed `AgentDependencies`, `RunContext`-scoped tools, Pydantic v2 output, `asyncio` throughout. Additional consumers can subscribe to the decoder fan-out queue without modifying the consumer.
+Agents use typed `AgentRunDependencies`, Pydantic v2 output, and `asyncio` throughout.
 
 ---
 
@@ -154,8 +135,7 @@ Settings load via `whatsapp/settings.py` (`WhatsAppSettings`, pydantic-settings)
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--mode` | `rehearsal` | `live` = OpenF1 WebSocket; `rehearsal` = Monaco script |
-| `--speed` | `3.0` | Rehearsal playback multiplier (`5.0` ≈ 90s total) |
+| `--mode` | `rehearsal` | `live` enforces full WhatsApp config; otherwise local/non-live |
 | `--port` | `8000` | HTTP port |
 | `--decode-backend` | `rules` | `rules`, `hybrid`, or `llm` |
 | `--llm-model` | *(env)* | Override model name |
@@ -198,16 +178,6 @@ curl "http://localhost:8000/webhook?hub.mode=subscribe&hub.verify_token=YOUR_TOK
 
 ---
 
-## The dashboard
-
-Single HTML file (`dashboard.jsx`), no build step. Three columns:
-
-- **Left** — live transmission feed (team colors, intent badges, jargon decode, latency)
-- **Center** — strategic signals, competitor intel (amber gate until acknowledged), session timeline
-- **Right** — Monaco track map, latency gauge, intent/urgency charts, rehearsal controls
-
----
-
 ## Fantasy picks API
 
 Endpoints (included on the main FastAPI app):
@@ -231,7 +201,7 @@ The pipeline (`intelligence/picks_pipeline.py`) runs FP1/FP2 practice analysis �
 **Scheduler** (background asyncio task on startup when `PITWALL_PICKS_AUTO=true`, default on in `live` mode):
 
 - `PITWALL_PICKS_INTERVAL_SECONDS` — default `1800` (30 min)
-- `PITWALL_CIRCUIT_KEY` — force a circuit (e.g. `monaco` in rehearsal)
+- `PITWALL_CIRCUIT_KEY` — force a circuit (e.g. `monaco`)
 - `PITWALL_RACE_YEAR` — default `2026`
 
 Active weekend detection uses OpenF1 Race sessions nearest to “now”, unless `PITWALL_CIRCUIT_KEY` is set.
@@ -286,26 +256,19 @@ Subscriber prefs: `live_alerts`, `cadence_preference` (`FULL` / `RACE_DAY_ONLY`)
 
 ## Testing
 
-Three layers — run in order:
+Run the whole suite (no server, no network, LLM providers mocked):
 
 ```bash
-# No server, no LLM — async runtime + error isolation (~2s)
-pytest tests/test_resilience.py -v
-
-# Monaco pipeline contracts (~2s, rules backend)
-pytest tests/test_e2e.py -v
-
-# Mocked LLM provider contracts (~2s)
-pytest tests/test_llm_contracts.py -v
-
-# Requires running server — multi-client WebSocket fan-out (~90s)
-pytest tests/test_ws_stress.py -v
-
-# Stage timings → latency_report.json
-python bench.py --runs 20 --backend rules
+PYTHONPATH=. PITWALL_DECODE_BACKEND=rules pytest -q
 ```
 
-**CI** (`.github/workflows/ci.yml`): Python 3.11, `test_e2e` + `test_resilience` + `test_llm_contracts` only. `test_ws_stress` excluded (needs live server).
+Evidence-language lint (user-facing copy states observations, never directives):
+
+```bash
+python tools/language_linter.py
+```
+
+**CI** (`.github/workflows/ci.yml`): Python 3.11 — evidence-language lint + the full test suite.
 
 ---
 
@@ -323,9 +286,7 @@ Set `DATABASE_URL`, WhatsApp vars, and `PITWALL_MODE` in the Railway dashboard. 
 
 **Spend kill-switch:** `PITWALL_MONTHLY_SPEND_CAP_USD` (default 75) meters LLM, vision, and WhatsApp outbound into `spend_events`. At 100%: rules-only LLM, vision blocked, new `SUBSCRIBE` paused. See `/api/budget` → `platform_spend`.
 
-**Subscriber rehearsal:** After first `TEAM` confirm (next race >5 days away), `onboarding/rehearsal.py` sends a compressed Monaco 2024 weekend using OpenF1 session `9158` and the same message formatters as production. Set `PITWALL_REHEARSAL_FAST=1` for ~25s spacing in dev. Texting any command pauses rehearsal pacing so replies take priority.
-
-**PICKS command:** Resolved via `whatsapp/app_runtime.get_pick_runtime()` — registered FastAPI app first, then scheduler context, then rules-only lazy runtime if embeddings are available.
+**PICKS command:** Resolved via `whatsapp/app_runtime.get_pick_runtime()` — registered FastAPI app first, then scheduler context, then a rules-only lazy runtime.
 
 ---
 
@@ -333,20 +294,17 @@ Set `DATABASE_URL`, WhatsApp vars, and `PITWALL_MODE` in the Railway dashboard. 
 
 ```
 agents/                             # PicksAgent, RaceMonitor, ScorerLearner (+ stage modules)
-pitwallai/agents/radio_intercept/   # Radio Intercept Decoder (separate from weekend agents)
 orchestrator/                       # LeadStrategist, RaceContext store
-intelligence/                       # pick generator, vision extractors, repository, cache health
+intelligence/                       # pick generator, lap signals, vision extractors, repository
 openf1/                             # REST client + Postgres cache
 circuits/                           # static circuit profiles (startup-injected)
-api/                                # FastAPI app factory, picks router, rehearsal
+api/                                # FastAPI app factory, picks router, share pages
 whatsapp/                           # webhook, inbound, command_router, sender, media
 db/                                 # ORM models, migrate, Fernet
 scheduler/                          # APScheduler jobs → LeadStrategist
 main.py                             # ASGI entry (uvicorn main:app)
-dashboard.jsx                       # strategist / demo UI
-bench.py                            # latency benchmark
 scripts/whatsapp_chat.py            # terminal command simulator
-tests/                              # e2e, resilience, integration image flow, erase audit
+tests/                              # pipeline, integration image flow, erase audit
 PRIVACY.md                          # data handling + DELETE scope (app review)
 ```
 

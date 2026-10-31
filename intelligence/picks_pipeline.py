@@ -22,9 +22,7 @@ from intelligence.explanation_attach import attach_explanations_from_db
 from intelligence.repository import get_fantasy_team
 from intelligence.schemas import PickGeneratorInput, PickOutput
 from openf1.client import OpenF1Client
-from pitwallai.agents.radio_intercept.agent import RadioInterceptAgent
 from pitwallai.llm.settings import PitWallSettings
-from pitwallai.agents.radio_intercept.vector_store import MockVectorStore
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,8 +45,6 @@ def _generated_by_label(settings: PitWallSettings) -> str:
 async def run_picks_pipeline(
     *,
     client: OpenF1Client,
-    agent: RadioInterceptAgent,
-    vector_store: MockVectorStore,
     settings: PitWallSettings,
     ctx: OrchestratorContext | None = None,
     year: int | None = None,
@@ -63,8 +59,6 @@ async def run_picks_pipeline(
 
     Args:
         client: OpenF1 REST client.
-        agent: Radio intercept agent for practice radio decode.
-        vector_store: Seeded vector store for decode context.
         settings: PitWall settings (provider label for output).
         ctx: Orchestrator context; loaded from startup if omitted.
         year: Championship year override.
@@ -93,8 +87,6 @@ async def run_picks_pipeline(
 
     practice_signals = await analyze_practice_weekend(
         client=client,
-        agent=agent,
-        vector_store=vector_store,
         circuit=circuit,
         year=active.year,
         persist=persist_practice,

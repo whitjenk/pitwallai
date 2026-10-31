@@ -5,11 +5,6 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-  # Live-server websocket stress test runs on demand and on a weekly schedule,
-  # not on every PR/push (it boots a real uvicorn and is timing-sensitive).
-  workflow_dispatch:
-  schedule:
-    - cron: "0 6 * * 1" # Mondays 06:00 UTC
 
 jobs:
   language-lint:
@@ -42,66 +37,10 @@ jobs:
           cache: pip
           cache-dependency-path: requirements.txt
 
-      - name: Cache Hugging Face models
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/huggingface
-            ~/.cache/torch
-          key: hf-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
-          restore-keys: |
-            hf-${{ runner.os }}-
-
       - name: Install dependencies
         run: pip install -r requirements.txt
-
-      - name: Pre-download embedding model
-        run: |
-          python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
-        env:
-          HF_HUB_DISABLE_TELEMETRY: "1"
 
       - name: Run full test suite
-        # Whole suite gates the build. The live-server websocket stress test
-        # boots a uvicorn subprocess and runs in the separate, non-gating
-        # ws-stress job (manual / scheduled only).
-        run: PYTHONPATH=. pytest --ignore=tests/test_ws_stress.py -q
+        run: PYTHONPATH=. pytest -q
         env:
-          HF_HUB_DISABLE_TELEMETRY: "1"
-          PITWALL_DECODE_BACKEND: rules
-
-  ws-stress:
-    runs-on: ubuntu-latest
-    # Live-server websocket load test — informational, does not gate merges
-    # (timing-sensitive; boots a real uvicorn on port 8000). Only runs on
-    # manual dispatch or the weekly schedule, never on PRs/pushes.
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
-    timeout-minutes: 15
-    continue-on-error: true
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.11"
-          cache: pip
-          cache-dependency-path: requirements.txt
-
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-
-      - name: Pre-download embedding model
-        run: |
-          python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
-        env:
-          HF_HUB_DISABLE_TELEMETRY: "1"
-
-      - name: Run websocket stress test
-        # Per-step cap so a hung client can never run to the job ceiling.
-        timeout-minutes: 8
-        run: PYTHONPATH=. pytest tests/test_ws_stress.py -q
-        env:
-          HF_HUB_DISABLE_TELEMETRY: "1"
           PITWALL_DECODE_BACKEND: rules

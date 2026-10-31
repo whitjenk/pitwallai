@@ -531,9 +531,6 @@ async def handle_inbound_text(phone: str, text: str, raw_text: str) -> None:
 
     Sends the response via Meta Cloud API. Swallows send errors after logging.
     """
-    from onboarding.rehearsal import notify_rehearsal_user_activity
-
-    notify_rehearsal_user_activity(phone)
     reply: str | list[str]
 
     try:

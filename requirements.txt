@@ -5,10 +5,6 @@ sqlalchemy[asyncio]>=2.0,<3.0
 asyncpg>=0.29,<1.0
 aiosqlite>=0.20,<1.0   # local command simulator (scripts/whatsapp_chat.py) ephemeral DB
 cryptography>=42.0,<45.0
-huggingface-hub>=0.34,<1.0
-chromadb>=0.5,<1.0
-sentence-transformers>=3.0,<4.0
-websockets>=12.0,<14.0
 loguru>=0.7,<1.0
 fastapi>=0.111,<1.0
 uvicorn[standard]>=0.29,<1.0
@@ -34,20 +30,9 @@ openai>=1.50,<2.0
 # `BetaUserLocationParam` in >=0.70. Bump this together with pydantic-ai.
 anthropic>=0.40,<0.70
 
-# opentelemetry pinned to 1.38.0 across the family: pydantic-ai 0.8 imports
-# `opentelemetry._events`, dropped by opentelemetry-api 1.45, and chromadb <1.0
-# needs the sdk/exporter packages to match the api version. Remove when brief
-# 003 drops chromadb.
+# opentelemetry-api pinned to 1.38.0: pydantic-ai 0.8 imports
+# `opentelemetry._events`, which opentelemetry-api dropped in 1.45.
 opentelemetry-api==1.38.0
-opentelemetry-sdk==1.38.0
-opentelemetry-proto==1.38.0
-opentelemetry-exporter-otlp-proto-grpc==1.38.0
-opentelemetry-exporter-otlp-proto-common==1.38.0
 
 # Optional extras if you prefer slim installs:
 # pip install "pydantic-ai-slim[google,openai,anthropic]"
-
-# Optional: local team-radio transcription so the radio-sentiment pipeline runs
-# on real OpenF1 FP1/FP2 audio (free, no API key). Enable with
-# PITWALL_RADIO_TRANSCRIBE=true. Bundles PyAV for decoding (no ffmpeg CLI).
-# pip install faster-whisper

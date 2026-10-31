@@ -1,21 +1,18 @@
-"""FastAPI bridge between the radio intercept pipeline and the React dashboard."""
+"""FastAPI web surface: picks API, public share pages, and OG cards."""
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
 from collections.abc import AsyncIterator
-from dataclasses import dataclass, field
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
-from pydantic import BaseModel
 
 from api.picks import router as picks_router
 from api.picks_auth import require_picks_api_key
@@ -26,102 +23,23 @@ from intelligence.season_recap import (
 )
 from intelligence.share_page import render_season_share_html
 from openf1.client import OpenF1Client
-from api.rehearsal import SCENARIOS, RehearsalEngine
-from pitwallai.agents.radio_intercept.agent import RadioInterceptAgent
 from pitwallai.llm.settings import PitWallSettings
-from pitwallai.agents.radio_intercept.decode_utils import is_valid_transmission_id
-from pitwallai.agents.radio_intercept.enums import (
-    StreamEventType,
-    UrgencyLevel,
-)
-from pitwallai.agents.radio_intercept.models import (
-    DecodedTransmission,
-    WebSocketEvent,
-)
-from pitwallai.agents.radio_intercept.seed_data import (
-    JARGON_GLOSSARY,
-    MONACO_REHEARSAL_SCENARIO,
-    TEAM_COLORS,
-)
-from pitwallai.agents.radio_intercept.stream_handler import RadioInterceptDecoder
-from pitwallai.agents.radio_intercept.vector_store import MockVectorStore
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DASHBOARD_PATH = PROJECT_ROOT / "dashboard.jsx"
 STATIC_DIR = PROJECT_ROOT / "api" / "static"
-
-
-class ConfirmIntelBody(BaseModel):
-    """Request body for competitor intel verification.
-
-    Collapsed from the legacy three-state flow (UNCONFIRMED → ACKNOWLEDGED
-    → ACTED_ON) to a single ``verified`` boolean — the state machine
-    assumed a user acting on live signals, which the live-race product no
-    longer does.
-    """
-
-    verified: bool = True
-
-
-class RehearsalStartBody(BaseModel):
-    """Request body to start a rehearsal scenario."""
-
-    scenario: str = "monaco_2024"
-
-
-@dataclass
-class SessionState:
-    """
-    In-memory session state for API queries and dashboard status.
-
-    Attributes:
-        mode: Operating mode ('live' or 'rehearsal').
-        session_key: Active OpenF1 or rehearsal session key.
-        circuit: Human-readable circuit name.
-        transmissions: Decoded transmissions keyed by transmission_id.
-        active_drivers: Driver codes heard this session.
-        current_lap: Latest lap number observed.
-    """
-
-    mode: str = "rehearsal"
-    session_key: int = 0
-    circuit: str = "Unknown"
-    transmissions: dict[str, DecodedTransmission] = field(default_factory=dict)
-    active_drivers: set[str] = field(default_factory=set)
-    current_lap: int = 0
-
-
-def _urgency_meets_minimum(level: UrgencyLevel, minimum: str | None) -> bool:
-    """
-    Check whether an urgency level meets a minimum filter string.
-
-    Args:
-        level: Transmission urgency level.
-        minimum: Minimum urgency name or None for no filter.
-
-    Returns:
-        True if the transmission passes the filter.
-    """
-    if minimum is None:
-        return True
-    try:
-        min_level = UrgencyLevel(minimum.upper())
-    except ValueError:
-        return True
-    return level.priority >= min_level.priority
 
 
 def create_app(
     mode: str = "rehearsal",
-    rehearsal_speed: float = 3.0,
     settings: PitWallSettings | None = None,
 ) -> FastAPI:
     """
     Create and configure the PitWallAI FastAPI application.
 
     Args:
-        mode: Operating mode ('live' or 'rehearsal').
-        rehearsal_speed: Default rehearsal playback speed multiplier.
+        mode: Operating mode ('live' enforces full WhatsApp config; anything
+            else runs in local/non-live mode).
+        settings: Optional pre-built settings; loaded from env when omitted.
 
     Returns:
         Configured FastAPI instance.
@@ -130,11 +48,7 @@ def create_app(
 
     @contextlib.asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        """Initialize pipeline components on startup, tear them down on shutdown.
-
-        Replaces the deprecated ``@app.on_event("startup"/"shutdown")`` hooks.
-        Code before ``yield`` runs on startup; code after runs on shutdown.
-        """
+        """Initialize app components on startup, tear them down on shutdown."""
         # ----- startup -----
         log = logger.bind(mode=mode)
         log.info("Initializing PitWallAI components")
@@ -173,82 +87,16 @@ def create_app(
         wa_settings = get_whatsapp_settings()
         app.state.race_scheduler = start_race_scheduler(app, wa_settings.database_url)
 
-        vector_store = MockVectorStore(
-            embedding_cache_size=pitwall_settings.embedding_cache_size,
-        )
-        agent = RadioInterceptAgent(settings=pitwall_settings)
-        decoder = RadioInterceptDecoder(agent=agent, vector_store=vector_store)
-        decoder._running = True
-
-        app.state.vector_store = vector_store
-        app.state.agent = agent
-        app.state.decoder = decoder
         log.bind(
             decode_backend=pitwall_settings.decode_backend.value,
             llm_enabled=pitwall_settings.llm_enabled,
-        ).info("Decode pipeline configured")
-
-        session: SessionState = app.state.session
-        if mode == "rehearsal":
-            session.circuit = MONACO_REHEARSAL_SCENARIO.circuit
-            session.session_key = MONACO_REHEARSAL_SCENARIO.events[0].session_key
-            decoder._deps.session_key = session.session_key
-
-        collector_queue: asyncio.Queue[WebSocketEvent] = asyncio.Queue(maxsize=500)
-        decoder.subscribe(collector_queue)
-
-        async def session_collector() -> None:
-            while decoder._running:
-                try:
-                    event = await asyncio.wait_for(collector_queue.get(), timeout=1.0)
-                except asyncio.TimeoutError:
-                    continue
-                await _handle_session_event(app, event)
-
-        tasks: list[asyncio.Task[Any]] = [
-            asyncio.create_task(decoder._agent_consumer()),
-            asyncio.create_task(decoder._output_emitter()),
-            asyncio.create_task(session_collector()),
-        ]
-        if mode == "live":
-            tasks.append(asyncio.create_task(decoder._ws_producer()))
-
-        app.state.pipeline_tasks = tasks
-        app.state.collector_queue = collector_queue
-
-        if mode == "rehearsal":
-            engine = RehearsalEngine(decoder, MONACO_REHEARSAL_SCENARIO)
-            app.state.rehearsal_engine = engine
-            engine.start_background(speed_multiplier=rehearsal_speed)
-            log.info("Monaco 2024 rehearsal auto-started")
-
-            from fantasy.rules import DRIVER_PRICES_M
-            from intelligence.cache_health import check_signal_cache_health
-            from intelligence.rehearsal_cache_seed import seed_rehearsal_practice_signals_if_needed
-            from onboarding.monaco_calendar import MONACO_2024_REHEARSAL
-
-            await seed_rehearsal_practice_signals_if_needed()
-            print("\n=== SIGNAL CACHE HEALTH CHECK ===")
-            health = await check_signal_cache_health(
-                race_key=MONACO_2024_REHEARSAL.race_key,
-                driver_codes=sorted(DRIVER_PRICES_M.keys()),
-            )
-            print(f"Practice coverage: {health.practice_hits}/{health.drivers_checked}")
-            print(f"Radio coverage:    {health.radio_hits}/{health.drivers_checked}")
-            print(f"Ready for cards:   {health.ready_for_explanations}")
-            if health.practice_misses:
-                print(f"Missing practice:  {', '.join(health.practice_misses)}")
-            if health.radio_misses:
-                print(f"Missing radio:     {', '.join(health.radio_misses)}")
-            print("=================================\n")
+        ).info("Pick pipeline configured")
 
         from agents.race_monitor import resume_monitors_on_startup
         from agents.base import AgentRunDependencies
 
         monitor_deps = AgentRunDependencies(
             openf1_client=OpenF1Client(),
-            radio_agent=agent,
-            vector_store=vector_store,
             settings=pitwall_settings,
         )
         await resume_monitors_on_startup(monitor_deps)
@@ -281,16 +129,9 @@ def create_app(
         picks_sched = getattr(app.state, "picks_scheduler", None)
         if picks_sched is not None:
             await picks_sched.stop()
-        decoder = app.state.decoder
-        await decoder.stop()
-        for task in app.state.pipeline_tasks:
-            task.cancel()
-        engine = app.state.rehearsal_engine
-        if engine is not None:
-            await engine.stop()
 
     app = FastAPI(
-        title="PitWallAI Radio Intercept Decoder",
+        title="PitWallAI",
         version="1.0",
         lifespan=lifespan,
     )
@@ -298,12 +139,7 @@ def create_app(
     STATIC_DIR.mkdir(parents=True, exist_ok=True)
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
     app.state.mode = mode
-    app.state.rehearsal_speed = rehearsal_speed
     app.state.settings = pitwall_settings
-    app.state.session = SessionState(mode=mode)
-    app.state.rehearsal_engine = None
-    app.state.pipeline_tasks: list[asyncio.Task[Any]] = []
-    app.state.ws_connections = 0
 
     app.add_middleware(
         CORSMiddleware,
@@ -325,53 +161,27 @@ def create_app(
 
     @app.get("/health")
     async def health() -> dict[str, Any]:
-        """
-        Health check endpoint.
-
-        Returns:
-            Status payload with mode and session key.
-        """
-        session: SessionState = app.state.session
+        """Health check endpoint."""
         pitwall_settings: PitWallSettings = app.state.settings
-        agent: RadioInterceptAgent = app.state.agent
-        budget_snap = await agent.budget_guard.snapshot(session.session_key)
         return {
             "status": "ok",
             "mode": app.state.mode,
-            "session_key": session.session_key,
             "decode_backend": pitwall_settings.decode_backend.value,
             "llm_configured": pitwall_settings.llm_enabled,
             "llm_model": pitwall_settings.llm_model or None,
             "llm_budget_acknowledged": pitwall_settings.llm_budget_acknowledged,
-            "llm_budget": agent.budget_guard.to_public_dict(budget_snap),
         }
 
     @app.get(
         "/api/budget",
         dependencies=[Depends(require_picks_api_key)],
     )
-    async def budget_status(
-        session_key: int | None = Query(default=None),
-    ) -> dict[str, Any]:
-        """
-        Return LLM budget utilization and configured caps.
-
-        Args:
-            session_key: Optional session to scope per-session counters.
-
-        Returns:
-            Budget snapshot and limits.
-        """
-        agent: RadioInterceptAgent = app.state.agent
-        key = session_key if session_key is not None else app.state.session.session_key
-        snap = await agent.budget_guard.snapshot(key)
+    async def budget_status() -> dict[str, Any]:
+        """Return platform LLM spend utilization and caps."""
         from intelligence.spend_guard import get_spend_guard, to_public_dict
 
         spend = await get_spend_guard()
-        return {
-            **agent.budget_guard.to_public_dict(snap),
-            "platform_spend": to_public_dict(spend),
-        }
+        return {"platform_spend": to_public_dict(spend)}
 
     @app.get("/api/season/{token}")
     async def season_recap(token: str) -> dict[str, Any]:
@@ -536,68 +346,6 @@ def create_app(
         html = await render_homepage_for_request()
         return HTMLResponse(content=html)
 
-    @app.get("/dashboard")
-    async def dashboard() -> FileResponse:
-        """
-        Serve the embedded React dashboard.
-
-        Returns:
-            FileResponse for dashboard.jsx.
-
-        Raises:
-            HTTPException: If dashboard.jsx is missing.
-        """
-        if not DASHBOARD_PATH.is_file():
-            raise HTTPException(status_code=404, detail="dashboard.jsx not found")
-        return FileResponse(DASHBOARD_PATH, media_type="text/html")
-
-    @app.get("/api/session/status")
-    async def session_status() -> dict[str, Any]:
-        """
-        Return current session status for the dashboard.
-
-        Returns:
-            Mode, lap, drivers, transmission count, and average latency.
-        """
-        session: SessionState = app.state.session
-        transmissions = list(session.transmissions.values())
-        recent = transmissions[-10:]
-        latencies = [
-            t.processing_latency_ms
-            for t in recent
-            if t.processing_latency_ms is not None
-        ]
-        avg_latency = sum(latencies) / len(latencies) if latencies else 0.0
-        engine: RehearsalEngine | None = app.state.rehearsal_engine
-        progress = engine.get_progress() if engine is not None else {}
-        payload: dict[str, Any] = {
-            "mode": session.mode,
-            "current_lap": session.current_lap or progress.get("current_lap", 0),
-            "circuit": session.circuit,
-            "session_key": session.session_key,
-            "active_drivers": sorted(session.active_drivers),
-            "transmission_count": len(session.transmissions),
-            "avg_latency_ms": round(avg_latency, 1),
-            "rehearsal_progress": progress,
-        }
-        cached = getattr(app.state, "last_picks_result", None)
-        if cached is not None:
-            from whatsapp.message_format import format_explanation_card
-
-            previews: list[dict[str, Any]] = []
-            for pick in cached.output.picks[:3]:
-                if pick.explanation is None:
-                    continue
-                previews.append(
-                    {
-                        "driver_code": pick.driver_code,
-                        "card": format_explanation_card(pick.explanation),
-                    }
-                )
-            if previews:
-                payload["pick_explanation_cards"] = previews
-        return payload
-
     @app.get(
         "/api/onboarding/metrics",
         dependencies=[Depends(require_picks_api_key)],
@@ -612,230 +360,4 @@ def create_app(
         funnel = await check_and_alert_onboarding_funnel()
         return asdict(funnel)
 
-    @app.post(
-        "/api/intel/confirm/{transmission_id}",
-        dependencies=[Depends(require_picks_api_key)],
-    )
-    async def confirm_intel(
-        transmission_id: str,
-        body: ConfirmIntelBody,
-    ) -> DecodedTransmission:
-        """
-        Update competitor intel confirmation state for a transmission.
-
-        Args:
-            transmission_id: Unique transmission identifier.
-            body: Confirmation state payload.
-
-        Returns:
-            Updated DecodedTransmission.
-
-        Raises:
-            HTTPException: If transmission or intel is not found.
-        """
-        if not is_valid_transmission_id(transmission_id):
-            raise HTTPException(status_code=400, detail="Invalid transmission_id format")
-
-        session: SessionState = app.state.session
-        transmission = session.transmissions.get(transmission_id)
-        if transmission is None:
-            raise HTTPException(status_code=404, detail="Transmission not found")
-        if transmission.competitor_intel is None:
-            raise HTTPException(status_code=404, detail="No competitor intel on transmission")
-
-        updated_intel = transmission.competitor_intel.model_copy(
-            update={"verified": body.verified}
-        )
-        updated = transmission.model_copy(update={"competitor_intel": updated_intel})
-        session.transmissions[transmission_id] = updated
-        return updated
-
-    @app.post(
-        "/api/rehearsal/start",
-        dependencies=[Depends(require_picks_api_key)],
-    )
-    async def rehearsal_start(body: RehearsalStartBody) -> dict[str, Any]:
-        """
-        Start or restart a rehearsal scenario.
-
-        Args:
-            body: Scenario selection payload.
-
-        Returns:
-            Started status with event count and estimated duration.
-
-        Raises:
-            HTTPException: If scenario name is unknown.
-        """
-        scenario = SCENARIOS.get(body.scenario)
-        if scenario is None:
-            raise HTTPException(status_code=404, detail=f"Unknown scenario: {body.scenario}")
-
-        decoder: RadioInterceptDecoder = app.state.decoder
-        engine: RehearsalEngine | None = app.state.rehearsal_engine
-        if engine is not None:
-            await engine.stop()
-
-        speed = app.state.rehearsal_speed
-        engine = RehearsalEngine(decoder, scenario)
-        app.state.rehearsal_engine = engine
-        engine.start_background(speed_multiplier=speed)
-
-        session: SessionState = app.state.session
-        session.circuit = scenario.circuit
-        session.session_key = scenario.events[0].session_key if scenario.events else 0
-        session.mode = "rehearsal"
-        decoder._deps.session_key = session.session_key
-
-        return {
-            "status": "started",
-            "total_events": len(scenario.events),
-            "estimated_duration_seconds": RehearsalEngine.estimate_duration_seconds(
-                scenario, speed
-            ),
-        }
-
-    @app.post(
-        "/api/rehearsal/stop",
-        dependencies=[Depends(require_picks_api_key)],
-    )
-    async def rehearsal_stop() -> dict[str, str]:
-        """
-        Cancel the active rehearsal run.
-
-        Returns:
-            Stopped status dict.
-        """
-        engine: RehearsalEngine | None = app.state.rehearsal_engine
-        if engine is not None:
-            await engine.stop()
-        return {"status": "stopped"}
-
-    @app.get(
-        "/api/history",
-        dependencies=[Depends(require_picks_api_key)],
-    )
-    async def history(
-        limit: int = Query(default=50, ge=1, le=500),
-        driver_code: str | None = Query(default=None),
-        min_urgency: str | None = Query(default=None),
-    ) -> list[dict[str, Any]]:
-        """
-        Return filtered session transmission history.
-
-        Args:
-            limit: Maximum records to return.
-            driver_code: Optional driver code filter.
-            min_urgency: Optional minimum urgency filter.
-
-        Returns:
-            List of serialized DecodedTransmission dicts, newest first.
-        """
-        session: SessionState = app.state.session
-        items = list(session.transmissions.values())
-        items.sort(key=lambda t: t.timestamp, reverse=True)
-
-        filtered: list[DecodedTransmission] = []
-        for item in items:
-            if driver_code and item.driver_code.upper() != driver_code.upper():
-                continue
-            if not _urgency_meets_minimum(item.urgency_level, min_urgency):
-                continue
-            filtered.append(item)
-
-        return [t.model_dump(mode="json") for t in filtered[:limit]]
-
-    @app.websocket("/ws/stream")
-    async def ws_stream(websocket: WebSocket) -> None:
-        """
-        WebSocket stream of real-time PitWallAI events.
-
-        Subscribes to decoder fan-out and forwards JSON-serialized WebSocketEvent messages.
-
-        Args:
-            websocket: Connected WebSocket client.
-        """
-        pitwall_settings: PitWallSettings = app.state.settings
-        if app.state.ws_connections >= pitwall_settings.ws_max_connections:
-            await websocket.close(code=1008, reason="Too many connections")
-            return
-
-        await websocket.accept()
-        app.state.ws_connections += 1
-        decoder: RadioInterceptDecoder = app.state.decoder
-        queue: asyncio.Queue[WebSocketEvent] = asyncio.Queue(maxsize=100)
-        decoder.subscribe(queue)
-
-        status_event = await _build_system_status(app)
-        await websocket.send_text(status_event.model_dump_json())
-
-        try:
-            while True:
-                event = await queue.get()
-                payload = event.model_dump_json()
-                if len(payload) > 256_000:
-                    continue
-                await websocket.send_text(payload)
-        except WebSocketDisconnect:
-            logger.info("WebSocket client disconnected")
-        finally:
-            decoder.unsubscribe(queue)
-            app.state.ws_connections = max(0, app.state.ws_connections - 1)
-
     return app
-
-
-async def _handle_session_event(app: FastAPI, event: WebSocketEvent) -> None:
-    """
-    Update session state from a streamed WebSocket event.
-
-    Args:
-        app: FastAPI application with session state.
-        event: Incoming WebSocket event.
-    """
-    session: SessionState = app.state.session
-    if event.event_type == StreamEventType.TRANSMISSION_DECODED:
-        if not isinstance(event.payload, DecodedTransmission):
-            return
-        transmission = event.payload
-        if transmission.transmission_id:
-            session.transmissions[transmission.transmission_id] = transmission
-        session.active_drivers.add(transmission.driver_code)
-        if transmission.lap_number is not None:
-            session.current_lap = max(session.current_lap, transmission.lap_number)
-        session.session_key = transmission.session_key
-
-
-async def _build_system_status(app: FastAPI) -> WebSocketEvent:
-    """
-    Build a SYSTEM_STATUS WebSocket event from current application state.
-
-    Args:
-        app: FastAPI application instance.
-
-    Returns:
-        WebSocketEvent with session status payload.
-    """
-    session: SessionState = app.state.session
-    decoder: RadioInterceptDecoder = app.state.decoder
-    engine: RehearsalEngine | None = app.state.rehearsal_engine
-    agent: RadioInterceptAgent = app.state.agent
-    budget_snap = await agent.budget_guard.snapshot(session.session_key)
-    payload: dict[str, Any] = {
-        "mode": session.mode,
-        "session_key": session.session_key,
-        "circuit": session.circuit,
-        "transmission_count": len(session.transmissions),
-        "active_drivers": sorted(session.active_drivers),
-        "current_lap": session.current_lap,
-        "collection_size": decoder._vector_store.collection_size(),
-        "llm_budget": agent.budget_guard.to_public_dict(budget_snap),
-    }
-    if engine is not None:
-        payload["rehearsal_progress"] = engine.get_progress()
-    return WebSocketEvent(
-        event_type=StreamEventType.SYSTEM_STATUS,
-        payload=payload,
-        session_key=session.session_key,
-        emitted_at=datetime.now(tz=UTC),
-    )

@@ -165,8 +165,6 @@ async def _broadcast_to_subscriber(
         output = await generate_picks_for_weekend(
             weekend,
             client=client,
-            agent=app.state.agent,
-            vector_store=app.state.vector_store,
             settings=settings,
             phone=phone,
             persist_picks=True,

@@ -6,9 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
-from pitwallai.agents.radio_intercept.agent import RadioInterceptAgent
 from pitwallai.llm.settings import PitWallSettings
-from pitwallai.agents.radio_intercept.vector_store import MockVectorStore
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
@@ -18,8 +16,6 @@ if TYPE_CHECKING:
 class PickRuntime:
     """Dependencies required for on-demand pick generation."""
 
-    agent: RadioInterceptAgent
-    vector_store: MockVectorStore
     settings: PitWallSettings
 
 
@@ -38,12 +34,10 @@ def register_fastapi_app(app: FastAPI) -> None:
 
 
 def _runtime_from_app(app: FastAPI) -> PickRuntime | None:
-    agent = getattr(app.state, "agent", None)
-    vector_store = getattr(app.state, "vector_store", None)
     settings = getattr(app.state, "settings", None)
-    if agent is None or vector_store is None or settings is None:
+    if settings is None:
         return None
-    return PickRuntime(agent=agent, vector_store=vector_store, settings=settings)
+    return PickRuntime(settings=settings)
 
 
 def _lazy_pick_runtime() -> PickRuntime:
@@ -51,16 +45,7 @@ def _lazy_pick_runtime() -> PickRuntime:
     global _lazy_runtime
     if _lazy_runtime is not None:
         return _lazy_runtime
-    settings = PitWallSettings.from_env()
-    try:
-        _lazy_runtime = PickRuntime(
-            agent=RadioInterceptAgent(settings=settings),
-            vector_store=MockVectorStore(embedding_cache_size=32),
-            settings=settings,
-        )
-    except Exception as exc:
-        logger.warning("Lazy PICKS runtime unavailable ({}); picks need full app startup", exc)
-        raise
+    _lazy_runtime = PickRuntime(settings=PitWallSettings.from_env())
     logger.info("PICKS using lazy rules-only runtime (app not registered)")
     return _lazy_runtime
 

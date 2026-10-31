@@ -246,8 +246,6 @@ async def send_picks_on_demand(
     output = await generate_picks_for_weekend(
         weekend,
         client=client,
-        agent=runtime.agent,
-        vector_store=runtime.vector_store,
         settings=runtime.settings,
         phone=phone,
         persist_picks=False,

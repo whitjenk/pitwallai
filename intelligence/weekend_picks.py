@@ -26,9 +26,7 @@ from intelligence.repository import (
 from whatsapp.sender import mask_phone
 from intelligence.schemas import PickGeneratorInput, PickOutput
 from openf1.client import OpenF1Client
-from pitwallai.agents.radio_intercept.agent import RadioInterceptAgent
 from pitwallai.llm.settings import PitWallSettings
-from pitwallai.agents.radio_intercept.vector_store import MockVectorStore
 from scheduler.calendar import RaceWeekend, profile_circuit_key
 
 
@@ -70,8 +68,6 @@ async def generate_picks_for_weekend(
     weekend: RaceWeekend,
     *,
     client: OpenF1Client,
-    agent: RadioInterceptAgent,
-    vector_store: MockVectorStore,
     settings: PitWallSettings,
     phone: str | None = None,
     persist_picks: bool = True,
@@ -95,8 +91,6 @@ async def generate_picks_for_weekend(
     if refresh_practice:
         practice_signals = await analyze_practice_weekend(
             client=client,
-            agent=agent,
-            vector_store=vector_store,
             circuit=circuit,
             year=2026,
             persist=True,
@@ -107,8 +101,6 @@ async def generate_picks_for_weekend(
         if not practice_signals:
             practice_signals = await analyze_practice_weekend(
                 client=client,
-                agent=agent,
-                vector_store=vector_store,
                 circuit=circuit,
                 year=2026,
                 persist=True,

@@ -16,12 +16,9 @@ from whatsapp.webhook import router as whatsapp_router
 
 # ASGI entry for Railway / `uvicorn main:app` (see railway.toml).
 # Startup/shutdown (assert_live_ready, init_db, orchestrator context,
-# constructor seeding, pipeline tasks) is handled by create_app's lifespan —
+# constructor seeding) is handled by create_app's lifespan —
 # no separate on_event handler here.
-app = create_app(
-    mode=os.environ.get("PITWALL_MODE", "rehearsal"),
-    rehearsal_speed=float(os.environ.get("PITWALL_REHEARSAL_SPEED", "3.0")),
-)
+app = create_app(mode=os.environ.get("PITWALL_MODE", "rehearsal"))
 app.include_router(whatsapp_router)
 
 
@@ -32,24 +29,18 @@ def parse_args() -> argparse.Namespace:
     Returns:
         Parsed argparse namespace.
     """
-    parser = argparse.ArgumentParser(description="PitWallAI Radio Intercept Decoder")
+    parser = argparse.ArgumentParser(description="PitWallAI")
     parser.add_argument(
         "--mode",
         choices=["live", "rehearsal"],
         default="rehearsal",
-        help="Operating mode: live OpenF1 ingest or scripted rehearsal",
+        help="'live' enforces full WhatsApp config; otherwise runs local/non-live",
     )
     parser.add_argument(
         "--port",
         type=int,
         default=8000,
-        help="HTTP port for FastAPI and dashboard",
-    )
-    parser.add_argument(
-        "--speed",
-        type=float,
-        default=3.0,
-        help="Rehearsal playback speed multiplier",
+        help="HTTP port for FastAPI",
     )
     parser.add_argument(
         "--decode-backend",
@@ -95,11 +86,11 @@ def build_settings(args: argparse.Namespace) -> PitWallSettings:
 
 
 def main() -> None:
-    """Start PitWallAI with FastAPI, dashboard, and optional rehearsal playback."""
+    """Start PitWallAI with FastAPI."""
     args = parse_args()
     settings = build_settings(args)
     mode_label = args.mode.upper()
-    print(f"PitWallAI v1.0 — RADIO INTERCEPT DECODER — {mode_label}")
+    print(f"PitWallAI v1.0 — {mode_label}")
     print(f"Decode backend: {settings.decode_backend.value} (LLM: {settings.llm_model or 'disabled'})")
 
     if settings.decode_backend != DecodeBackend.RULES and not settings.llm_enabled:
@@ -120,16 +111,10 @@ def main() -> None:
                 f"${settings.llm_max_estimated_usd_per_day:.2f}/day"
             )
 
-    app = create_app(mode=args.mode, rehearsal_speed=args.speed, settings=settings)
-
-    if args.mode == "rehearsal":
-        logger.bind(speed=args.speed).info(
-            "Rehearsal mode — Monaco scenario scheduled on API startup"
-        )
+    app = create_app(mode=args.mode, settings=settings)
 
     host = settings.bind_host
-    logger.info("Dashboard → http://localhost:{}/dashboard", args.port)
-    logger.info("Stream  → ws://localhost:{}/ws/stream", args.port)
+    logger.info("PitWallAI → http://localhost:{}/", args.port)
 
     uvicorn.run(app, host=host, port=args.port, log_level="info")
 

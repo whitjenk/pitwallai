@@ -1,84 +1,10 @@
-"""Tests for the two engineering launch blockers:
-auth on /api/intel/confirm and persistent race-monitor dedup."""
+"""Tests for the engineering launch blocker: persistent race-monitor dedup."""
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
-from fastapi.testclient import TestClient
-
-from api.server import create_app
-from intelligence.picks_config import PicksSettings
-
-
-# ── /api/intel/confirm auth ───────────────────────────────────────────────
-
-
-@pytest.fixture
-def app_client() -> TestClient:
-    app = create_app(mode="rehearsal", settings=None)
-    app.state.picks_settings = PicksSettings(
-        auto_enabled=False,
-        interval_seconds=1800,
-        race_year=2026,
-        circuit_key_override="monaco",
-        api_key="test-key",
-    )
-    app.state.picks_scheduler = MagicMock()
-    app.state.picks_scheduler.run_once = AsyncMock(return_value=None)
-    return TestClient(app)
-
-
-def test_confirm_intel_rejects_missing_key(app_client: TestClient) -> None:
-    """Unauthenticated callers must not flip verification flags."""
-    resp = app_client.post(
-        "/api/intel/confirm/00000000-0000-4000-8000-000000000000",
-        json={"verified": True},
-    )
-    assert resp.status_code == 401
-
-
-def test_confirm_intel_rejects_wrong_key(app_client: TestClient) -> None:
-    resp = app_client.post(
-        "/api/intel/confirm/00000000-0000-4000-8000-000000000000",
-        json={"verified": True},
-        headers={"X-PitWall-API-Key": "not-the-key"},
-    )
-    assert resp.status_code == 401
-
-
-def test_confirm_intel_with_correct_key_clears_auth(
-    app_client: TestClient,
-) -> None:
-    """A valid key clears the auth dependency. The endpoint then 404s
-    because the test session has no transmission with that id — the
-    important thing is the status code is not 401."""
-    resp = app_client.post(
-        "/api/intel/confirm/00000000-0000-4000-8000-000000000000",
-        json={"verified": True},
-        headers={"X-PitWall-API-Key": "test-key"},
-    )
-    assert resp.status_code in (400, 404)
-
-
-def test_confirm_intel_503_when_server_key_unconfigured(
-    app_client: TestClient,
-) -> None:
-    """Mirrors the picks endpoint contract: 503 when server has no key set."""
-    app_client.app.state.picks_settings = PicksSettings(
-        auto_enabled=False,
-        interval_seconds=1800,
-        race_year=2026,
-        circuit_key_override="monaco",
-        api_key="",
-    )
-    resp = app_client.post(
-        "/api/intel/confirm/00000000-0000-4000-8000-000000000000",
-        json={"verified": True},
-        headers={"X-PitWall-API-Key": "anything"},
-    )
-    assert resp.status_code == 503
 
 
 # ── Race monitor dedup hydration ──────────────────────────────────────────

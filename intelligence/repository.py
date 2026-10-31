@@ -1519,6 +1519,7 @@ _ERASE_PHONE_TARGETS: tuple[tuple[type, str], ...] = (
     (ChipPlanStore, "phone"),
     (TeamValueSnapshot, "phone"),
     (WeekendNotificationSent, "phone"),
+    (LockedLineup, "phone"),
 )
 
 

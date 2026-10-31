@@ -28,7 +28,7 @@ from intelligence.share_page import render_season_share_html
 from openf1.client import OpenF1Client
 from api.rehearsal import SCENARIOS, RehearsalEngine
 from pitwallai.agents.radio_intercept.agent import RadioInterceptAgent
-from pitwallai.agents.radio_intercept.config import PitWallSettings
+from pitwallai.llm.settings import PitWallSettings
 from pitwallai.agents.radio_intercept.decode_utils import is_valid_transmission_id
 from pitwallai.agents.radio_intercept.enums import (
     StreamEventType,

@@ -49,7 +49,7 @@ def test_assert_free_model_noop_when_off(monkeypatch) -> None:
 
 def test_get_model_blocks_paid_providers_by_default(monkeypatch) -> None:
     monkeypatch.delenv("PITWALL_FREE_MODELS_ONLY", raising=False)
-    from pitwallai.agents.radio_intercept.model_factory import get_model
+    from pitwallai.llm.model_factory import get_model
 
     with pytest.raises(PaidModelBlockedError):
         get_model("openai", "test-key")
@@ -63,7 +63,7 @@ def test_get_model_blocks_paid_providers_by_default(monkeypatch) -> None:
 def test_config_forces_non_vertex_when_free_only(monkeypatch) -> None:
     monkeypatch.setenv("PITWALL_FREE_MODELS_ONLY", "1")
     monkeypatch.setenv("PITWALL_LLM_USE_VERTEX", "true")
-    from pitwallai.agents.radio_intercept.config import PitWallSettings
+    from pitwallai.llm.settings import PitWallSettings
 
     settings = PitWallSettings.from_env()
     assert settings.llm_use_vertex is False

@@ -4,78 +4,19 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import re
 import time
 from dataclasses import replace
 from typing import Protocol
 
 from loguru import logger
 
-from pitwallai.agents.radio_intercept.config import DecodeBackend, PitWallSettings
 from pitwallai.agents.radio_intercept.llm_budget import LLMBudgetGuard
 from pitwallai.agents.radio_intercept.llm_decoder import LLMDecoder
 from pitwallai.agents.radio_intercept.models import AgentDependencies, DecodedTransmission, RadioRawMessage
 from pitwallai.agents.radio_intercept.rules_decoder import RulesDecoder
 from pitwallai.free_models import PaidModelBlockedError
-
-# Phrases that turn evidence into strategist directives (forbidden in evidence_summary).
-_DIRECTIVE_PHRASES: tuple[str, ...] = (
-    "box now",
-    "pit now",
-    "you should",
-    "you must",
-    "we should",
-    "recommend",
-    "recommended",
-    "immediately",
-    "need to box",
-    "need to pit",
-    "must box",
-    "must pit",
-    "consider boxing",
-    "consider pitting",
-    "deploy now",
-    "push now",
-)
-
-_IMPERATIVE_SENTENCE = re.compile(
-    r"^\s*(box|pit|push|deploy|recommend|consider|must|should)\b",
-    re.IGNORECASE,
-)
-
-
-def _sanitise_evidence_summary(text: str | None) -> str | None:
-    """
-    Strip directive language from LLM evidence summaries.
-
-    The evidence_summary field must contain factual observations only — never
-    instructions, recommendations, or action verbs directed at the strategist.
-
-    Args:
-        text: Raw LLM evidence summary.
-
-    Returns:
-        Sanitised summary, or None if nothing observational remains.
-    """
-    if text is None:
-        return None
-    cleaned = text.strip()
-    if not cleaned:
-        return None
-
-    for phrase in _DIRECTIVE_PHRASES:
-        cleaned = re.sub(re.escape(phrase), "", cleaned, flags=re.IGNORECASE)
-
-    cleaned = re.sub(r"\s{2,}", " ", cleaned).strip(" ,;.-")
-
-    sentences = re.split(r"(?<=[.!?])\s+", cleaned)
-    observational = [
-        sentence.strip()
-        for sentence in sentences
-        if sentence.strip() and not _IMPERATIVE_SENTENCE.match(sentence.strip())
-    ]
-    result = " ".join(observational).strip()
-    return result if result else None
+from pitwallai.llm.sanitize import sanitise_evidence_summary
+from pitwallai.llm.settings import DecodeBackend, PitWallSettings
 
 
 def apply_llm_output_guards(transmission: DecodedTransmission) -> DecodedTransmission:
@@ -88,7 +29,7 @@ def apply_llm_output_guards(transmission: DecodedTransmission) -> DecodedTransmi
     Returns:
         Transmission with sanitised evidence_summary.
     """
-    sanitised = _sanitise_evidence_summary(transmission.evidence_summary)
+    sanitised = sanitise_evidence_summary(transmission.evidence_summary)
     if sanitised == transmission.evidence_summary:
         return transmission
     return transmission.model_copy(update={"evidence_summary": sanitised})

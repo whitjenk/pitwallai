@@ -365,9 +365,9 @@ async def _generate_fantasy_tendency(
     circuit: CircuitProfile,
 ) -> str:
     """One LLM sentence per profile at seed time; sanitised evidence-only."""
-    from pitwallai.agents.radio_intercept.decoder_factory import _sanitise_evidence_summary
-    from pitwallai.agents.radio_intercept.model_factory import get_model, resolve_api_key
-    from pitwallai.agents.radio_intercept.config import PitWallSettings
+    from pitwallai.llm.model_factory import get_model, resolve_api_key
+    from pitwallai.llm.sanitize import sanitise_evidence_summary
+    from pitwallai.llm.settings import PitWallSettings
 
     settings = PitWallSettings.from_env()
     provider = (settings.llm_provider or "gemini").strip().lower()
@@ -394,7 +394,7 @@ async def _generate_fantasy_tendency(
         )
         result = await agent.run(prompt)
         raw = str(result.output).strip()[:120]
-        cleaned = _sanitise_evidence_summary(raw)
+        cleaned = sanitise_evidence_summary(raw)
         if cleaned:
             return cleaned[:120]
     except Exception as exc:

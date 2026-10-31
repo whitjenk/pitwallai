@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pitwallai.agents.radio_intercept.config import DecodeBackend, PitWallSettings
+from pitwallai.llm.settings import DecodeBackend, PitWallSettings
 from pitwallai.agents.radio_intercept.decoder_factory import HybridDecoder, create_decoder
 from pitwallai.agents.radio_intercept.llm_budget import LLMBudgetGuard
 from pitwallai.agents.radio_intercept.errors import DecodeRuntimeError, DecodeValidationError

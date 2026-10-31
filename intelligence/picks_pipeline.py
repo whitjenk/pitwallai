@@ -23,7 +23,7 @@ from intelligence.repository import get_fantasy_team
 from intelligence.schemas import PickGeneratorInput, PickOutput
 from openf1.client import OpenF1Client
 from pitwallai.agents.radio_intercept.agent import RadioInterceptAgent
-from pitwallai.agents.radio_intercept.config import PitWallSettings
+from pitwallai.llm.settings import PitWallSettings
 from pitwallai.agents.radio_intercept.vector_store import MockVectorStore
 
 

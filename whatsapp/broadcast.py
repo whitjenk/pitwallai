@@ -14,7 +14,7 @@ from intelligence.repository import list_active_subscribers, save_pick_ownership
 from intelligence.schemas import PickOutput
 from intelligence.weekend_picks import generate_picks_for_weekend
 from openf1.client import OpenF1Client
-from pitwallai.agents.radio_intercept.config import PitWallSettings
+from pitwallai.llm.settings import PitWallSettings
 from scheduler.calendar import RaceWeekend, get_race_weekend
 from scheduler.jobs import _require_ctx
 from whatsapp.message_format import (

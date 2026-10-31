@@ -80,7 +80,7 @@ def _sanitize_name(value: str | None) -> str | None:
 async def _build_agent():
     from pydantic_ai import Agent
 
-    from pitwallai.agents.radio_intercept.model_factory import get_model, resolve_api_key
+    from pitwallai.llm.model_factory import get_model, resolve_api_key
 
     provider = os.getenv("PITWALL_LLM_PROVIDER", "gemini").strip().lower() or "gemini"
     model_name = os.getenv("PITWALL_LLM_MODEL", "").strip() or None

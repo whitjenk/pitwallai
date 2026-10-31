@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict
 from openf1.client import OpenF1Client
 from orchestrator.race_context import RaceContext
 from pitwallai.agents.radio_intercept.agent import RadioInterceptAgent
-from pitwallai.agents.radio_intercept.config import PitWallSettings
+from pitwallai.llm.settings import PitWallSettings
 from pitwallai.agents.radio_intercept.vector_store import MockVectorStore
 
 T = TypeVar("T")

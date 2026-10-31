@@ -11,7 +11,7 @@ import uvicorn
 from loguru import logger
 
 from api.server import create_app
-from pitwallai.agents.radio_intercept.config import DecodeBackend, PitWallSettings
+from pitwallai.llm.settings import DecodeBackend, PitWallSettings
 from whatsapp.webhook import router as whatsapp_router
 
 # ASGI entry for Railway / `uvicorn main:app` (see railway.toml).

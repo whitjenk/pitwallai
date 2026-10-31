@@ -1,0 +1,30 @@
+{
+  "message_lines": [
+    "\ud83c\udfc1 Your Monaco Grand Prix lineup \u2014 graded",
+    "\ud83c\udfb4 Chip: LIMITLESS \u2014 ignores the $100M cap for one race \u2014 so the play is pure ceiling: load the fastest cars regardless of price.",
+    "",
+    "Drivers (projected race pts on practice pace):",
+    "  HAM  P1   25 pts",
+    "  LEC  P2   18 pts",
+    "  ANT  P5   10 pts",
+    "  RUS  P4   12 pts",
+    "  VER  P3   15 pts",
+    "  \u2192 drivers project 80 pts",
+    "",
+    "\ud83e\udde2 Captain (2x): you picked HAM (+25 bonus) \u2014 \u2705 optimal.",
+    "",
+    "Constructors:",
+    "  FER  43 pts",
+    "  MER  22 pts",
+    "  \u2192 constructors project 65 pts",
+    "",
+    "\ud83d\udcca Your lineup projects ~170 pts on practice pace (incl. +25 captain).",
+    "",
+    "\ud83e\udd16 PitWallAI's top picks on practice pace:",
+    "  Drivers: HAM, LEC, VER, RUS, ANT",
+    "  Constructors: FER, MER",
+    "",
+    "\u2705 You match 5/5 of my driver picks.",
+    "\ud83c\udfed Constructors: you match 2/2 (FER, MER are my top pair)."
+  ]
+}

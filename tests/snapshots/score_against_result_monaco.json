@@ -1,0 +1,23 @@
+{
+  "captain": "LEC",
+  "captain_bonus": 50,
+  "constructor_pts": {
+    "FER": 43,
+    "MER": 8
+  },
+  "driver_pts": {
+    "HAM": 18,
+    "LEC": 25,
+    "NOR": -20,
+    "RUS": 8,
+    "VER": 15
+  },
+  "positions": {
+    "HAM": 2,
+    "LEC": 1,
+    "NOR": null,
+    "RUS": 6,
+    "VER": 3
+  },
+  "total": 147
+}

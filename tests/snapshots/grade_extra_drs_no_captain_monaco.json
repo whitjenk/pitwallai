@@ -1,0 +1,30 @@
+{
+  "message_lines": [
+    "\ud83c\udfc1 Your Monaco Grand Prix lineup \u2014 graded",
+    "\ud83c\udfb4 Chip: EXTRA DRS (3x) \u2014 triples one driver's points \u2014 put it on your highest-ceiling driver.",
+    "",
+    "Drivers (projected race pts on practice pace):",
+    "  LEC  P2   18 pts",
+    "  VER  P3   15 pts",
+    "  RUS  P4   12 pts",
+    "  ANT  P5   10 pts",
+    "  NOR  P6   8 pts",
+    "  \u2192 drivers project 63 pts",
+    "",
+    "\ud83e\udde2 Triple (DRS Boost): captain LEC \u2014 highest ceiling (P2, +36 bonus).",
+    "",
+    "Constructors:",
+    "  FER  43 pts",
+    "  \u2192 constructors project 43 pts",
+    "",
+    "\ud83d\udcca Your lineup projects ~142 pts on practice pace (incl. +36 captain).",
+    "",
+    "\ud83e\udd16 PitWallAI's top picks on practice pace:",
+    "  Drivers: HAM, LEC, VER, RUS, ANT",
+    "  Constructors: FER, MER",
+    "",
+    "\u2705 You match 4/5 of my driver picks.",
+    "\ud83d\udd01 Differences: you have NOR \u2014 I'd lean HAM over NOR.",
+    "\ud83c\udfed Constructors: you match 1/2 (FER, MER are my top pair)."
+  ]
+}

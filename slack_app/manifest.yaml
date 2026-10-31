@@ -1,0 +1,30 @@
+# PitWallAI Slack app manifest.
+# Create the app from this file at https://api.slack.com/apps → Create New App →
+# From a manifest. Socket Mode means no request URL and no public host.
+# See docs/slack_setup.md for the full walkthrough.
+display_information:
+  name: PitWallAI
+  description: F1 Fantasy companion for our league — save your team, get picks.
+  background_color: "#111319"
+features:
+  bot_user:
+    display_name: PitWallAI
+    always_online: true
+  slash_commands:
+    - command: /pitwall
+      description: Save your team and get transfer picks (only you see the reply)
+      usage_hint: team HAM LEC NOR PIA VER MCL FER budget 2.5 transfers 2 | picks | forget | help
+      should_escape: false
+oauth_config:
+  scopes:
+    bot:
+      - commands
+      - chat:write
+settings:
+  # Socket Mode: one long-running process connects out to Slack, so there is no
+  # public URL to host or verify.
+  socket_mode_enabled: true
+  interactivity:
+    is_enabled: false
+  org_deploy_enabled: false
+  token_rotation_enabled: false

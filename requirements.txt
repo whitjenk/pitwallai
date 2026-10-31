@@ -17,6 +17,11 @@ apscheduler>=3.10,<4.0
 psycopg2-binary>=2.9,<3.0
 alembic>=1.13,<2.0
 
+# Slack app (brief 006): Bolt in Socket Mode — one long-running process, no
+# public URL. aiohttp is the async Socket Mode transport Bolt uses.
+slack-bolt>=1.18,<2.0
+aiohttp>=3.9,<4.0
+
 # Vertex AI / Gemini (default LLM path)
 google-genai>=1.0,<2.0
 google-auth>=2.0,<3.0

@@ -27,6 +27,7 @@ from core.api import (
     suggest_transfers,
 )
 from core.parse import extract_captain, extract_lineup, parse_team_command
+from core.price_catalog import prices_staleness_note
 from core.types import Lineup as CoreLineup
 from core.types import Team as CoreTeam
 from slack_app.openf1_client import build_client
@@ -61,6 +62,18 @@ def _next_race() -> object | None:
         (w for w in race_calendar() if w.race_utc > now), key=lambda w: w.race_utc
     )
     return upcoming[0] if upcoming else None
+
+
+def _append_price_note(text: str) -> str:
+    """Add the out-of-date prices line to a personal reply when prices aren't fresh.
+
+    Budget maths in ``team`` and the swap values in ``picks`` lean on the price
+    catalog, so these replies say plainly when the catalog hasn't refreshed
+    recently. League banter (grade/score/record) doesn't quote prices, so it's
+    left alone.
+    """
+    note = prices_staleness_note()
+    return f"{text}\n\n{note}" if note else text
 
 
 def _format_team(team: store.Team) -> str:
@@ -167,7 +180,7 @@ async def _handle_team(args: str, user_id: str, team_id: str, display_name: str)
                 "I don't have your team yet. Save it with "
                 "`/pitwall team HAM LEC NOR PIA VER MCL FER budget 2.5 transfers 2`."
             )
-        return Reply("*Your saved team*\n" + _format_team(team))
+        return Reply(_append_price_note("*Your saved team*\n" + _format_team(team)))
 
     parsed = parse_team_command(args)
     if not parsed.ok:
@@ -189,7 +202,7 @@ async def _handle_team(args: str, user_id: str, team_id: str, display_name: str)
         chips_used={},
     )
     await store.upsert_team(team)
-    return Reply("*Saved your team*\n" + _format_team(team))
+    return Reply(_append_price_note("*Saved your team*\n" + _format_team(team)))
 
 
 async def _handle_picks(args: str, user_id: str, team_id: str, display_name: str) -> Reply:
@@ -216,7 +229,7 @@ async def _handle_picks(args: str, user_id: str, team_id: str, display_name: str
     except Exception as exc:  # never leak a stack trace to the user
         logger.warning("picks failed user={} race={}: {}", user_id, weekend.race_key, exc)
         return Reply("Couldn't pull the picks right now — the data wasn't available. Try again later.")
-    return Reply(_format_picks(out, weekend))
+    return Reply(_append_price_note(_format_picks(out, weekend)))
 
 
 async def _handle_forget(args: str, user_id: str, team_id: str, display_name: str) -> Reply:

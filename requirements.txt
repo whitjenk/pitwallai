@@ -1,43 +1,13 @@
 pydantic>=2.7,<3.0
-pydantic-settings>=2.0,<3.0
-pydantic-ai>=0.8,<1.0
 sqlalchemy[asyncio]>=2.0,<3.0
-asyncpg>=0.29,<1.0
-aiosqlite>=0.20,<1.0   # local command simulator (scripts/whatsapp_chat.py) ephemeral DB
-cryptography>=42.0,<45.0
+aiosqlite>=0.20,<1.0        # async SQLite driver for the store (sqlite+aiosqlite)
 loguru>=0.7,<1.0
-fastapi>=0.111,<1.0
-uvicorn[standard]>=0.29,<1.0
-numpy>=1.26,<3.0
-pillow>=10.1,<13.0
+httpx>=0.27,<1.0
+
 pytest>=8.0,<9.0
 pytest-asyncio>=0.23,<1.0
-httpx>=0.27,<1.0
-apscheduler>=3.10,<4.0
-psycopg2-binary>=2.9,<3.0
-alembic>=1.13,<2.0
 
-# Slack app (brief 006): Bolt in Socket Mode — one long-running process, no
-# public URL. aiohttp is the async Socket Mode transport Bolt uses.
+# Slack app: Bolt in Socket Mode — one long-running process, no public URL.
+# aiohttp is the async Socket Mode transport Bolt uses.
 slack-bolt>=1.18,<2.0
 aiohttp>=3.9,<4.0
-
-# Vertex AI / Gemini (default LLM path)
-google-genai>=1.0,<2.0
-google-auth>=2.0,<3.0
-
-# OpenAI provider (gpt-4o-mini, Ollama OpenAI-compatible shim)
-openai>=1.50,<2.0
-
-# Anthropic BYOK path (claude provider — retained for bring-your-own-key).
-# Upper bound coupled to pydantic-ai 0.8.x: its Anthropic adapter imports
-# `UserLocation` from anthropic.types.beta, which the SDK renamed to
-# `BetaUserLocationParam` in >=0.70. Bump this together with pydantic-ai.
-anthropic>=0.40,<0.70
-
-# opentelemetry-api pinned to 1.38.0: pydantic-ai 0.8 imports
-# `opentelemetry._events`, which opentelemetry-api dropped in 1.45.
-opentelemetry-api==1.38.0
-
-# Optional extras if you prefer slim installs:
-# pip install "pydantic-ai-slim[google,openai,anthropic]"

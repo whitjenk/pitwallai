@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Refresh fantasy/prices.json from the official F1 Fantasy live feed.
+"""Refresh F1 Fantasy prices in the store from the official live feed.
+
+Fetches current driver and constructor prices, applies them to the catalog and
+caches them in the SQLite store (the same path the Slack app reads on startup).
 
 Usage:
     python scripts/refresh_prices.py
@@ -15,20 +18,21 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from fantasy.price_catalog import load_price_catalog  # noqa: E402
-from fantasy.price_feed import refresh_prices_from_live  # noqa: E402
+import store  # noqa: E402
+from core.price_catalog import (  # noqa: E402
+    driver_price_m,
+    known_driver_codes,
+    load_price_catalog,
+)
+from feeds.fantasy_prices import refresh_prices  # noqa: E402
 
 
 async def main() -> int:
     load_price_catalog()
-    nd, nc = await refresh_prices_from_live(persist=True)
-    if not nd and not nc:
-        print("Live price refresh failed — prices.json unchanged.", file=sys.stderr)
+    await store.init_db()
+    if not await refresh_prices():
+        print("Live price refresh failed — prices unchanged.", file=sys.stderr)
         return 1
-    print(f"Updated fantasy/prices.json: {nd} drivers, {nc} constructors (live F1 Fantasy feed).")
-
-    from fantasy.rules import driver_price_m
-    from fantasy.price_catalog import known_driver_codes
 
     top = sorted(known_driver_codes(), key=lambda c: -driver_price_m(c))[:5]
     print("Most expensive drivers now:", ", ".join(f"{c} ${driver_price_m(c):.1f}M" for c in top))

@@ -1,28 +1,9 @@
-"""Single source of truth for race_key strings across agents and scheduler."""
+# shim: remove when whatsapp/ is retired
+import sys as _sys
 
-from __future__ import annotations
+from core import race_key as _module
 
-
-def make_race_key(year: int, circuit_key: str, *, round_number: int | None = None) -> str:
-    """
-    Canonical race_key used by calendar, orchestrator, and persistence.
-
-    Format: ``{year}_{circuit_slug}`` (e.g. ``2026_monaco``, ``2024_monaco``).
-
-    ``round_number`` is accepted for call-site clarity but is not part of the key
-    string (calendar and historical data use year + circuit only).
-    """
-    _ = round_number
-    return f"{year}_{circuit_key.lower()}"
-
-
-def parse_race_key(race_key: str) -> tuple[int, str] | None:
-    """Split ``year_circuit`` into components, or None if malformed."""
-    parts = race_key.split("_", 1)
-    if len(parts) != 2:
-        return None
-    try:
-        year = int(parts[0])
-    except ValueError:
-        return None
-    return year, parts[1]
+# Alias this legacy path onto the core module so re-exports AND the frozen
+# behaviour snapshot monkeypatches (which patch module globals here) reach the
+# same object the logic actually reads.
+_sys.modules[__name__] = _module

@@ -1,13 +1,15 @@
-"""Editable price catalog — JSON file + optional DB overlay.
+"""Editable price catalog — JSON baseline plus the live refresh overlay.
 
-Transfer recommendations are gated on ``prices_trusted()`` (operator sets
-``PITWALL_PRICES_VERIFIED=1`` after matching in-game values).
+Prices count as trusted when a successful live refresh (see ``feeds``) landed
+within :data:`_TRUSTED_WITHIN_HOURS`, or when the operator pins them with
+``PITWALL_PRICES_VERIFIED=1`` after matching in-game values.
 """
 
 from __future__ import annotations
 
 import json
 import os
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from loguru import logger
@@ -24,15 +26,27 @@ _CATALOG_PATH = Path(__file__).resolve().parent / "prices.json"
 # committed baseline). Layered on top of prices.json when present.
 _LIVE_PATH = Path(__file__).resolve().parent / "prices.live.json"
 
+# A live refresh this recent counts as trusted; past it, replies say so.
+_TRUSTED_WITHIN_HOURS = 48
+
 _driver_prices: dict[str, float] = dict(DRIVER_PRICES_M)
 _constructor_prices: dict[str, float] = dict(CONSTRUCTOR_PRICES_M)
 _updated_at: str | None = None
+# When the last successful live refresh landed (set by ``apply_live_prices``).
+# Reset by ``load_price_catalog`` so the baseline alone is never "fresh".
+_refreshed_at: datetime | None = None
 _loaded = False
 
 
 def load_price_catalog() -> None:
-    """Load the baseline prices.json, then overlay the live refresh if present."""
-    global _driver_prices, _constructor_prices, _updated_at, _loaded
+    """Load the baseline prices.json, then overlay the live refresh if present.
+
+    Resets ``_refreshed_at``: reloading the committed baseline is not a live
+    refresh, so prices only count as fresh once ``apply_live_prices`` sets a
+    real refresh time (on startup the store overlay does this straight after).
+    """
+    global _driver_prices, _constructor_prices, _updated_at, _refreshed_at, _loaded
+    _refreshed_at = None
     if not _CATALOG_PATH.is_file():
         _loaded = True
         logger.debug("price_catalog: no prices.json — using rules.py defaults")
@@ -78,17 +92,22 @@ def apply_live_prices(
     constructors: dict[str, float],
     *,
     persist: bool = True,
+    refreshed_at: datetime | None = None,
 ) -> None:
-    """Overlay live prices onto the in-memory catalog and stamp updated_at=today.
+    """Overlay live prices onto the in-memory catalog and record the refresh time.
 
     Args:
         drivers: CODE -> price in M.
         constructors: CODE -> price in M.
-        persist: Also write core/prices.live.json (gitignored runtime overlay)
-            so the refresh survives restart without touching the committed baseline.
+        persist: Also write core/prices.live.json (gitignored runtime overlay).
+            The Slack app persists through the store instead and passes
+            ``persist=False``; only the manual ``scripts/refresh_prices.py`` and
+            tests still write the file.
+        refreshed_at: When these prices were fetched. Defaults to now. Pass the
+            stored value when replaying a cached refresh on startup so the
+            freshness window reflects the real fetch, not this process's start.
     """
-    global _driver_prices, _constructor_prices, _updated_at, _loaded
-    from datetime import UTC, datetime
+    global _driver_prices, _constructor_prices, _updated_at, _refreshed_at, _loaded
 
     if not _loaded:
         load_price_catalog()
@@ -96,7 +115,8 @@ def apply_live_prices(
         _driver_prices.update({str(k).upper(): float(v) for k, v in drivers.items()})
     if constructors:
         _constructor_prices.update({str(k).upper(): float(v) for k, v in constructors.items()})
-    _updated_at = datetime.now(tz=UTC).strftime("%Y-%m-%d")
+    _refreshed_at = refreshed_at or datetime.now(tz=UTC)
+    _updated_at = _refreshed_at.strftime("%Y-%m-%d")
     _loaded = True
     if persist:
         try:
@@ -117,14 +137,70 @@ def apply_live_prices(
             logger.warning("price_catalog: failed to write prices.json: {}", exc)
 
 
-def prices_trusted() -> bool:
-    """True when operator confirmed prices match the official F1 Fantasy app."""
+def _env_prices_verified() -> bool:
+    """True when the operator pinned prices with ``PITWALL_PRICES_VERIFIED``."""
     return os.getenv("PITWALL_PRICES_VERIFIED", "").strip().lower() in {
         "1",
         "true",
         "yes",
         "on",
     }
+
+
+def prices_refreshed_at() -> datetime | None:
+    """When the last successful live refresh landed, or ``None`` if never."""
+    if not _loaded:
+        load_price_catalog()
+    return _refreshed_at
+
+
+def prices_fresh(now: datetime | None = None) -> bool:
+    """True when a live refresh landed within the trusted window."""
+    refreshed = prices_refreshed_at()
+    if refreshed is None:
+        return False
+    now = now or datetime.now(tz=UTC)
+    return now - refreshed < timedelta(hours=_TRUSTED_WITHIN_HOURS)
+
+
+def prices_trusted(now: datetime | None = None) -> bool:
+    """True when prices are current enough to reason over.
+
+    Trusted when a live refresh landed within the last
+    :data:`_TRUSTED_WITHIN_HOURS`, or when the operator pins them with
+    ``PITWALL_PRICES_VERIFIED`` (the override still works for a manual run).
+    """
+    return _env_prices_verified() or prices_fresh(now)
+
+
+def _refresh_age_phrase(now: datetime | None = None) -> str | None:
+    """Rough age of the last refresh as prose, e.g. "3 days ago"; ``None`` if never."""
+    refreshed = prices_refreshed_at()
+    if refreshed is None:
+        return None
+    now = now or datetime.now(tz=UTC)
+    seconds = max(0.0, (now - refreshed).total_seconds())
+    days = int(seconds // 86400)
+    if days >= 1:
+        return f"{days} day{'s' if days != 1 else ''} ago"
+    hours = int(seconds // 3600)
+    if hours >= 1:
+        return f"{hours} hour{'s' if hours != 1 else ''} ago"
+    return "less than an hour ago"
+
+
+def prices_staleness_note(now: datetime | None = None) -> str | None:
+    """One short line for replies when prices aren't trusted, else ``None``.
+
+    States what's observable — when prices last refreshed — rather than issuing
+    an instruction, so personal replies can surface it plainly.
+    """
+    if prices_trusted(now):
+        return None
+    phrase = _refresh_age_phrase(now)
+    if phrase is None:
+        return "_Prices haven't refreshed recently and may be out of date._"
+    return f"_Prices last updated {phrase} and may be out of date._"
 
 
 def catalog_updated_at() -> str | None:

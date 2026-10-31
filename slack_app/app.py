@@ -8,12 +8,18 @@ URL (see ``docs/slack_setup.md``).
 
 from __future__ import annotations
 
+import asyncio
 import os
 
 from loguru import logger
 
 import store
+from core.price_catalog import load_price_catalog
+from feeds.fantasy_prices import load_prices_from_store, refresh_prices
 from slack_app.handlers import handle
+
+# How often the background task re-fetches F1 Fantasy prices.
+PRICE_REFRESH_INTERVAL_SECONDS = 12 * 3600
 
 # Env vars the Socket Mode app needs. SLACK_BOT_TOKEN authorises chat:write;
 # SLACK_APP_TOKEN (an app-level token with connections:write) opens the socket.
@@ -51,12 +57,34 @@ def build_app():
     return app
 
 
+async def _price_refresh_loop(
+    *, interval_seconds: int = PRICE_REFRESH_INTERVAL_SECONDS
+) -> None:
+    """Refresh F1 Fantasy prices now, then every ``interval_seconds`` forever.
+
+    Runs inside the Bolt process (no APScheduler). Each refresh is best-effort:
+    on failure it keeps the last good prices and tries again next cycle.
+    """
+    while True:
+        await refresh_prices()
+        await asyncio.sleep(interval_seconds)
+
+
 async def run() -> None:
     """Create the DB if needed and serve the app over Socket Mode forever."""
     from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
 
     await store.init_db()
+    # Load the committed baseline, then overlay the last cached refresh so
+    # prices are current before the first live fetch completes and survive a
+    # redeploy (Railway wipes the filesystem; the store is on a volume).
+    load_price_catalog()
+    await load_prices_from_store()
     app = build_app()
+    refresh_task = asyncio.create_task(_price_refresh_loop())
     handler = AsyncSocketModeHandler(app, os.environ[APP_TOKEN_ENV])
     logger.info("PitWallAI Slack app starting (Socket Mode)…")
-    await handler.start_async()
+    try:
+        await handler.start_async()
+    finally:
+        refresh_task.cancel()

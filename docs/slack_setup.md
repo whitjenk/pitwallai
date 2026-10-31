@@ -41,6 +41,12 @@ unset — nothing starts until both are set.
 The SQLite file is created automatically on first run (default `./pitwall.sqlite`;
 override with `PITWALL_DB_PATH`). No Postgres, no migrations.
 
+On startup, and then every 12 hours, the app fetches current F1 Fantasy prices and
+caches them in that SQLite file, so budget maths stays current and survives a
+redeploy. If a fetch fails it keeps the last good prices; when the newest prices are
+more than 48 hours old, `team` and `picks` replies add a short line saying so. Set
+`PITWALL_PRICES_VERIFIED=1` to pin the catalog as trusted regardless.
+
 ## 4. Try it in Slack
 
 In any channel or DM in our workspace (every reply below is visible only to you):

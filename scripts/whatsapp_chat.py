@@ -110,7 +110,7 @@ async def _provision_sqlite_db() -> str:
     """
     import tempfile
 
-    import openf1.cache  # noqa: F401 — OpenF1CacheEntry on Base.metadata
+    import db.openf1_cache  # noqa: F401 — OpenF1CacheEntry on Base.metadata
 
     from db.models import Base
     from db.session import get_engine
@@ -130,7 +130,7 @@ async def _ensure_sqlite_schema() -> None:
     Used when DATABASE_URL points at a SQLite file so the subscriber, team and
     practice-signal tables exist without the Postgres-only migration path.
     """
-    import openf1.cache  # noqa: F401 — OpenF1CacheEntry on Base.metadata
+    import db.openf1_cache  # noqa: F401 — OpenF1CacheEntry on Base.metadata
 
     from db.models import Base
     from db.session import get_engine

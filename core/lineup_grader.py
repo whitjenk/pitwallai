@@ -22,23 +22,29 @@ from core.pick_generator import (
 from core.circuits import get_circuit_profile
 from core.rules import CONSTRUCTOR_PRICES_M
 from core.calendar import get_race_weekend, profile_circuit_key
+from core.race_key import parse_race_key
 
 
-# The DB-backed practice cache lives in the legacy intelligence layer, which
-# core must not import. These thin wrappers defer that import until call time
-# (prod only — tests monkeypatch both names), so `import core.lineup_grader`
-# stays free of the database. grade_lineup falls back to live OpenF1 laps when
-# the cache is empty, so the Slack app path never needs the cache at all.
+# These two names are kept because the frozen behaviour snapshot monkeypatches
+# them. `circuit_key_for_race` is now computed purely from the calendar, and
+# `load_practice_by_driver` no longer reads any database — it returns `{}` so
+# grading always falls back to the live OpenF1 laps path below. The Slack app
+# doesn't use this module at all (it grades through `core.api`).
 def circuit_key_for_race(race_key: str) -> str | None:
-    from intelligence.signal_cache import circuit_key_for_race as _impl
-
-    return _impl(race_key)
+    """Profile circuit key for a weekend, from the calendar alone."""
+    weekend = get_race_weekend(race_key)
+    if weekend is not None:
+        return profile_circuit_key(weekend.circuit_key)
+    parsed = parse_race_key(race_key)
+    if parsed is None:
+        return None
+    _year, circuit = parsed
+    return profile_circuit_key(circuit)
 
 
 async def load_practice_by_driver(circuit_key: str) -> dict:
-    from intelligence.signal_cache import load_practice_by_driver as _impl
-
-    return await _impl(circuit_key)
+    """No persisted practice cache in the new stack — grading uses live laps."""
+    return {}
 
 _CHIP_LABEL = {
     "limitless": "LIMITLESS",

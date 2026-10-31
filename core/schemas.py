@@ -7,7 +7,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from core.circuits import CircuitProfile
-from models.pick_explanation import PickExplanation
+from core.pick_explanation import PickExplanation
 
 
 class PracticeSignal(BaseModel):

@@ -1,27 +1,24 @@
-"""Postgres-backed TTL cache for OpenF1 API responses."""
+"""Postgres-backed TTL cache for OpenF1 API responses (legacy db layer).
+
+This used to live in ``openf1/cache.py``, but ``openf1`` must not import the
+database (brief 010). The pure key/tier helpers now live in
+``openf1/cache_keys.py``; the storage table and read/write helpers stay here in
+the legacy ``db`` layer, for the WhatsApp-era app that still uses Postgres. The
+Slack app caches through the SQLite ``store`` instead and never touches this.
+"""
 
 from __future__ import annotations
 
-import hashlib
-import json
 from datetime import UTC, datetime, timedelta
-from enum import Enum
 from typing import Any
 
 from sqlalchemy import DateTime, String, Text, select
 from sqlalchemy.orm import Mapped, mapped_column
 
+from openf1.cache_keys import CacheTier, cache_key_for  # noqa: F401 — re-exported
+
 from db.models import Base
 from db.session import get_session
-
-
-class CacheTier(str, Enum):
-    """TTL policy buckets for OpenF1 endpoints."""
-
-    SESSION = "session"  # 24 hours
-    LAP = "lap"  # 1 hour
-    LIVE = "live"  # 30 seconds
-
 
 _TTL_SECONDS: dict[CacheTier, int] = {
     CacheTier.SESSION: 24 * 3600,
@@ -47,21 +44,6 @@ class OpenF1CacheEntry(Base):
     )
 
 
-def cache_key_for(endpoint: str, params: dict[str, Any]) -> str:
-    """
-    Build a stable cache key from endpoint and query parameters.
-
-    Args:
-        endpoint: API path segment (e.g. laps).
-        params: Query parameters.
-
-    Returns:
-        SHA256 hex digest (truncated).
-    """
-    normalized = json.dumps({"endpoint": endpoint, "params": params}, sort_keys=True, default=str)
-    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:64]
-
-
 async def cache_get(key: str) -> list[dict[str, Any]] | None:
     """
     Return cached payload if present and not expired.
@@ -72,6 +54,8 @@ async def cache_get(key: str) -> list[dict[str, Any]] | None:
     Returns:
         Deserialized JSON list or None.
     """
+    import json
+
     now = datetime.now(tz=UTC)
     try:
         async with get_session() as session:
@@ -107,6 +91,8 @@ async def cache_set(
         tier: TTL tier.
         payload: Raw JSON list to store.
     """
+    import json
+
     expires = datetime.now(tz=UTC) + timedelta(seconds=_TTL_SECONDS[tier])
     try:
         async with get_session() as session:

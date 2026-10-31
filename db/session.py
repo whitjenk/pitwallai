@@ -116,6 +116,29 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
             raise
 
 
+async def overlay_prices_from_db() -> int:
+    """Merge latest ``driver_prices`` table rows over the JSON price catalog.
+
+    Lives here, next to its only caller (``init_db``), so the pure price catalog
+    in ``core`` need not import the legacy ``intelligence`` repository. Mutates
+    the catalog's in-memory driver prices in place.
+    """
+    from intelligence.repository import get_all_current_prices
+
+    from core import price_catalog as pc
+
+    try:
+        db_prices = await get_all_current_prices()
+    except ValueError:
+        return 0
+    if not db_prices:
+        return 0
+    if not pc._loaded:
+        pc.load_price_catalog()
+    pc._driver_prices.update({k.upper(): float(v) for k, v in db_prices.items()})
+    return len(db_prices)
+
+
 async def init_db() -> None:
     """
     Create database tables if they do not exist.
@@ -132,7 +155,7 @@ async def init_db() -> None:
     engine = get_engine()
     await upgrade_schema(engine)
 
-    from fantasy.price_catalog import load_price_catalog, overlay_prices_from_db
+    from fantasy.price_catalog import load_price_catalog
 
     load_price_catalog()
     try:

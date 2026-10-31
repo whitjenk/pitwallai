@@ -38,10 +38,9 @@ from typing import Any
 
 import pytest
 
-from circuits.profiles import get_circuit_profile
-from db.models import FantasyTeam
-from fantasy import price_catalog as pc
-from fantasy.rules import (
+from core.circuits import get_circuit_profile
+from core import price_catalog as pc
+from core.rules import (
     CONSTRUCTOR_PRICES_M,
     DRIVER_PRICES_M,
     constructor_points_race,
@@ -50,11 +49,53 @@ from fantasy.rules import (
     driver_points_sprint,
     transfer_penalty_points,
 )
-from intelligence import lineup_grader as lg
-from intelligence.lineup_grader import perfect_lineup_from_positions
-from intelligence.pick_generator import generate_picks
-from intelligence.schemas import PickGeneratorInput, PracticeSignal, QualifyingRow
-from scheduler.calendar import RaceWeekend
+from core import lineup_grader as lg
+from core.lineup_grader import perfect_lineup_from_positions
+from core.pick_generator import generate_picks
+from core.schemas import PickGeneratorInput, PracticeSignal, QualifyingRow
+from core.calendar import RaceWeekend
+
+
+class FantasyTeam:
+    """Local stand-in for the legacy ``db.models.FantasyTeam``.
+
+    Core reads a user's team purely by attribute, so a plain object with the
+    same attribute names (``driver_1``…``driver_5``, ``constructor_1/2``,
+    ``remaining_budget``, ``transfers_available``, ``chips_used``) is enough to
+    drive the snapshotted paths — no database model required.
+    """
+
+    def __init__(
+        self,
+        *,
+        phone: str | None = None,
+        driver_1: str | None = None,
+        driver_2: str | None = None,
+        driver_3: str | None = None,
+        driver_4: str | None = None,
+        driver_5: str | None = None,
+        constructor_1: str | None = None,
+        constructor_2: str | None = None,
+        remaining_budget: float = 0.0,
+        transfers_available: int = 0,
+        chips_used: dict | None = None,
+        league_mode_enabled: bool = False,
+        league_size: int | None = None,
+    ) -> None:
+        self.phone = phone
+        self.driver_1 = driver_1
+        self.driver_2 = driver_2
+        self.driver_3 = driver_3
+        self.driver_4 = driver_4
+        self.driver_5 = driver_5
+        self.constructor_1 = constructor_1
+        self.constructor_2 = constructor_2
+        self.remaining_budget = remaining_budget
+        self.transfers_available = transfers_available
+        self.chips_used = chips_used if chips_used is not None else {}
+        self.league_mode_enabled = league_mode_enabled
+        self.league_size = league_size
+
 
 SNAP_DIR = Path(__file__).parent / "snapshots"
 
@@ -397,7 +438,7 @@ def test_snapshot_chip_plan() -> None:
         _far_future_weekend("marina_bay", "Singapore Grand Prix", is_sprint=False),
         _far_future_weekend("austin", "United States Grand Prix", is_sprint=True),
     ]
-    from intelligence.chip_planner import generate_chip_plan
+    from core.chip_planner import generate_chip_plan
 
     plan = generate_chip_plan(team, races).model_dump(mode="json")
     # Strip the time- and random-dependent fields.

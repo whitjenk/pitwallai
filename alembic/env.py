@@ -11,7 +11,7 @@ from sqlalchemy import engine_from_config, pool
 from db.models import Base
 
 # Import models so Base.metadata is complete (incl. OpenF1 cache).
-import openf1.cache  # noqa: F401
+import db.openf1_cache  # noqa: F401
 
 config = context.config
 if config.config_file_name is not None:

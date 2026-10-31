@@ -73,6 +73,11 @@ a safety cap.
 These steps assume the PitWallAI service already exists on Railway from the
 WhatsApp days. We're repurposing it, not creating a new one.
 
+> **Don't change the Python version.** The repo root has a `.python-version`
+> file pinning **3.11**. Railway's Nixpacks build reads it and builds on the same
+> Python as CI. The project doesn't import on 3.13, so leave that file alone — no
+> `PYTHON_VERSION`/`NIXPACKS_PYTHON_VERSION` override in the service variables.
+
 ### 5.1 Swap the environment variables
 
 Open the PitWallAI service → **Variables**.

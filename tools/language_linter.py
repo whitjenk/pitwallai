@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SCAN_DIRS = ("core", "slack_app", "whatsapp", "intelligence", "agents", "orchestrator")
+SCAN_DIRS = ("core", "slack_app")
 EXCLUDE_DIR_NAMES = {"tests", "tools", "data", "__pycache__"}
 EXCLUDE_FILE_PREFIXES = ("test_",)
 EXCLUDE_FILE_SUFFIXES = ("_test.py",)

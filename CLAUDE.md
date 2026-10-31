@@ -17,8 +17,8 @@ Target shape: `core/` (fantasy logic, no I/O beyond the OpenF1 client) → `stor
 
 ## Environment and tests
 ```bash
-python3.11 -m venv venv || (pip install uv && uv venv -p 3.11 venv)   # 3.11 only; uv fetches it if missing
-source venv/bin/activate
+python3.11 -m venv .venv || (pip install uv && uv venv -p 3.11 .venv)   # 3.11 only; uv fetches it if missing
+source .venv/bin/activate
 pip install -r requirements.txt            # with a uv venv: uv pip install -r requirements.txt
 PYTHONPATH=. PITWALL_DECODE_BACKEND=rules pytest --ignore=tests/test_ws_stress.py -q   # what CI gates on
 python tools/language_linter.py                                                       # evidence-language lint
@@ -26,6 +26,8 @@ python tools/language_linter.py                                                 
 - Use Python **3.11** (CI's version). The project fails to import on 3.13. Don't "fix" that by upgrading packages.
 - Tests that download the Hugging Face embedding model fail without network access. If that's the
   only failure, say so in the PR and rely on CI (which pre-downloads it). Brief 003 removes those tests.
+- Name the virtualenv **`.venv`** (not `venv`). `tests/test_mask_phone_audit.py` scans the repo and only skips `.venv`.
+- Don't create a `.env` file in the checkout. Settings read it, and it breaks tests that expect missing env vars.
 - `tests/test_ws_stress.py` needs a live server — never part of a normal task's check.
 - No API keys are needed for tests; LLM providers are mocked. Never add tests that hit the network.
 

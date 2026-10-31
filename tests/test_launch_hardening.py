@@ -95,13 +95,11 @@ async def test_openf1_404_treated_as_empty(monkeypatch) -> None:
     """OpenF1 returns 404 for an empty result set — must degrade to [], so
     find_session_key returns None instead of raising (which would crash the
     race monitor)."""
-    from openf1 import cache, client as of1
+    from openf1 import client as of1
 
-    async def _miss(_key):
-        return None
-
-    monkeypatch.setattr(cache, "cache_get", _miss)
-
+    # The client no longer has a built-in Postgres cache (brief 010): a plain
+    # OpenF1Client() caches nothing, so the request always reaches the fake HTTP
+    # layer below — no cache monkeypatch needed.
     class _Resp:
         status_code = 404
 

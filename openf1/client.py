@@ -1,16 +1,16 @@
-"""Async OpenF1 REST client with rate limiting and Postgres cache."""
+"""Async OpenF1 REST client with rate limiting and an optional response cache."""
 
 from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any, TypeVar
+from typing import Any, Protocol, TypeVar
 
 import httpx
 from loguru import logger
 from pydantic import BaseModel
 
-from openf1.cache import CacheTier, cache_get, cache_key_for, cache_set
+from openf1.cache_keys import CacheTier, cache_key_for
 from openf1.models import (
     CarDataSample,
     DriverSessionRow,
@@ -31,22 +31,37 @@ _BASE_URL = "https://api.openf1.org/v1"
 _MIN_INTERVAL_S = 0.25  # 4 requests per second max
 
 
+class OpenF1Cache(Protocol):
+    """A response cache the client can read through. Keyed by ``cache_key_for``."""
+
+    async def get(self, key: str) -> list[dict[str, Any]] | None: ...
+
+    async def set(
+        self, key: str, endpoint: str, tier: CacheTier, data: list[dict[str, Any]]
+    ) -> None: ...
+
+
 class OpenF1Client:
     """
     Rate-limited async client for OpenF1.
 
-    All fetch methods return typed Pydantic models. Responses are cached in
-    Postgres with tier-appropriate TTLs.
+    All fetch methods return typed Pydantic models. When a ``cache`` is supplied
+    responses are read/written through it with tier-appropriate TTLs; with the
+    default ``None`` the client talks to OpenF1 directly and caches nothing.
     """
 
-    def __init__(self, *, timeout_s: float = 30.0) -> None:
+    def __init__(
+        self, *, timeout_s: float = 30.0, cache: OpenF1Cache | None = None
+    ) -> None:
         """
         Initialize the client.
 
         Args:
             timeout_s: HTTP request timeout in seconds.
+            cache: Optional response cache (``None`` = no caching).
         """
         self._timeout = timeout_s
+        self._cache = cache
         self._lock = asyncio.Lock()
         self._last_request_at = 0.0
 
@@ -78,13 +93,14 @@ class OpenF1Client:
             List of JSON objects.
         """
         key = cache_key_for(endpoint, params)
-        cached = await cache_get(key)
-        if cached is not None:
-            logger.debug("OpenF1 cache hit endpoint={} params={}", endpoint, params)
-            from openf1.health import record_openf1_success
+        if self._cache is not None:
+            cached = await self._cache.get(key)
+            if cached is not None:
+                logger.debug("OpenF1 cache hit endpoint={} params={}", endpoint, params)
+                from openf1.health import record_openf1_success
 
-            record_openf1_success()
-            return cached
+                record_openf1_success()
+                return cached
 
         await self._throttle()
         url = f"{_BASE_URL}/{endpoint}"
@@ -109,7 +125,8 @@ class OpenF1Client:
 
             record_openf1_failure(exc)
             raise
-        await cache_set(key, endpoint, tier, data)
+        if self._cache is not None:
+            await self._cache.set(key, endpoint, tier, data)
         from openf1.health import record_openf1_success
 
         record_openf1_success()

@@ -254,20 +254,3 @@ def known_constructor_codes() -> frozenset[str]:
     if not _loaded:
         load_price_catalog()
     return frozenset(_constructor_prices.keys())
-
-
-async def overlay_prices_from_db() -> int:
-    """Merge latest driver_prices table rows over the JSON catalog."""
-    from intelligence.repository import get_all_current_prices
-
-    try:
-        db_prices = await get_all_current_prices()
-    except ValueError:
-        return 0
-    if not db_prices:
-        return 0
-    global _driver_prices
-    if not _loaded:
-        load_price_catalog()
-    _driver_prices.update({k.upper(): float(v) for k, v in db_prices.items()})
-    return len(db_prices)

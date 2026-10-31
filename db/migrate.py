@@ -31,7 +31,7 @@ async def upgrade_schema(engine: AsyncEngine) -> None:
     """
     import asyncio
 
-    import openf1.cache  # noqa: F401 — OpenF1CacheEntry on Base.metadata
+    import db.openf1_cache  # noqa: F401 — OpenF1CacheEntry on Base.metadata
 
     from db.alembic_runner import run_alembic_upgrade
 

@@ -35,13 +35,21 @@ Backed by **three agents** that run across the weekend (the pre-lock pipeline is
 
 ---
 
-## Subscribe
+## Use it in Slack
 
-Text **SUBSCRIBE** to the PitWallAI WhatsApp number (set `WHATSAPP_DISPLAY_NUMBER` in production — generate a QR with `python scripts/generate_subscribe_qr.py`).  
-Send a screenshot of your F1 Fantasy **My Team** screen (or text **TEAM**) to set up your squad.  
-Text **HELP** for commands · **UNSUBSCRIBE** to stop messages · **DELETE** to erase your data ([PRIVACY.md](PRIVACY.md)).
+PitWallAI runs as a Slack app for one friends' league, in **Socket Mode** — no
+public URL, no webhook. Everything happens through one slash command:
 
-*Closed beta — free, open source, no app required. Operator checklist: [BETA_INVITE.md](BETA_INVITE.md).*
+```
+/pitwall help     – list the commands
+/pitwall team …   – set up your squad (drivers, constructors, budget, transfers)
+/pitwall picks    – transfer and captain suggestions for the next race
+/pitwall forget   – erase everything the app stores about you
+```
+
+Setting it up in your own workspace and deploying it takes about ten minutes:
+**[docs/slack_setup.md](docs/slack_setup.md)** walks through creating the app
+from the manifest, the two tokens, running it locally, and deploying on Railway.
 
 ---
 
@@ -55,25 +63,21 @@ Picks are scored against **Grand Prix race results** using the official F1 Fanta
 
 ## Run it yourself
 
-No API key required to boot the server locally:
+Clone the repo, install the deps, and run the Slack app (Python **3.11**):
 
 ```bash
 git clone https://github.com/whitjenk/f1-tactical-intelligence-hive.git
 cd f1-tactical-intelligence-hive
-python3.11 -m venv venv && source venv/bin/activate
+python3.11 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-python main.py
-# PitWallAI → http://localhost:8000/
+export SLACK_BOT_TOKEN="xoxb-…" SLACK_APP_TOKEN="xapp-…"
+python -m slack_app
 ```
 
-To try the WhatsApp commands without a phone number, use the terminal simulator:
-
-```bash
-python scripts/whatsapp_chat.py
-# then type: PICKS
-```
-
-Picks are built from real OpenF1 FP1/FP2 lap data — no live WhatsApp connection needed.
+You need a Slack app and its two tokens first —
+**[docs/slack_setup.md](docs/slack_setup.md)** has the full walkthrough (local
+and Railway). Picks are built from real OpenF1 FP1/FP2 lap data; no API key is
+required to boot.
 
 ---
 
@@ -149,7 +153,7 @@ Fantasy scoring and prices in this repo are simplified approximations of publish
 
 Live timing and session data may be sourced from [OpenF1](https://openf1.org/) and other public APIs; see their terms for attribution and use.
 
-WhatsApp is a trademark of Meta Platforms, Inc. Subscribers opt in via **SUBSCRIBE** and can opt out with **UNSUBSCRIBE** or erase all data with **DELETE**. See [PRIVACY.md](PRIVACY.md) for what we store and how deletion works.
+PitWallAI runs in a single Slack workspace you control. Run `/pitwall forget` to erase everything the app stores about you. See [PRIVACY.md](PRIVACY.md) for what we store and how deletion works.
 
 ## Legal
 

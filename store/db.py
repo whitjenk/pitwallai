@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 from datetime import UTC, datetime
+from pathlib import Path
 
 from sqlalchemy import JSON, Float, Integer, String, delete, event, select
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
@@ -66,6 +67,20 @@ def _db_path() -> str:
     return os.environ.get("PITWALL_DB_PATH", DEFAULT_DB_PATH)
 
 
+def _ensure_parent_dir(path: str) -> None:
+    """Create the directory that will hold the SQLite file, if it's missing.
+
+    On Railway the DB lives on a mounted volume (``PITWALL_DB_PATH=/data/
+    pitwall.sqlite``). Creating the parent means a fresh deploy — or any path
+    into a directory that doesn't exist yet — just works, instead of SQLite
+    failing to open the file. A bare filename like ``./pitwall.sqlite`` has no
+    parent to make.
+    """
+    parent = Path(path).parent
+    if str(parent) not in ("", "."):
+        parent.mkdir(parents=True, exist_ok=True)
+
+
 def _engine() -> AsyncEngine:
     """Return the async engine for the current ``PITWALL_DB_PATH``.
 
@@ -75,6 +90,7 @@ def _engine() -> AsyncEngine:
     path = _db_path()
     engine = _engines.get(path)
     if engine is None:
+        _ensure_parent_dir(path)
         engine = create_async_engine(f"sqlite+aiosqlite:///{path}")
         _apply_sqlite_pragmas(engine)
         _engines[path] = engine

@@ -2,4 +2,9 @@
 builder = "NIXPACKS"
 
 [deploy]
-startCommand = "uvicorn main:app --host 0.0.0.0 --port $PORT"
+# Socket Mode: one long-running process that connects out to Slack. No public
+# domain, port or healthcheck — those were only for the old FastAPI webhook.
+startCommand = "python -m slack_app"
+# Cap restarts so a crash loop (e.g. a bad token) can't quietly burn usage.
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5

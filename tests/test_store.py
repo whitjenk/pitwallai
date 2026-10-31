@@ -58,6 +58,26 @@ async def test_init_db_is_idempotent(tmp_db):
     assert await store.list_teams() == []
 
 
+async def test_init_db_creates_missing_parent_dir(tmp_path, monkeypatch):
+    """PITWALL_DB_PATH into a non-existent directory: the store creates it.
+
+    This is the Railway case — the volume mounts at /data and the DB lives at
+    /data/pitwall.sqlite. Pointing at a directory that isn't there yet must
+    just work rather than failing to open the file.
+    """
+    path = tmp_path / "data" / "nested" / "pitwall.sqlite"
+    assert not path.parent.exists()
+    monkeypatch.setenv("PITWALL_DB_PATH", str(path))
+    try:
+        await store.init_db()
+        await store.upsert_team(_team())
+        assert path.exists()
+        assert (await store.get_team("U1")) is not None
+    finally:
+        store_db._engines.pop(str(path), None)
+        store_db._factories.pop(str(path), None)
+
+
 async def test_upsert_and_get_team(tmp_db):
     await store.init_db()
     await store.upsert_team(_team())

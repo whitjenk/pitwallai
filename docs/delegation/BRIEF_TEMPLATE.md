@@ -1,13 +1,16 @@
-# Brief NNN: <outcome in one line>
+# Brief NNN: <outcome in one line — this is also the PR title>
 
-**Status:** todo · **Size:** S / M · **Touches:** <main dirs/files>
+**Status:** todo · **Size:** S / M (M = up to ~500 changed lines excl. deletions; bigger → split)
+**Touches:** <main dirs/files>
+**Depends on:** <brief numbers that must be merged first, or "nothing">
+**Protected (must not be edited):** `tests/test_behaviour_snapshot.py`, `tests/snapshots/`, <others>
 
 ## Goal
 One or two sentences: what will be true when this is done, and why it matters to a user or to you.
 
 ## Context
-What the agent can't infer from the code: background, links, what you've already tried,
-relevant files to start from.
+What the agent can't infer from the code: background, what you've already tried or verified,
+the files to start from.
 
 ## In scope
 - ...
@@ -17,8 +20,8 @@ relevant files to start from.
 
 ## Acceptance criteria
 - [ ] <checkable statement> — verified by <test / command / manual step>
-- [ ] Full test suite and `tools/language_linter.py` pass
-- [ ] Version bumped in `pitwallai/version.py` if user-facing behaviour changed
+- [ ] Protected files untouched (`git diff --stat main -- <files>` is empty)
+- [ ] Full test suite + `tools/language_linter.py` pass; CI green
 
 ## How I'll review it
-What you'll actually do to check it (e.g. run `scripts/whatsapp_chat.py`, send `PICKS`, expect ...).
+What you'll actually do, in under 15 minutes, to decide merge or send back.

@@ -34,6 +34,16 @@ openai>=1.50,<2.0
 # `BetaUserLocationParam` in >=0.70. Bump this together with pydantic-ai.
 anthropic>=0.40,<0.70
 
+# opentelemetry pinned to 1.38.0 across the family: pydantic-ai 0.8 imports
+# `opentelemetry._events`, dropped by opentelemetry-api 1.45, and chromadb <1.0
+# needs the sdk/exporter packages to match the api version. Remove when brief
+# 003 drops chromadb.
+opentelemetry-api==1.38.0
+opentelemetry-sdk==1.38.0
+opentelemetry-proto==1.38.0
+opentelemetry-exporter-otlp-proto-grpc==1.38.0
+opentelemetry-exporter-otlp-proto-common==1.38.0
+
 # Optional extras if you prefer slim installs:
 # pip install "pydantic-ai-slim[google,openai,anthropic]"
 

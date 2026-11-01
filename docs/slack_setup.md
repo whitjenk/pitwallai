@@ -1,4 +1,4 @@
-# Running the PitWallAI Slack app locally
+# Setting up the PitWallAI Slack app
 
 The app runs in **Socket Mode**: one long-running Python process connects out to
 Slack, so there's no public URL, no webhook to host, and no request signatures to

@@ -1,164 +1,99 @@
 # PitWallAI
 
-> The most useful thing an F1 fantasy fan has on race weekend.
+> An F1 Fantasy companion for your friends' league, living in your Slack.
 
-> **Independent fan project.** PitWallAI is not affiliated with, endorsed by, or connected to Formula 1, F1 Fantasy, ESPN, or any F1 team or constructor. All recommendations are informational only and intended for use within the F1 Fantasy game. Nothing here constitutes financial, betting, or investment advice.
+> **Independent fan project.** Not affiliated with, endorsed by, or connected to Formula 1, F1 Fantasy, the FIA, or any team or driver. Picks are informational only, for use within the F1 Fantasy game. Not financial, betting or investment advice. See [DISCLAIMER.md](DISCLAIMER.md).
 
-PitWallAI is an open-source F1 fantasy companion on WhatsApp. Every Sunday it logs the strategic moments of the race — safety cars, retirements, pit windows — each stamped with the source-signal time and our decode time, so you can forward your league chat exactly what we saw and when. Across the weekend it also sends personalized, budget-aware picks before lock, and scores every one against the actual race result.
-
-![PitWallAI on WhatsApp — the Sunday "what we called" recap](docs/sample-message.png)
-
-[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
+[![CI](https://github.com/whitjenk/pitwallai/actions/workflows/ci.yml/badge.svg)](https://github.com/whitjenk/pitwallai/actions/workflows/ci.yml)
+[![Python 3.11](https://img.shields.io/badge/python-3.11-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![CI](https://github.com/whitjenk/f1-tactical-intelligence-hive/actions/workflows/ci.yml/badge.svg)](https://github.com/whitjenk/f1-tactical-intelligence-hive/actions/workflows/ci.yml)
-[![OpenF1](https://img.shields.io/badge/OpenF1-REST-red)](https://openf1.org/)
+
+PitWallAI is a Slack bot for an F1 Fantasy league. Everyone saves their team and gets private transfer and captain reads built from real practice lap data. Lineups get graded, locked and scored in the league channel, and the bot plays along with its own pick every weekend, so there's always someone to beat.
+
+![The league channel: a lineup graded on Friday, a lock on Saturday, and the scores on Sunday night (example)](docs/images/league-channel.png)
 
 ---
 
-## What it does
+## Commands
 
-**The receipts (Sunday).** During the race, **RaceMonitor** logs every strategic moment as PitWallAI sees it — safety cars, retirements, pit windows, weather flips — each saved with its source-signal time and our decode time. After the flag, **CalledRecap** drops a forwardable summary to your WhatsApp with a shareable link (`/called/{token}`), so you can show your league chat exactly what we saw and when. This is the part that works from race one — no track record required to be useful.
+Everything goes through one slash command. Personal things are only visible to you. League banter posts in the channel.
 
-**The picks (Thursday → Saturday).** Across the weekend you also get personalized picks before lock — filtered to your actual team, remaining budget, and available transfers — and every pick is scored against the real race result. The model re-weights its own signals each week, so the picks get sharper over the season as results accumulate.
+| Command | What it does | Who sees it |
+|---|---|---|
+| `/pitwall team ANT LEC ALO HUL LAW MER FER budget 1.5 transfers 2` | Save your squad. `budget` is the money **left** after your team, not the $100M cap | Only you |
+| `/pitwall team` | Show your saved squad | Only you |
+| `/pitwall picks` | Transfer and captain reads for the next race | Only you |
+| `/pitwall grade <lineup> captain XXX` | Grade a lineup against practice pace and the bot's picks | Channel |
+| `/pitwall lock <lineup> captain XXX` | Lock your call for the next race | You, plus a one-liner in the channel (no lineup shown) |
+| `/pitwall score [race]` | Your locked call vs the bot vs the result vs the perfect lineup | Channel |
+| `/pitwall record` | Your season so far vs the bot | Channel |
+| `/pitwall forget` | Erase everything the bot stores about you | Only you |
 
-Backed by **three agents** that run across the weekend (the pre-lock pipeline is one agent with three stages).
+Drivers and constructors can be three-letter codes (`ANT`, `MER`) or names (`antonelli`, `mercedes`). Add a chip with `3x`, `limitless`, `wildcard`, `no negative`, `autopilot` or `final fix`.
 
-**PicksAgent (Thursday → Saturday)** — three stages, one versioned pipeline:
-
-- **Thursday (context)** — circuit history, championship pressure per driver, weather forecast, FIA directives.
-- **Friday (practice)** — FP1/FP2 lap pace and statistical anomalies (e.g. a driver 0.8s off teammate pace, or slower in FP2 than FP1).
-- **Saturday (quali)** — your team, budget, and qualifying result; models legal transfer combinations and sends the swap that pencils out.
-
-**Sunday (race)** — **RaceMonitor** watches the OpenF1 stream and timestamps every strategic moment as PitWallAI sees it: safety cars, retirements, pit windows, weather flips. The picks are already locked — the value here is *receipts*. Each call-out is saved with its source-signal time and our decode time so you can show your league chat afterward what we saw and when.
-
-**Sunday night** — **ScorerLearner** logs every pick against the actual result and updates season accuracy + signal-quality weights. **CalledRecap** drops a forwardable summary of the weekend's call-outs to your WhatsApp with a shareable link (`/called/{token}`) — same idea as the season recap, but for live race intelligence.
-
----
-
-## Use it in Slack
-
-PitWallAI runs as a Slack app for one friends' league, in **Socket Mode** — no
-public URL, no webhook. Everything happens through one slash command:
-
-```
-/pitwall help     – list the commands
-/pitwall team …   – set up your squad (drivers, constructors, budget, transfers)
-/pitwall picks    – transfer and captain suggestions for the next race
-/pitwall forget   – erase everything the app stores about you
-```
-
-Setting it up in your own workspace and deploying it takes about ten minutes:
-**[docs/slack_setup.md](docs/slack_setup.md)** walks through creating the app
-from the manifest, the two tokens, running it locally, and deploying on Railway.
+![A private picks reply, only visible to the person who asked (example)](docs/images/private-picks.png)
 
 ---
 
-## Season GP pick hit rate
+## A race weekend with PitWallAI
 
-Picks are scored against **Grand Prix race results** using the official F1 Fantasy race points scale (not qualifying or sprint). Updated after every race.
+| When | What to do |
+|---|---|
+| **Friday, after FP2** | `picks` and `grade`. This is the first time real practice pace is in |
+| **Saturday, before qualifying** | `lock` your final lineup (F1 Fantasy locks at qualifying) |
+| **Sunday, after the race** | `score`, then `record` for the season table |
 
-[Link to live leaderboard]
+**Timing note:** the free [OpenF1](https://openf1.org/) data the bot uses is paused from 30 minutes before each live session until 30 minutes after it. During that window, commands that need fresh data may not answer. Fixing this is on the [roadmap](docs/delegation/ROADMAP.md).
 
 ---
 
-## Run it yourself
+## Try it
 
-Clone the repo, install the deps, and run the Slack app (Python **3.11**):
+### From the terminal (no Slack needed)
 
 ```bash
-git clone https://github.com/whitjenk/f1-tactical-intelligence-hive.git
-cd f1-tactical-intelligence-hive
-python3.11 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-export SLACK_BOT_TOKEN="xoxb-…" SLACK_APP_TOKEN="xapp-…"
-python -m slack_app
+git clone https://github.com/whitjenk/pitwallai.git
+cd pitwallai
+uv venv -p 3.11 .venv && source .venv/bin/activate   # uv downloads Python 3.11 if needed
+uv pip install -r requirements.txt
+python scripts/pitwall_cli.py                        # type commands like `help`, `picks`
 ```
 
-You need a Slack app and its two tokens first —
-**[docs/slack_setup.md](docs/slack_setup.md)** has the full walkthrough (local
-and Railway). Picks are built from real OpenF1 FP1/FP2 lap data; no API key is
-required to boot.
+The CLI runs the same handlers as the Slack bot against a separate local database (`pitwall-cli.sqlite`), and labels every reply **PRIVATE** or **CHANNEL**. Use `--user sam` to act as a different league-mate. No `uv`? Install it with `brew install uv` or see [docs.astral.sh/uv](https://docs.astral.sh/uv/).
+
+### In Slack
+
+Create a Slack app from the included manifest, add two tokens, and run `python -m slack_app`. It uses Socket Mode, so there's no public URL or webhook to host. **[docs/slack_setup.md](docs/slack_setup.md)** walks through it step by step, including deploying on Railway (about $5 a month).
 
 ---
 
 ## How it works
 
-**Three agents.** One orchestrator (`LeadStrategist`). One shared `RaceContext` across the weekend.
-
-`PicksAgent` owns Thursday–Saturday as three **stages** (`context` → `practice` → `quali`). Stage logic still lives in `agents/context_builder.py`, `practice_analyst.py`, and `quali_strategist.py` for testing — the consolidation is the *named interface*, not a merge of code paths.
-
 ```
-Thursday–Saturday (PicksAgent)          Sunday              Post-race
-────────────────────────────────────────────────────────────────────
- context → practice → quali      RaceMonitor        ScorerLearner
-         │                              │                    │
-         └──────────────┬───────────────┴────────────────────┘
-                    LeadStrategist
-                          │
-                  WhatsApp → Fan
+OpenF1 laps & sessions ─┐
+F1 Fantasy prices ──────┤
+                        ▼
+                     core/         rules, prices, practice-pace projections,
+                                   transfers, grading, scoring (pure, no database)
+                        │
+          store/  ◄─────┼────►  slack_app/   /pitwall handlers + Slack (Bolt, Socket Mode)
+   one SQLite file:     │
+   teams, locks, cache  ▼
+                     your league's Slack channel
 ```
 
-Practice signals come from real OpenF1 FP1/FP2 lap data (OpenF1 never publishes
-radio transcripts), synthesised into a `PracticeSignal` per driver per session:
+- **Picks come from practice lap pace**: gap to the session leader, FP1 → FP2 improvement, long-run counts and teammate gaps, plus the qualifying grid once it's set and how easy the circuit is to overtake at.
+- **Evidence, not instructions.** The bot says what it saw ("+0.18s to the leader on the soft") rather than telling you what to do. A linter in CI enforces that wording.
+- **Prices stay current**: they refresh from the game's price feed at startup and every 12 hours.
 
-```
-OpenF1 REST (/v1/laps, /v1/drivers) → build_lap_only_signals
-        │
-        ▼
-PracticeSignal (Pydantic v2)
-  ├── pace_satisfaction: float   ← gap to session leader
-  ├── setup_sentiment: float     ← pace standing + FP1→FP2 improvement
-  ├── tire_confidence: float     ← timed-lap count vs the field
-  └── anomaly_flags: list[str]   ← teammate_gap_*, session_regression, short_long_run_count
-```
-
-→ Deeper architecture, CLI, tests, and data-science notes: **[TECHNICAL.md](TECHNICAL.md)**
+Developer notes: **[TECHNICAL.md](TECHNICAL.md)**.
 
 ---
 
-## Design principles
+## How this repo is built
 
-**Evidence, not instructions.** Signals carry a `raw_evidence` trail (e.g. "lap-only: best 78.4s, +0.3s to leader"), not a `recommended_action`. The system tells you what it saw and what history says about it. You decide. A fan who second-guesses their read because an AI gave a conflicting instruction has lost something. That is not a tool — that is a liability.
-
-**Provenance over assertion.** Every pick and recap shows the evidence that drove it — lap gaps, anomaly flags, qualifying grid — so you can check the reasoning rather than take it on faith.
-
----
-
-## Stack
-
-| Layer | Technology |
-|---|---|
-| Agent orchestration | PydanticAI (model-agnostic) |
-| Default LLM | Gemini 2.0 Flash via Vertex AI |
-| BYOK | Claude / GPT-4o-mini / Ollama |
-| Live data | OpenF1 API (REST) |
-| Async runtime | asyncio |
-| API server | FastAPI + uvicorn |
-| Database | Postgres (Railway) |
-| Delivery | WhatsApp Cloud API |
-
----
-
-## Contributing
-
-Contributions are open. The **3-agent** topology (`PicksAgent`, `RaceMonitor`, `ScorerLearner`) is the current contract — see [TECHNICAL.md](TECHNICAL.md) for stage schedules, WhatsApp commands, and data models. New weekend logic should extend an existing stage or agent, not add a fourth top-level agent without discussion. Pattern: typed `AgentRunDependencies`, Pydantic v2 outputs, asyncio-native, `PIPELINE_VERSION` bump in [pitwallai/version.py](pitwallai/version.py) when behaviour changes.
-
-## Disclaimer
-
-PitWallAI is an independent open-source fan project. It is **not** affiliated with, endorsed by, or sponsored by Formula One Licensing B.V., the FIA, or the official [F1 Fantasy](https://fantasy.formula1.com/) game. F1, Formula 1, and related marks are trademarks of their respective owners.
-
-**AI-generated intelligence.** Picks, recaps, and other outputs may use rules engines, statistical models, and large language models. They can be wrong, incomplete, or out of date — especially when data is missing, sessions change, or the official game applies penalties after the fact. PitWallAI is **not** financial or betting advice. You are responsible for your own fantasy decisions; always verify lineup, budget, transfers, and lock time in the official F1 Fantasy app.
-
-Fantasy scoring and prices in this repo are simplified approximations of published game rules — always confirm transfers and points in the official app before lock.
-
-Live timing and session data may be sourced from [OpenF1](https://openf1.org/) and other public APIs; see their terms for attribution and use.
-
-PitWallAI runs in a single Slack workspace you control. Run `/pitwall forget` to erase everything the app stores about you. See [PRIVACY.md](PRIVACY.md) for what we store and how deletion works.
-
-## Legal
-
-PitWallAI is an independent fan project not affiliated with Formula 1, F1 Fantasy, ESPN, or any F1 constructor. All picks are informational only. See [DISCLAIMER.md](DISCLAIMER.md) for full terms.
+Most changes are made by AI coding agents working from short written briefs, with a human picking the work, reviewing and merging. The playbook, the briefs and the roadmap are in **[docs/delegation/](docs/delegation/)**. Agent conventions live in [CLAUDE.md](CLAUDE.md). Contributions follow the same loop: open an issue with a brief (see [BRIEF_TEMPLATE.md](docs/delegation/BRIEF_TEMPLATE.md)).
 
 ## License
 
-MIT
+MIT. See [LICENSE](LICENSE).

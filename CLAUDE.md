@@ -17,9 +17,9 @@ Data comes from `openf1/` and `feeds/`. Briefs live in `docs/delegation/briefs/`
 
 ## Environment and tests
 ```bash
-python3.11 -m venv .venv || (pip install uv && uv venv -p 3.11 .venv)   # 3.11 only; uv fetches it if missing
-source .venv/bin/activate
-pip install -r requirements.txt            # with a uv venv: uv pip install -r requirements.txt
+# uv downloads Python 3.11 if it isn't installed (install uv: `brew install uv` or https://docs.astral.sh/uv/)
+uv venv -p 3.11 .venv && source .venv/bin/activate
+uv pip install -r requirements.txt         # uv venvs have no pip: always `uv pip`, never plain `pip`
 PYTHONPATH=. PITWALL_DECODE_BACKEND=rules pytest -q                                   # what CI gates on
 python tools/language_linter.py                                                       # evidence-language lint
 ```

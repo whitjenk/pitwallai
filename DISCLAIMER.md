@@ -27,15 +27,15 @@ PitWallAI is designed to inform, not direct. All outputs use observational langu
 
 ## Data sources
 
-All race data is sourced from OpenF1 (open-source, community maintained). No proprietary F1 data is used or redistributed. Price prediction models use community-reported price changes and publicly available historical results.
+Race data comes from [OpenF1](https://openf1.org/) (open-source, community maintained). Current player prices are read from the F1 Fantasy game's public price feed so budget maths stays accurate; they're used only inside the app and not redistributed. Prices and points in this repo are approximations of the published game rules. Always confirm transfers, budget and lock time in the official app.
 
 ## Accuracy
 
-PitWallAI publishes its prediction track record openly at [pitwallai.app/accuracy](https://pitwallai.app/accuracy). Past accuracy does not guarantee future results. Confidence scores are probabilistic estimates, not certainties.
+Picks are estimates from practice lap pace and qualifying, and they can be wrong. The bot scores its own picks against real results in the league channel, so you can see how it's doing. Past results don't guarantee future ones.
 
-## Subscriber data
+## Your data
 
-We store your phone number and timezone to deliver picks. Data is not sold or shared. Text **DELETE** on WhatsApp to erase your subscriber profile and associated team data.
+PitWallAI runs inside a single Slack workspace. It stores your Slack user ID and display name, the team you save, and the lineups you lock, in one SQLite file controlled by whoever runs the bot. Nothing is sold or shared. Run `/pitwall forget` to erase everything it stores about you.
 
 ## Open source
 
@@ -43,4 +43,4 @@ PitWallAI is MIT licensed. The code, models, and methodology are fully open for 
 
 ---
 
-Last updated: 2026-05-27
+Last updated: 2026-11-01

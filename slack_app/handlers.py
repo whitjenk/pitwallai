@@ -22,7 +22,6 @@ import store
 from core import calendar as cal
 from core.api import (
     grade_lineup,
-    project_race,
     race_calendar,
     score_lineup,
     suggest_transfers,
@@ -32,6 +31,7 @@ from core.price_catalog import prices_staleness_note
 from core.types import Lineup as CoreLineup
 from core.types import Team as CoreTeam
 from openf1.health import openf1_health
+from slack_app import reminders
 from slack_app.actions import IM_IN, PING_OK
 from slack_app.openf1_client import OpenF1Paused, build_client
 from slack_app.poster import Poster
@@ -39,7 +39,8 @@ from slack_app.reply import IN_CHANNEL, Reply, slack_date
 
 _HELP = (
     "*PitWallAI* — F1 Fantasy for the league.\n"
-    "• `/pitwall team HAM LEC NOR PIA VER MCL FER budget 2.5 transfers 2` — save your squad\n"
+    "• `/pitwall team HAM LEC NOR PIA VER MCL FER budget 1.5 transfers 2` — save your squad "
+    "(`budget` is the money left after your team, not the $100M cap)\n"
     "• `/pitwall team` — show your saved squad\n"
     "• `/pitwall picks` — transfer and captain reads for the next race\n"
     "• `/pitwall grade HAM LEC ANT RUS VER MER FER captain HAM 3x` — grade a lineup (posts to the channel)\n"
@@ -48,6 +49,7 @@ _HELP = (
     "• `/pitwall record` — your season so far vs mine (posts to the channel)\n"
     "• `/pitwall channel` — run it in the league channel (invite me first) to set where I post\n"
     "• `/pitwall ping` — I DM you, so you can check DMs and buttons reach you\n"
+    "• `/pitwall dms off|on` — turn my lock-reminder DMs off or on (your team still locks automatically)\n"
     "• `/pitwall forget` — erase everything I store about you\n"
     "• `/pitwall help` — this list"
 )
@@ -230,17 +232,6 @@ def _fmt_lineup(lineup: CoreLineup) -> str:
     return f"{drivers} | {constructors}{tail}"
 
 
-def _model_lineup_from_projection(projection: dict) -> dict | None:
-    """The bot's own pick at lock time, as a plain dict, or ``None``."""
-    if not projection:
-        return None
-    return {
-        "drivers": list(projection.get("top_drivers", [])),
-        "constructors": list(projection.get("top_constructors", [])),
-        "captain": projection.get("captain"),
-    }
-
-
 def _model_as_lineup(model_lineup: dict | None) -> CoreLineup | None:
     """Rebuild a :class:`CoreLineup` from a stored model pick, if present."""
     if not model_lineup or not model_lineup.get("drivers"):
@@ -373,25 +364,15 @@ async def _handle_lock(args: str, user_id: str, team_id: str, display_name: str)
 
     weekend = cal.get_race_weekend(race_key)
     client = build_client()
-    projection_error: BaseException | None = None
-    try:
-        projection = await project_race(race_key, client)
-    except Exception as exc:  # the lock still saves without the bot's own pick
-        logger.warning("lock projection failed user={} race={}: {}", user_id, race_key, exc)
-        projection = {}
-        projection_error = exc
-    model_lineup = _model_lineup_from_projection(projection)
-
-    await store.lock_lineup(
-        store.LockedLineup(
-            slack_user_id=user_id,
-            race_key=race_key,
-            drivers=lineup.drivers,
-            constructors=lineup.constructors,
-            chip=lineup.chip,
-            captain=lineup.captain,
-            model_lineup=model_lineup,
-        )
+    # The save-and-projection path is shared with the ✅ button and the auto-lock.
+    model_lineup, projection_error = await reminders.save_lock(
+        user_id=user_id,
+        race_key=race_key,
+        drivers=lineup.drivers,
+        constructors=lineup.constructors,
+        chip=lineup.chip,
+        captain=lineup.captain,
+        client=client,
     )
 
     name = _race_name(race_key)
@@ -642,6 +623,35 @@ async def _handle_ping(
     )
 
 
+async def _handle_dms(args: str, user_id: str, team_id: str, display_name: str) -> Reply:
+    """Turn lock-reminder DMs off or on, or show the current setting.
+
+    Opting out stops the reminder DM only — the saved team still locks
+    automatically at the deadline, so an opted-out player still has a lineup.
+    """
+    arg = args.strip().lower()
+    if arg == "off":
+        await store.set_dms_enabled(user_id, False)
+        return Reply(
+            "Reminder DMs off. I won't DM you before a lock. Your saved team still "
+            "locks automatically at the deadline, so you still have a lineup. "
+            "`/pitwall dms on` turns them back on."
+        )
+    if arg == "on":
+        await store.set_dms_enabled(user_id, True)
+        return Reply(
+            "Reminder DMs on. I'll DM you a few hours before each lock with your "
+            "saved team and a one-tap lock. `/pitwall dms off` turns them off."
+        )
+    if arg:
+        return Reply("I didn't follow that. Use `/pitwall dms off`, `/pitwall dms on`, or `/pitwall dms` to see the setting.")
+    state = "on" if await store.get_dms_enabled(user_id) else "off"
+    return Reply(
+        f"Your lock-reminder DMs are *{state}*. Change it with `/pitwall dms on` "
+        "or `/pitwall dms off`."
+    )
+
+
 async def _handle_help(args: str, user_id: str, team_id: str, display_name: str) -> Reply:
     return Reply(_HELP)
 
@@ -653,6 +663,7 @@ _HANDLERS = {
     "lock": _handle_lock,
     "score": _handle_score,
     "record": _handle_record,
+    "dms": _handle_dms,
     "forget": _handle_forget,
     "help": _handle_help,
 }

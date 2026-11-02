@@ -120,6 +120,14 @@ The bot only posts in a channel it's been invited to (we don't give it
    on them. For the DM to arrive, the Messages tab must be enabled (it is, via the
    manifest in section 1).
 
+**Lock reminders.** About 6 hours before each fantasy lock (override with
+`PITWALL_REMINDER_HOURS_BEFORE_LOCK`), the bot DMs everyone with a saved team
+their lineup, captain and free transfers, with a one-tap **✅ Same team** lock. Any
+player who doesn't respond has their saved team locked automatically at the
+deadline, so everyone always has a lineup. A player can stop the DM with
+`/pitwall dms off` (they're still auto-locked) and bring it back with
+`/pitwall dms on`.
+
 **Scheduled posts only fire while the process is running.** They come from the
 in-process scheduler, so nothing posts while the bot is stopped. Deploy on
 Railway (section 6) before inviting the league, so updates land even when your

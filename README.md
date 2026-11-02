@@ -29,6 +29,7 @@ Everything goes through one slash command. Personal things are only visible to y
 | `/pitwall record` | Your season so far vs the bot | Channel |
 | `/pitwall channel` | Set the channel the bot posts league updates in — run it **in that channel**, after inviting the bot | You, plus an intro post in the channel |
 | `/pitwall ping` | The bot DMs you, so you can check its DMs and buttons reach you | Only you, plus a DM to you |
+| `/pitwall dms off` / `on` | Turn the lock-reminder DMs off or on (your saved team still locks automatically) | Only you |
 | `/pitwall forget` | Erase everything the bot stores about you | Only you |
 
 Drivers and constructors can be three-letter codes (`ANT`, `MER`) or names (`antonelli`, `mercedes`). Add a chip with `3x`, `limitless`, `wildcard`, `no negative`, `autopilot` or `final fix`.
@@ -42,8 +43,11 @@ Drivers and constructors can be three-letter codes (`ANT`, `MER`) or names (`ant
 | When | What to do |
 |---|---|
 | **Friday, after FP2** | `picks` and `grade`. This is the first time real practice pace is in |
-| **Saturday, before qualifying** | `lock` your final lineup (F1 Fantasy locks at qualifying) |
+| **~6 h before the lock** | The bot DMs everyone with a saved team: their team, the captain on record and free transfers, with **✅ Same team** and **✏️ Edit** buttons. One tap locks your call |
+| **Saturday, before qualifying** | `lock` your final lineup (F1 Fantasy locks at qualifying). Didn't respond to the reminder? Your saved team is locked automatically at the deadline, so you always have a lineup |
 | **Sunday, after the race** | `score`, then `record` for the season table |
+
+Prefer not to be DMed? `/pitwall dms off` stops the reminder — your saved team still locks automatically.
 
 **Timing note:** the free [OpenF1](https://openf1.org/) data the bot uses is paused from 30 minutes before each live session until 30 minutes after it. During that window `picks`, `grade`, `lock` and `score` answer from data fetched before the lockout, and when they can't they say OpenF1 is paused and roughly when fresh data is back (in your own time zone) — rather than failing.
 

@@ -13,7 +13,7 @@ import pytest
 
 import store
 from openf1.health import record_openf1_failure, reset_openf1_health
-from slack_app import handlers
+from slack_app import handlers, reminders
 from slack_app.openf1_client import OpenF1Paused
 from store import db as store_db
 
@@ -146,7 +146,7 @@ async def test_lock_nothing_yet_bot_line(tmp_db, monkeypatch):
     async def no_proj(race_key, client):
         return {}
 
-    monkeypatch.setattr(handlers, "project_race", no_proj)
+    monkeypatch.setattr(reminders, "project_race", no_proj)
     confirm, _channel = await _call(f"lock {_LINEUP}")
     assert "No practice laps" in confirm.text  # lock still saved, no model pick
 
@@ -158,7 +158,7 @@ async def test_lock_paused_bot_line(tmp_db, monkeypatch):
     async def paused(race_key, client):
         raise OpenF1Paused(_WINDOW_CLOSE)
 
-    monkeypatch.setattr(handlers, "project_race", paused)
+    monkeypatch.setattr(reminders, "project_race", paused)
     confirm, _channel = await _call(f"lock {_LINEUP}")
     assert "<!date^" in confirm.text and "Qualifying" in confirm.text
     # The lineup was still locked despite the paused projection.
@@ -171,7 +171,7 @@ async def _lock_for_score(monkeypatch):
     async def proj(race_key, client):
         return {"race_key": race_key, "top_drivers": ["LEC"], "top_constructors": ["FER"], "captain": "LEC"}
 
-    monkeypatch.setattr(handlers, "project_race", proj)
+    monkeypatch.setattr(reminders, "project_race", proj)
     await _call(f"lock {_LINEUP}")
 
 

@@ -287,6 +287,26 @@ async def test_forget_user_does_not_touch_bot_posts(tmp_db):
     assert await store.count_bot_posts("T1", "2026-W45") == 1
 
 
+# ── user_prefs (brief 014) ────────────────────────────────────────────────────
+async def test_dms_enabled_defaults_on_and_persists(tmp_db):
+    await store.init_db()
+    assert await store.get_dms_enabled("U1") is True  # no row = opted in
+    await store.set_dms_enabled("U1", False)
+    assert await store.get_dms_enabled("U1") is False
+    await store.set_dms_enabled("U1", True)
+    assert await store.get_dms_enabled("U1") is True
+
+
+async def test_forget_user_removes_user_prefs(tmp_db):
+    await store.init_db()
+    await store.set_dms_enabled("U1", False)
+    await store.set_dms_enabled("U2", False)
+    await store.forget_user("U1")
+    # U1's preference is gone (back to the default); U2 is untouched.
+    assert await store.get_dms_enabled("U1") is True
+    assert await store.get_dms_enabled("U2") is False
+
+
 def test_store_imports_nothing_forbidden():
     """store/ must not import from db/, whatsapp/, core/, intelligence/."""
     forbidden = {"db", "whatsapp", "core", "intelligence"}

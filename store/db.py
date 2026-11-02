@@ -11,7 +11,18 @@ import os
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy import JSON, Float, Integer, String, delete, event, func, select, update
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Float,
+    Integer,
+    String,
+    delete,
+    event,
+    func,
+    select,
+    update,
+)
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -110,6 +121,20 @@ class BotPostRow(Base):
     iso_week: Mapped[str] = mapped_column(String)
     ts: Mapped[str] = mapped_column(String)
     posted_at: Mapped[datetime] = mapped_column()
+
+
+class UserPrefRow(Base):
+    """Per-user preferences, keyed by Slack user (brief 014).
+
+    Just the lock-reminder DM toggle today. It *is* per-user data, so
+    ``forget_user`` deletes the row. ``create_all`` adds this new table to an
+    existing SQLite file without touching the others.
+    """
+
+    __tablename__ = "user_prefs"
+
+    slack_user_id: Mapped[str] = mapped_column(String, primary_key=True)
+    dms_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
 def _db_path() -> str:
@@ -257,10 +282,31 @@ async def forget_user(slack_user_id: str) -> None:
             )
         )
         await s.execute(
+            delete(UserPrefRow).where(UserPrefRow.slack_user_id == slack_user_id)
+        )
+        await s.execute(
             update(LeagueConfigRow)
             .where(LeagueConfigRow.admin_user_id == slack_user_id)
             .values(admin_user_id=None)
         )
+        await s.commit()
+
+
+async def get_dms_enabled(slack_user_id: str) -> bool:
+    """Whether this user wants reminder DMs. Default ``True`` (no row = opted in)."""
+    async with _session()() as s:
+        row = await s.get(UserPrefRow, slack_user_id)
+        return True if row is None else bool(row.dms_enabled)
+
+
+async def set_dms_enabled(slack_user_id: str, enabled: bool) -> None:
+    """Record whether this user wants reminder DMs."""
+    async with _session()() as s:
+        row = await s.get(UserPrefRow, slack_user_id)
+        if row is None:
+            row = UserPrefRow(slack_user_id=slack_user_id)
+            s.add(row)
+        row.dms_enabled = enabled
         await s.commit()
 
 

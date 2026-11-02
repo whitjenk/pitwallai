@@ -80,8 +80,8 @@ That's four channel posts a week (Mon, Thu, Sat, Sun), which is the cap. The Sat
 |---|---|---|---|
 | 012 | Real session times, data through the lockout, in-process scheduler | — | São Paulo |
 | 013 | Social foundation: league channel, DMs, buttons, can't-post alert, weekly post cap | 012 | Las Vegas invite |
-| 014 | Saturday lock reminder DM with "same team? ✅ / edit"; DM opt-out; clearer budget wording (issue 5); ownership reveal after lock (moves to 015 if 014 runs long) | 013 | Las Vegas lock (Fri 20 Nov, 23:00 ET) |
-| 015 | Weekly head-to-head vs league-mates and the bot; Monday awards + results post | 014 | Qatar/Abu Dhabi trial |
+| 014 | Saturday lock reminder DM with "same team? ✅ / edit", auto-lock at the deadline; DM opt-out; clearer budget wording (issue 5) | 013 | Las Vegas lock (Fri 20 Nov, 23:00 ET) |
+| 015 | Ownership reveal after lock; weekly head-to-head vs league-mates and the bot; Monday awards + results post | 014 | Qatar/Abu Dhabi trial |
 | — | "Any race" fixes for score/picks/grade/lock (issues 2–3) | 015 | Off-season |
 | 016 | Thursday preview + prediction buttons, scored on Monday | 015 | 2027 launch |
 | 017 | Stints + trophy cabinet | 015 | 2027 launch |

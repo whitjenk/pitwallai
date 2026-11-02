@@ -30,7 +30,7 @@ import store  # noqa: E402
 from core.price_catalog import load_price_catalog  # noqa: E402
 from feeds.fantasy_prices import load_prices_from_store, refresh_prices  # noqa: E402
 from slack_app.handlers import handle  # noqa: E402
-from slack_app.reply import IN_CHANNEL  # noqa: E402
+from slack_app.reply import IN_CHANNEL, to_plain_text  # noqa: E402
 
 _TEAM_ID = "TCLI"
 
@@ -51,7 +51,9 @@ async def _run(text: str, user: str) -> None:
     replies = result if isinstance(result, list) else [result]
     for reply in replies:
         who = "CHANNEL - everyone sees this" if reply.visibility == IN_CHANNEL else f"PRIVATE - only {user} sees this"
-        print(f"\n[{who}]\n{reply.text}\n")
+        # Slack renders <!date^…> tokens in the reader's time zone; the terminal
+        # can't, so show the plain UTC fallback instead of the raw token.
+        print(f"\n[{who}]\n{to_plain_text(reply.text)}\n")
 
 
 async def main() -> int:

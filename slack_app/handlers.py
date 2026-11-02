@@ -14,11 +14,12 @@ one-line channel note that names who locked in but never their lineup.
 from __future__ import annotations
 
 import re
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from loguru import logger
 
 import store
+from core import calendar as cal
 from core.api import (
     grade_lineup,
     project_race,
@@ -30,8 +31,9 @@ from core.parse import extract_captain, extract_lineup, parse_team_command
 from core.price_catalog import prices_staleness_note
 from core.types import Lineup as CoreLineup
 from core.types import Team as CoreTeam
-from slack_app.openf1_client import build_client
-from slack_app.reply import IN_CHANNEL, Reply
+from openf1.health import openf1_health
+from slack_app.openf1_client import OpenF1Paused, build_client
+from slack_app.reply import IN_CHANNEL, Reply, slack_date
 
 _HELP = (
     "*PitWallAI* — F1 Fantasy for the league.\n"
@@ -47,9 +49,15 @@ _HELP = (
 )
 
 
+def _now() -> datetime:
+    """Current UTC instant — one seam so tests (and local weekend runs) can
+    freeze the clock that both race selection and the pause replies read."""
+    return datetime.now(tz=UTC)
+
+
 def _next_race_key(now: datetime | None = None) -> str | None:
     """race_key of the next weekend by race time, or ``None`` if the season's done."""
-    now = now or datetime.now(tz=UTC)
+    now = now or _now()
     upcoming = sorted(
         (w for w in race_calendar() if w.race_utc > now), key=lambda w: w.race_utc
     )
@@ -57,7 +65,7 @@ def _next_race_key(now: datetime | None = None) -> str | None:
 
 
 def _next_race() -> object | None:
-    now = datetime.now(tz=UTC)
+    now = _now()
     upcoming = sorted(
         (w for w in race_calendar() if w.race_utc > now), key=lambda w: w.race_utc
     )
@@ -74,6 +82,74 @@ def _append_price_note(text: str) -> str:
     """
     note = prices_staleness_note()
     return f"{text}\n\n{note}" if note else text
+
+
+# ── Honest "data isn't there" replies (brief 012) ─────────────────────────────
+# OpenF1's free data is paused around every live session; outside that it just
+# drops in and out. When a command can't answer, we say which it is instead of a
+# flat "couldn't pull it", so a reader knows whether to wait for a known reopen.
+def _round5(minutes: float) -> int:
+    """Round minutes to the nearest 5, never below 0 — for a rough '~N min'."""
+    return max(0, round(minutes / 5) * 5)
+
+
+def _paused_message(session_name: str, reopens_at: datetime, now: datetime) -> str:
+    """'…paused while Qualifying is on. It's back around 16:30 (in ~40 min).'"""
+    mins = _round5((reopens_at - now).total_seconds() / 60)
+    token = slack_date(reopens_at.timestamp(), f"{reopens_at:%H:%M} UTC")
+    return (
+        f"OpenF1's free live data is paused while {session_name} is on. "
+        f"It's back around {token} (in ~{mins} min)."
+    )
+
+
+def _pause_recently_ended(now: datetime) -> bool:
+    """True if some session's pause window ended within the last 2 hours.
+
+    A session can overrun its scheduled slot, so data stays paused past the
+    nominal reopen; worth saying when OpenF1 looks unreachable just after one.
+    """
+    for weekend in race_calendar():
+        for session in cal.sessions(weekend):
+            reopened = session.end + cal.DATA_PAUSE_MARGIN
+            if timedelta() <= now - reopened <= timedelta(hours=2):
+                return True
+    return False
+
+
+def _unreachable_message(now: datetime) -> str:
+    text = (
+        "OpenF1 couldn't be reached just now, and it isn't a scheduled pause. "
+        "The free data drops in and out — another try in a few minutes often works."
+    )
+    if _pause_recently_ended(now):
+        text += " A session just wrapped up too, and those sometimes overrun, so the pause may not have fully lifted."
+    return text
+
+
+def _data_status_message(now: datetime, exc: BaseException | None) -> str | None:
+    """Paused or unreachable message, or ``None`` when data is genuinely absent.
+
+    ``None`` means the request *succeeded* and OpenF1 simply has nothing yet
+    (e.g. no practice run), so the caller supplies its own domain wording.
+    """
+    pause = cal.data_pause_at(now)
+    if pause is not None:
+        return _paused_message(pause.session.name, pause.reopens_at, now)
+    if isinstance(exc, OpenF1Paused):
+        # Clock skew near a window edge: trust the client's own reopen time.
+        return _paused_message("a live session", exc.reopens_at, now)
+    if exc is not None or openf1_health().is_unavailable:
+        return _unreachable_message(now)
+    return None
+
+
+def _no_practice_message(weekend) -> str:
+    """The only reply allowed to mention practice not being loaded yet."""
+    name = getattr(weekend, "display_name", None) or getattr(weekend, "race_key", "")
+    fp1 = weekend.fp1_utc
+    token = slack_date(fp1.timestamp(), f"{fp1:%a %d %b %H:%M} UTC")
+    return f"No practice laps for the {name} yet. FP1 starts {token}."
 
 
 def _format_team(team: store.Team) -> str:
@@ -228,7 +304,8 @@ async def _handle_picks(args: str, user_id: str, team_id: str, display_name: str
         out = await suggest_transfers(core_team, weekend.race_key, client)
     except Exception as exc:  # never leak a stack trace to the user
         logger.warning("picks failed user={} race={}: {}", user_id, weekend.race_key, exc)
-        return Reply("Couldn't pull the picks right now — the data wasn't available. Try again later.")
+        msg = _data_status_message(_now(), exc) or _no_practice_message(weekend)
+        return Reply(msg)
     return Reply(_append_price_note(_format_picks(out, weekend)))
 
 
@@ -249,17 +326,16 @@ async def _handle_grade(args: str, user_id: str, team_id: str, display_name: str
     if race_key is None:
         return Reply("No upcoming race on the calendar to grade against.")
 
+    weekend = cal.get_race_weekend(race_key)
     client = build_client()
     try:
         graded = await grade_lineup(lineup, race_key, client)
     except Exception as exc:  # never leak a stack trace to the channel
         logger.warning("grade failed user={} race={}: {}", user_id, race_key, exc)
-        return Reply("Couldn't grade that right now — the data wasn't available. Try again later.")
+        return Reply(_data_status_message(_now(), exc) or _no_practice_message(weekend))
     if not graded:
-        return Reply(
-            f"No practice pace loaded for the {_race_name(race_key)} yet, "
-            "so there's nothing to grade a lineup against. Try again once FP1/FP2 are in."
-        )
+        # Call succeeded but no pace yet (or a pause the stale cache just covered).
+        return Reply(_data_status_message(_now(), None) or _no_practice_message(weekend))
 
     matched = graded["drivers_matching_model"]
     cap = graded["captain"]
@@ -291,12 +367,15 @@ async def _handle_lock(args: str, user_id: str, team_id: str, display_name: str)
     if race_key is None:
         return [Reply("No upcoming race on the calendar to lock for.")]
 
+    weekend = cal.get_race_weekend(race_key)
     client = build_client()
+    projection_error: BaseException | None = None
     try:
         projection = await project_race(race_key, client)
     except Exception as exc:  # the lock still saves without the bot's own pick
         logger.warning("lock projection failed user={} race={}: {}", user_id, race_key, exc)
         projection = {}
+        projection_error = exc
     model_lineup = _model_lineup_from_projection(projection)
 
     await store.lock_lineup(
@@ -320,9 +399,13 @@ async def _handle_lock(args: str, user_id: str, team_id: str, display_name: str)
         bot = _model_as_lineup(model_lineup)
         confirm_lines.append(f"🤖 My pick at lock: {_fmt_lineup(bot)}")
     else:
-        confirm_lines.append(
-            "🤖 No practice pace loaded yet, so I don't have my own pick on record for this one."
-        )
+        status = _data_status_message(_now(), projection_error)
+        if status is None:
+            status = (
+                _no_practice_message(weekend)
+                + " No pick from me on record for this one yet."
+            )
+        confirm_lines.append(f"🤖 {status}")
     confirm_lines.append(f"Run `/pitwall score` after the {name} to see how it went.")
 
     channel_line = f"🔒 <@{user_id}> locked in for the {name}."
@@ -353,16 +436,18 @@ async def _handle_score(args: str, user_id: str, team_id: str, display_name: str
         captain=locked.captain,
     )
     client = build_client()
+    not_classified = f"The {name} hasn't been classified yet — I'll have a score once it's done."
     try:
         you = await score_lineup(your_lineup, race_key, client)
         bot_lineup = _model_as_lineup(locked.model_lineup)
         bot = await score_lineup(bot_lineup, race_key, client) if bot_lineup else None
     except Exception as exc:  # never leak a stack trace to the channel
         logger.warning("score failed user={} race={}: {}", user_id, race_key, exc)
-        return Reply("Couldn't score that right now — the data wasn't available. Try again later.")
+        return Reply(_data_status_message(_now(), exc) or not_classified)
 
     if you is None:
-        return Reply(f"The {name} hasn't been classified yet — I'll have a score once it's done.")
+        # Call succeeded: the race genuinely isn't in yet (not a pause/outage).
+        return Reply(_data_status_message(_now(), None) or not_classified)
 
     perfect = you["perfect"]
     you_t = you["total"]

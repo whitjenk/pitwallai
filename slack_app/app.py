@@ -17,6 +17,7 @@ import store
 from core.price_catalog import load_price_catalog
 from feeds.fantasy_prices import load_prices_from_store, refresh_prices
 from slack_app.handlers import handle
+from slack_app.scheduler import start_scheduler
 
 # How often the background task re-fetches F1 Fantasy prices.
 PRICE_REFRESH_INTERVAL_SECONDS = 12 * 3600
@@ -82,9 +83,13 @@ async def run() -> None:
     await load_prices_from_store()
     app = build_app()
     refresh_task = asyncio.create_task(_price_refresh_loop())
+    # Warms the OpenF1 cache as each live-session lockout lifts (None if disabled).
+    scheduler_task = start_scheduler()
     handler = AsyncSocketModeHandler(app, os.environ[APP_TOKEN_ENV])
     logger.info("PitWallAI Slack app starting (Socket Mode)…")
     try:
         await handler.start_async()
     finally:
         refresh_task.cancel()
+        if scheduler_task is not None:
+            scheduler_task.cancel()

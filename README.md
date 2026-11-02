@@ -43,7 +43,7 @@ Drivers and constructors can be three-letter codes (`ANT`, `MER`) or names (`ant
 | **Saturday, before qualifying** | `lock` your final lineup (F1 Fantasy locks at qualifying) |
 | **Sunday, after the race** | `score`, then `record` for the season table |
 
-**Timing note:** the free [OpenF1](https://openf1.org/) data the bot uses is paused from 30 minutes before each live session until 30 minutes after it. During that window, commands that need fresh data may not answer. Fixing this is on the [roadmap](docs/delegation/ROADMAP.md).
+**Timing note:** the free [OpenF1](https://openf1.org/) data the bot uses is paused from 30 minutes before each live session until 30 minutes after it. During that window `picks`, `grade`, `lock` and `score` answer from data fetched before the lockout, and when they can't they say OpenF1 is paused and roughly when fresh data is back (in your own time zone) — rather than failing.
 
 ---
 

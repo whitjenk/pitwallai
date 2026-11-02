@@ -50,3 +50,8 @@ One GitHub issue per brief, titled with its outcome line, linking to the brief f
      └────────── 005 ─────────────┘
 ```
 005 can run alongside any of 001–004.
+
+Social layer (ROADMAP → Social layer) is strictly sequential, since every brief touches `slack_app/handlers.py` and `store/db.py`:
+```
+012 ── 013 ── 014 ── 015 ─┬─ "any race" fixes ── 016 ── 017 ── 018 (gated)
+```

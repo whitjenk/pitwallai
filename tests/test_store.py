@@ -228,6 +228,65 @@ async def test_forget_user_does_not_touch_job_runs(tmp_db):
     assert await store.job_has_run("warmup:2026_interlagos:FP1:5") is True
 
 
+# ── league_config + bot_posts (brief 013) ────────────────────────────────────
+async def test_set_and_get_league_config(tmp_db):
+    await store.init_db()
+    assert await store.get_league_config("T1") is None
+    await store.set_league_config("T1", "C-league", "U-admin")
+    config = await store.get_league_config("T1")
+    assert config is not None
+    assert config.channel_id == "C-league"
+    assert config.admin_user_id == "U-admin"
+    assert config.set_at is not None
+
+
+async def test_set_league_config_moves_the_channel(tmp_db):
+    await store.init_db()
+    await store.set_league_config("T1", "C-old", "U-admin")
+    await store.set_league_config("T1", "C-new", "U-admin")
+    config = await store.get_league_config("T1")
+    assert config.channel_id == "C-new"
+
+
+async def test_forget_user_nulls_admin_but_keeps_channel(tmp_db):
+    await store.init_db()
+    await store.set_league_config("T1", "C-league", "U1")
+    await store.forget_user("U1")
+    config = await store.get_league_config("T1")
+    assert config is not None  # the channel stays
+    assert config.channel_id == "C-league"
+    assert config.admin_user_id is None  # the per-user pointer is gone
+
+
+async def test_forget_user_leaves_another_leagues_admin(tmp_db):
+    await store.init_db()
+    await store.set_league_config("T1", "C-1", "U1")
+    await store.set_league_config("T2", "C-2", "U2")
+    await store.forget_user("U1")
+    assert (await store.get_league_config("T1")).admin_user_id is None
+    assert (await store.get_league_config("T2")).admin_user_id == "U2"
+
+
+async def test_record_and_count_bot_posts(tmp_db):
+    await store.init_db()
+    assert await store.count_bot_posts("T1", "2026-W45") == 0
+    await store.record_bot_post("T1", "C-league", "reveal", "2026-W45", "1.0")
+    await store.record_bot_post("T1", "C-league", "lock", "2026-W45", "2.0")
+    await store.record_bot_post("T1", "C-league", "reveal", "2026-W46", "3.0")
+    assert await store.count_bot_posts("T1", "2026-W45") == 2
+    assert await store.count_bot_posts("T1", "2026-W46") == 1
+    # Counts are per workspace.
+    assert await store.count_bot_posts("T2", "2026-W45") == 0
+
+
+async def test_forget_user_does_not_touch_bot_posts(tmp_db):
+    """bot_posts holds no per-user data, so forget_user leaves it alone."""
+    await store.init_db()
+    await store.record_bot_post("T1", "C-league", "reveal", "2026-W45", "1.0")
+    await store.forget_user("U1")
+    assert await store.count_bot_posts("T1", "2026-W45") == 1
+
+
 def test_store_imports_nothing_forbidden():
     """store/ must not import from db/, whatsapp/, core/, intelligence/."""
     forbidden = {"db", "whatsapp", "core", "intelligence"}

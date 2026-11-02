@@ -30,9 +30,13 @@ import store  # noqa: E402
 from core.price_catalog import load_price_catalog  # noqa: E402
 from feeds.fantasy_prices import load_prices_from_store, refresh_prices  # noqa: E402
 from slack_app.handlers import handle  # noqa: E402
+from slack_app.poster import FakePoster  # noqa: E402
 from slack_app.reply import IN_CHANNEL, to_plain_text  # noqa: E402
 
 _TEAM_ID = "TCLI"
+# A fake channel id the CLI "runs the command in". It isn't a DM (those start
+# with "D"), so `/pitwall channel` behaves as if run in the league channel.
+_CHANNEL_ID = "C-CLI"
 
 
 async def _startup(skip_refresh: bool) -> None:
@@ -47,13 +51,26 @@ async def _startup(skip_refresh: bool) -> None:
 
 
 async def _run(text: str, user: str) -> None:
-    result = await handle(text, user_id=f"U-{user}", team_id=_TEAM_ID, display_name=user)
+    # A fake poster captures what `channel`/`ping` would post or DM, with no Slack.
+    poster = FakePoster()
+    result = await handle(
+        text,
+        user_id=f"U-{user}",
+        team_id=_TEAM_ID,
+        display_name=user,
+        channel_id=_CHANNEL_ID,
+        poster=poster,
+    )
     replies = result if isinstance(result, list) else [result]
     for reply in replies:
         who = "CHANNEL - everyone sees this" if reply.visibility == IN_CHANNEL else f"PRIVATE - only {user} sees this"
         # Slack renders <!date^…> tokens in the reader's time zone; the terminal
         # can't, so show the plain UTC fallback instead of the raw token.
         print(f"\n[{who}]\n{to_plain_text(reply.text)}\n")
+    for post in poster.posts:
+        print(f"[CHANNEL POST -> {post.channel_id}]\n{to_plain_text(post.text)}\n")
+    for dm in poster.dms:
+        print(f"[DM -> {dm.user_id}]\n{to_plain_text(dm.text)}\n")
 
 
 async def main() -> int:

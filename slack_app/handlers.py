@@ -32,7 +32,9 @@ from core.price_catalog import prices_staleness_note
 from core.types import Lineup as CoreLineup
 from core.types import Team as CoreTeam
 from openf1.health import openf1_health
+from slack_app.actions import IM_IN, PING_OK
 from slack_app.openf1_client import OpenF1Paused, build_client
+from slack_app.poster import Poster
 from slack_app.reply import IN_CHANNEL, Reply, slack_date
 
 _HELP = (
@@ -44,6 +46,8 @@ _HELP = (
     "• `/pitwall lock <lineup>` — lock your call for the next race (private; a one-liner tells the channel you're in)\n"
     "• `/pitwall score [race]` — your locked call vs mine vs the result (posts to the channel)\n"
     "• `/pitwall record` — your season so far vs mine (posts to the channel)\n"
+    "• `/pitwall channel` — run it in the league channel (invite me first) to set where I post\n"
+    "• `/pitwall ping` — I DM you, so you can check DMs and buttons reach you\n"
     "• `/pitwall forget` — erase everything I store about you\n"
     "• `/pitwall help` — this list"
 )
@@ -534,6 +538,110 @@ async def _handle_record(args: str, user_id: str, team_id: str, display_name: st
     return Reply("\n".join(lines), visibility=IN_CHANNEL)
 
 
+def _channel_intro_blocks(text: str) -> list[dict]:
+    """The intro message: what the bot does, the post budget, and an "I'm in" button."""
+    return [
+        {"type": "section", "text": {"type": "mrkdwn", "text": text}},
+        {
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "👋 I'm in", "emoji": True},
+                    "action_id": IM_IN,
+                    "value": "",  # comma-separated ids of who has clicked
+                }
+            ],
+        },
+    ]
+
+
+_CHANNEL_INTRO = (
+    "👋 I'm PitWallAI. From now on I'll drop the odd update in this channel on race "
+    "weekends — lock reminders, the ownership reveal, how the league scored. At most "
+    "4 posts a race week, and you can always run `/pitwall` commands yourself. "
+    "Tap below so I know you're here."
+)
+
+
+async def _handle_channel(
+    args: str,
+    user_id: str,
+    team_id: str,
+    display_name: str,
+    channel_id: str | None,
+    poster: Poster | None,
+) -> Reply:
+    """Set this channel as the league channel, or show the current one."""
+    if args.strip().lower() == "status":
+        config = await store.get_league_config(team_id)
+        if config is None:
+            return Reply(
+                "No league channel set yet. Run `/pitwall channel` in the channel "
+                "you want me to post in (invite me there first)."
+            )
+        admin = f"<@{config.admin_user_id}>" if config.admin_user_id else "nobody right now"
+        return Reply(f"League channel: <#{config.channel_id}>, set by {admin}.")
+
+    # A slash command run in a DM carries a channel_id starting with "D".
+    if channel_id is None or channel_id.startswith("D"):
+        return Reply(
+            "Run `/pitwall channel` in the league channel, not here — that's where "
+            "I'll post, and I need to be a member of it."
+        )
+
+    assert poster is not None  # app.py and the CLI always pass one
+    result = await poster.post(channel_id, _CHANNEL_INTRO, blocks=_channel_intro_blocks(_CHANNEL_INTRO))
+    if result.ok:
+        await store.set_league_config(team_id, channel_id, user_id)
+        return Reply(
+            "Done — this is the league channel now, and you're the admin for it. "
+            "If one of my posts ever fails, I'll DM you so you can sort it."
+        )
+    if result.error == "not_in_channel":
+        return Reply(
+            "Invite me first: `/invite @PitWallAI`, then run `/pitwall channel` again."
+        )
+    return Reply(f"Couldn't post here — Slack said `{result.error}`.")
+
+
+_PING_TEXT = (
+    "DMs from PitWallAI work. If you can read this, I can reach you with lock "
+    "reminders and score updates. Tap *Got it* so we both know buttons work too."
+)
+
+
+def _ping_blocks(text: str) -> list[dict]:
+    return [
+        {"type": "section", "text": {"type": "mrkdwn", "text": text}},
+        {
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "Got it", "emoji": True},
+                    "action_id": PING_OK,
+                    "value": "ok",
+                }
+            ],
+        },
+    ]
+
+
+async def _handle_ping(
+    args: str, user_id: str, team_id: str, display_name: str, poster: Poster | None
+) -> Reply:
+    """DM the caller so they can check DMs and buttons before brief 014 relies on them."""
+    assert poster is not None
+    result = await poster.dm(user_id, _PING_TEXT, blocks=_ping_blocks(_PING_TEXT))
+    if result.ok:
+        return Reply("Just sent you a DM — open it and tap *Got it*.")
+    return Reply(
+        f"Couldn't DM you — Slack said `{result.error}`. Open PitWallAI's Messages "
+        "tab in Slack, then try `/pitwall ping` again."
+    )
+
+
 async def _handle_help(args: str, user_id: str, team_id: str, display_name: str) -> Reply:
     return Reply(_HELP)
 
@@ -551,7 +659,13 @@ _HANDLERS = {
 
 
 async def handle(
-    text: str, user_id: str, team_id: str, display_name: str | None = None
+    text: str,
+    user_id: str,
+    team_id: str,
+    display_name: str | None = None,
+    *,
+    channel_id: str | None = None,
+    poster: Poster | None = None,
 ) -> Reply | list[Reply]:
     """Route ``/pitwall <text>`` to a subcommand handler.
 
@@ -560,11 +674,19 @@ async def handle(
     the help text too, so a typo is never a dead end. Most handlers return one
     :class:`Reply`; ``lock`` returns a list (a private confirmation plus a public
     one-liner), so ``app.py`` posts each in turn.
+
+    ``channel_id`` and ``poster`` are supplied by the caller (``app.py`` from the
+    slash payload, the CLI with a fake one) and only used by ``channel``/``ping``.
     """
     parts = text.strip().split(maxsplit=1)
     command = parts[0].lower() if parts else "help"
     args = parts[1] if len(parts) > 1 else ""
+    display_name = display_name or user_id
+    if command == "channel":
+        return await _handle_channel(args, user_id, team_id, display_name, channel_id, poster)
+    if command == "ping":
+        return await _handle_ping(args, user_id, team_id, display_name, poster)
     handler = _HANDLERS.get(command)
     if handler is None:
         return Reply(f"I don't know `{command}`.\n\n{_HELP}")
-    return await handler(args, user_id, team_id, display_name or user_id)
+    return await handler(args, user_id, team_id, display_name)

@@ -27,6 +27,8 @@ Everything goes through one slash command. Personal things are only visible to y
 | `/pitwall lock <lineup> captain XXX` | Lock your call for the next race | You, plus a one-liner in the channel (no lineup shown) |
 | `/pitwall score [race]` | Your locked call vs the bot vs the result vs the perfect lineup | Channel |
 | `/pitwall record` | Your season so far vs the bot | Channel |
+| `/pitwall channel` | Set the channel the bot posts league updates in — run it **in that channel**, after inviting the bot | You, plus an intro post in the channel |
+| `/pitwall ping` | The bot DMs you, so you can check its DMs and buttons reach you | Only you, plus a DM to you |
 | `/pitwall forget` | Erase everything the bot stores about you | Only you |
 
 Drivers and constructors can be three-letter codes (`ANT`, `MER`) or names (`antonelli`, `mercedes`). Add a chip with `3x`, `limitless`, `wildcard`, `no negative`, `autopilot` or `final fix`.

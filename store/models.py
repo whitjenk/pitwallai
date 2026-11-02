@@ -36,3 +36,18 @@ class LockedLineup(BaseModel):
     captain: str | None = None
     model_lineup: dict | None = None
     locked_at: datetime | None = None
+
+
+class LeagueConfig(BaseModel):
+    """Which channel the bot posts the league's social content in (brief 013).
+
+    Keyed by Slack team (workspace). ``admin_user_id`` is whoever ran
+    ``/pitwall channel`` — the one the bot DMs if a post ever fails. It's the
+    only per-user field here, and ``store.forget_user`` nulls it while keeping
+    the channel.
+    """
+
+    team_id: str
+    channel_id: str
+    admin_user_id: str | None = None
+    set_at: datetime | None = None

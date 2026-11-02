@@ -10,13 +10,16 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 
 from loguru import logger
 
 import store
 from core.price_catalog import load_price_catalog
 from feeds.fantasy_prices import load_prices_from_store, refresh_prices
+from slack_app.actions import handle_action
 from slack_app.handlers import handle
+from slack_app.poster import SlackPoster
 from slack_app.scheduler import start_scheduler
 
 # How often the background task re-fetches F1 Fantasy prices.
@@ -39,6 +42,7 @@ def build_app():
     from slack_bolt.async_app import AsyncApp
 
     app = AsyncApp(token=os.environ[BOT_TOKEN_ENV])
+    poster = SlackPoster(app.client)
 
     @app.command("/pitwall")
     async def pitwall_command(ack, command, respond):  # type: ignore[no-untyped-def]
@@ -48,12 +52,26 @@ def build_app():
             user_id=command["user_id"],
             team_id=command.get("team_id", ""),
             display_name=command.get("user_name"),
+            channel_id=command.get("channel_id"),
+            poster=poster,
         )
         # A handler returns one Reply, or several (e.g. `lock`: a private
         # confirmation plus a public one-liner). Post each in order.
         replies = result if isinstance(result, list) else [result]
         for reply in replies:
             await respond(text=reply.text, response_type=reply.visibility)
+
+    @app.action(re.compile(r"^pitwall:"))
+    async def pitwall_action(ack, body, respond):  # type: ignore[no-untyped-def]
+        # Socket Mode delivers clicks here; ack within 3s, then edit the message.
+        await ack()
+        update = await handle_action(
+            action_id=body["actions"][0]["action_id"],
+            user_id=body["user"]["id"],
+            message=body.get("message", {}),
+        )
+        if update is not None:
+            await respond(text=update.text, blocks=update.blocks, replace_original=True)
 
     return app
 

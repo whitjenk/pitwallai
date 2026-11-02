@@ -6,14 +6,44 @@ verify. It's installed only in our workspace, so there's no Marketplace review.
 
 Follow these steps from scratch. They take about five minutes.
 
+## Updating an existing install
+
+Already have PitWallAI installed from an earlier version? When a release changes
+the manifest (new scopes, interactivity, the Messages tab), update it like this —
+no need to recreate the app:
+
+1. In the app settings, open **Features** → **App Manifest**, switch to **YAML**,
+   and paste the current [`slack_app/manifest.yaml`](../slack_app/manifest.yaml)
+   over what's there. Save.
+2. New scopes mean a **reinstall**: Slack prompts you to reinstall, or go to
+   **OAuth & Permissions** → **Reinstall to Workspace** → **Allow**.
+3. After reinstalling, check the **Bot User OAuth Token** (`xoxb-…`) on **OAuth &
+   Permissions**. If it **changed**, update `SLACK_BOT_TOKEN` both locally and in
+   the Railway service's **Variables** (section 6.1), then redeploy. The
+   app-level `xapp-…` token doesn't change on a reinstall.
+4. Then point the bot at the league channel — section 5.
+
+> **Don't enable token rotation** when you update (it's off in the manifest).
+> See the warning in section 1 for why.
+
 ## 1. Create the app from the manifest
 
 1. Go to <https://api.slack.com/apps> and click **Create New App** → **From a
    manifest**.
 2. Pick our workspace.
 3. Choose **YAML** and paste the contents of [`slack_app/manifest.yaml`](../slack_app/manifest.yaml).
-4. Review (it asks for the `commands` and `chat:write` scopes and turns Socket
-   Mode on) and click **Create**.
+4. Review and click **Create**. The manifest asks for the `commands`,
+   `chat:write` and `im:write` scopes, turns Socket Mode on, turns
+   **interactivity** on (so buttons work over the socket — no request URL
+   needed), and enables the **Messages tab** (read-only) so people can see the
+   bot's DMs.
+
+> **Don't enable token rotation.** The manifest keeps
+> `token_rotation_enabled: false`. If you turn rotation on, Slack starts expiring
+> the `xoxb-` bot token on a schedule, and the long-running Socket Mode process
+> keeps using the stale one until it simply stops working — and getting back to a
+> clean state means recreating the install. We've been bitten by this once
+> already. Leave rotation off.
 
 ## 2. Get the two tokens
 
@@ -49,7 +79,7 @@ more than 48 hours old, `team` and `picks` replies add a short line saying so. S
 
 ## 4. Try it in Slack
 
-In any channel or DM in our workspace (every reply below is visible only to you):
+In any channel or DM in our workspace:
 
 ```
 /pitwall help
@@ -66,14 +96,45 @@ In any channel or DM in our workspace (every reply below is visible only to you)
   suggestions for your saved team.
 - `forget` erases everything the app stores about you.
 
-## 5. Deploy on Railway
+**Not every reply is private.** Personal reads (`team`, `picks`, and your own
+`lock` confirmation) are visible only to you; league banter (`grade`, `score`,
+`record`, and a one-line "locked in" note) posts to the whole channel. The
+[README commands table](../README.md#commands) lists exactly who sees what.
+
+## 5. Point the bot at the league channel
+
+The bot only posts in a channel it's been invited to (we don't give it
+`chat:write.public` — inviting it is the opt-in). Do this once:
+
+1. In the channel you want league updates in, run `/invite @PitWallAI`.
+2. Run `/pitwall channel` **in that channel**. The bot posts a short intro with a
+   "👋 I'm in" button and remembers the channel; whoever ran it becomes the admin
+   the bot DMs if a post ever fails.
+   - Run it in a DM and it just tells you to run it in the channel instead.
+   - Run `/pitwall channel` before inviting the bot and it points you at
+     `/invite @PitWallAI` first.
+   - Run `/pitwall channel` in a different channel later to move where it posts.
+   - `/pitwall channel status` shows the current channel and admin.
+3. Run `/pitwall ping`. The bot DMs you with a "Got it" button — that's the
+   quick check that DMs and buttons reach you before any scheduled content relies
+   on them. For the DM to arrive, the Messages tab must be enabled (it is, via the
+   manifest in section 1).
+
+**Scheduled posts only fire while the process is running.** They come from the
+in-process scheduler, so nothing posts while the bot is stopped. Deploy on
+Railway (section 6) before inviting the league, so updates land even when your
+laptop is closed. And don't run the bot locally and on Railway at the same time
+with the same tokens — two sockets double every reply. When you run locally for a
+quick test, set `PITWALL_SCHEDULER=off` so only Railway posts.
+
+## 6. Deploy on Railway
 
 This runs the same `python -m slack_app` process on [Railway](https://railway.app)
 so the bot is always on, instead of only while your laptop is. There's **one
 service, no public URL** (Socket Mode connects out to Slack), and a **volume** so
 saved teams and locked lineups survive deploys.
 
-Plan: **Hobby** ($5/month, includes $5 of usage). Step 4 adds a $10 hard limit as
+Plan: **Hobby** ($5/month, includes $5 of usage). Step 6.4 adds a $10 hard limit as
 a safety cap.
 
 These steps assume the PitWallAI service already exists on Railway from the
@@ -84,7 +145,7 @@ WhatsApp days. We're repurposing it, not creating a new one.
 > Python as CI. The project doesn't import on 3.13, so leave that file alone — no
 > `PYTHON_VERSION`/`NIXPACKS_PYTHON_VERSION` override in the service variables.
 
-### 5.1 Swap the environment variables
+### 6.1 Swap the environment variables
 
 Open the PitWallAI service → **Variables**.
 
@@ -101,13 +162,13 @@ Open the PitWallAI service → **Variables**.
 `pitwall.sqlite` file (and the `/data` directory if it's somehow missing) on
 first run.
 
-### 5.2 Remove the public domain
+### 6.2 Remove the public domain
 
 Open the service → **Settings** → **Networking**. If there's a **public domain**
 (a `*.up.railway.app` URL from the webhook days), **remove it**. Socket Mode needs
 no inbound traffic, and an open domain to nothing is just surface area.
 
-### 5.3 Add the volume (this is what makes teams survive a redeploy)
+### 6.3 Add the volume (this is what makes teams survive a redeploy)
 
 Railway wipes a service's filesystem on every deploy. A **volume** is a disk that
 stays attached across deploys, so the SQLite file on it persists.
@@ -121,21 +182,21 @@ After this deploy, the DB lives at `/data/pitwall.sqlite` on the volume. A later
 redeploy reuses the same volume, so saved teams and locked lineups are still
 there.
 
-### 5.4 Cap usage
+### 6.4 Cap usage
 
 Workspace **Settings** → **Usage** → set a **hard limit of $10**. On Hobby, usage
 over the included $5 bills per-use; the hard limit stops a runaway (e.g. a crash
 loop — `railway.toml` already caps restarts at 5) from running up a bill. At the
 hard limit Railway stops the service rather than charging past it.
 
-### 5.5 Turn off the WhatsApp webhook
+### 6.5 Turn off the WhatsApp webhook
 
 In the **Meta developer dashboard** (developers.facebook.com → your WhatsApp app
 → **WhatsApp** → **Configuration**), **unsubscribe / remove the webhook callback
 URL** that pointed at the old Railway domain. Nothing is listening there anymore;
 this stops Meta from trying to deliver to a dead endpoint.
 
-### 5.6 Later — delete the old Postgres (your call)
+### 6.6 Later — delete the old Postgres (your call)
 
 The old Railway **Postgres** service held WhatsApp subscriber data the Slack app
 doesn't use. Once you're happy the Slack bot is working and you don't need that

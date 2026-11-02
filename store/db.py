@@ -11,11 +11,11 @@ import os
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy import JSON, Float, Integer, String, delete, event, select
+from sqlalchemy import JSON, Float, Integer, String, delete, event, func, select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-from store.models import LockedLineup, Team
+from store.models import LeagueConfig, LockedLineup, Team
 
 DEFAULT_DB_PATH = "./pitwall.sqlite"
 
@@ -75,6 +75,41 @@ class JobRunRow(Base):
 
     key: Mapped[str] = mapped_column(String, primary_key=True)
     ran_at: Mapped[datetime] = mapped_column()
+
+
+class LeagueConfigRow(Base):
+    """The one channel the bot posts league content in, keyed by workspace.
+
+    ``admin_user_id`` is the only per-user field; ``forget_user`` nulls it and
+    leaves the channel in place. ``create_all`` adds this table to an existing
+    SQLite file without touching the others.
+    """
+
+    __tablename__ = "league_config"
+
+    team_id: Mapped[str] = mapped_column(String, primary_key=True)
+    channel_id: Mapped[str] = mapped_column(String)
+    admin_user_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    set_at: Mapped[datetime] = mapped_column()
+
+
+class BotPostRow(Base):
+    """One row per scheduled post the bot makes on its own (brief 013).
+
+    Holds no per-user data — it records *that* the bot posted, so the weekly cap
+    (at most 4 scheduled posts per ISO week) can count them and later briefs can
+    thread or edit by ``ts``. Command-triggered posts and DMs aren't recorded.
+    """
+
+    __tablename__ = "bot_posts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    team_id: Mapped[str] = mapped_column(String)
+    channel_id: Mapped[str] = mapped_column(String)
+    kind: Mapped[str] = mapped_column(String)
+    iso_week: Mapped[str] = mapped_column(String)
+    ts: Mapped[str] = mapped_column(String)
+    posted_at: Mapped[datetime] = mapped_column()
 
 
 def _db_path() -> str:
@@ -209,7 +244,11 @@ async def list_locked_for_race(race_key: str) -> list[LockedLineup]:
 
 
 async def forget_user(slack_user_id: str) -> None:
-    """Remove the user from every table that stores their data."""
+    """Remove the user from every table that stores their data.
+
+    The league channel itself isn't the user's data, so it stays; only the
+    ``admin_user_id`` pointing at this user is nulled.
+    """
     async with _session()() as s:
         await s.execute(delete(UserRow).where(UserRow.slack_user_id == slack_user_id))
         await s.execute(
@@ -217,7 +256,62 @@ async def forget_user(slack_user_id: str) -> None:
                 LockedLineupRow.slack_user_id == slack_user_id
             )
         )
+        await s.execute(
+            update(LeagueConfigRow)
+            .where(LeagueConfigRow.admin_user_id == slack_user_id)
+            .values(admin_user_id=None)
+        )
         await s.commit()
+
+
+async def get_league_config(team_id: str) -> LeagueConfig | None:
+    """The channel the bot posts in for this workspace, or ``None`` if unset."""
+    async with _session()() as s:
+        return _model(LeagueConfig, await s.get(LeagueConfigRow, team_id))
+
+
+async def set_league_config(
+    team_id: str, channel_id: str, admin_user_id: str | None
+) -> None:
+    """Set (or move) the league channel for a workspace and who set it."""
+    async with _session()() as s:
+        row = await s.get(LeagueConfigRow, team_id)
+        if row is None:
+            row = LeagueConfigRow(team_id=team_id)
+            s.add(row)
+        row.channel_id = channel_id
+        row.admin_user_id = admin_user_id
+        row.set_at = _now()
+        await s.commit()
+
+
+async def record_bot_post(
+    team_id: str, channel_id: str, kind: str, iso_week: str, ts: str
+) -> None:
+    """Record one scheduled post the bot made, for the weekly cap and threading."""
+    async with _session()() as s:
+        s.add(
+            BotPostRow(
+                team_id=team_id,
+                channel_id=channel_id,
+                kind=kind,
+                iso_week=iso_week,
+                ts=ts,
+                posted_at=_now(),
+            )
+        )
+        await s.commit()
+
+
+async def count_bot_posts(team_id: str, iso_week: str) -> int:
+    """How many scheduled posts the bot made in ``iso_week`` for this workspace."""
+    async with _session()() as s:
+        stmt = (
+            select(func.count())
+            .select_from(BotPostRow)
+            .where(BotPostRow.team_id == team_id, BotPostRow.iso_week == iso_week)
+        )
+        return int((await s.execute(stmt)).scalar_one())
 
 
 async def cache_get(key: str, *, allow_stale: bool = False) -> object | None:

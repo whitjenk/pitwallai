@@ -9,7 +9,9 @@ from __future__ import annotations
 from store.db import (
     cache_get,
     cache_set,
+    count_bot_posts,
     forget_user,
+    get_league_config,
     get_locked,
     get_team,
     init_db,
@@ -18,16 +20,21 @@ from store.db import (
     list_teams,
     lock_lineup,
     mark_job_run,
+    record_bot_post,
+    set_league_config,
     upsert_team,
 )
-from store.models import LockedLineup, Team
+from store.models import LeagueConfig, LockedLineup, Team
 
 __all__ = [
+    "LeagueConfig",
     "LockedLineup",
     "Team",
     "cache_get",
     "cache_set",
+    "count_bot_posts",
     "forget_user",
+    "get_league_config",
     "get_locked",
     "get_team",
     "init_db",
@@ -36,5 +43,7 @@ __all__ = [
     "list_teams",
     "lock_lineup",
     "mark_job_run",
+    "record_bot_post",
+    "set_league_config",
     "upsert_team",
 ]

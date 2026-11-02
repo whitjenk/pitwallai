@@ -17,10 +17,11 @@ from loguru import logger
 import store
 from core.price_catalog import load_price_catalog
 from feeds.fantasy_prices import load_prices_from_store, refresh_prices
+from slack_app import reminders
 from slack_app.actions import handle_action
 from slack_app.handlers import handle
 from slack_app.poster import SlackPoster
-from slack_app.scheduler import start_scheduler
+from slack_app.scheduler import default_jobs, start_scheduler
 
 # How often the background task re-fetches F1 Fantasy prices.
 PRICE_REFRESH_INTERVAL_SECONDS = 12 * 3600
@@ -69,6 +70,8 @@ def build_app():
             action_id=body["actions"][0]["action_id"],
             user_id=body["user"]["id"],
             message=body.get("message", {}),
+            team_id=body.get("team", {}).get("id", ""),
+            poster=poster,
         )
         if update is not None:
             await respond(text=update.text, blocks=update.blocks, replace_original=True)
@@ -101,8 +104,13 @@ async def run() -> None:
     await load_prices_from_store()
     app = build_app()
     refresh_task = asyncio.create_task(_price_refresh_loop())
-    # Warms the OpenF1 cache as each live-session lockout lifts (None if disabled).
-    scheduler_task = start_scheduler()
+    # Cache warm-ups as each lockout lifts, plus the lock reminder + auto-lock for
+    # the next weekend (None if the scheduler is disabled). The reminder jobs need
+    # a poster to DM players; it wraps the same Bolt client the handlers use.
+    poster = SlackPoster(app.client)
+    scheduler_task = start_scheduler(
+        lambda: default_jobs() + reminders.reminder_jobs(poster)
+    )
     handler = AsyncSocketModeHandler(app, os.environ[APP_TOKEN_ENV])
     logger.info("PitWallAI Slack app starting (Socket Mode)…")
     try:

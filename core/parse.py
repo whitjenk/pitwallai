@@ -72,6 +72,10 @@ _CHIP_WORDS: list[tuple[str, str]] = [
     ("triple captain", "extra_drs"), ("final fix", "final_fix"), ("autopilot", "autopilot"),
 ]
 
+# A stated remaining budget at or above this looks like someone typed the $100M
+# cap instead of the money left after their team (which is a few million at most).
+BUDGET_LOOKS_LIKE_CAP_M = 30.0
+
 # Words in a team command that are grammar, not asset names — skipped when
 # hunting for unrecognised codes.
 _TEAM_STOPWORDS = frozenset(
@@ -226,8 +230,13 @@ def parse_team_command(text: str) -> ParsedTeam:
             f"Need exactly {CONSTRUCTORS_PER_TEAM} constructors (found {len(result.constructors)})."
         )
     if result.budget_m is None:
-        result.errors.append("Tell me your budget, e.g. `budget 2.5`.")
-    elif not (0.0 <= result.budget_m <= BUDGET_CAP_M):
+        result.errors.append("Tell me the money left after your team, e.g. `budget 1.5`.")
+    elif result.budget_m >= BUDGET_LOOKS_LIKE_CAP_M:
+        result.errors.append(
+            "That looks like the $100M cap. `budget` is the money left after your "
+            "team (e.g. `budget 1.5`)."
+        )
+    elif result.budget_m < 0.0:
         result.errors.append(
             f"Budget ${result.budget_m:.1f}M is outside the $0–{BUDGET_CAP_M:.0f}M cap."
         )

@@ -15,7 +15,7 @@ import pytest
 import store
 from core.types import Lineup as CoreLineup
 from core.types import Team as CoreTeam
-from slack_app import handlers
+from slack_app import handlers, reminders
 from slack_app.reply import EPHEMERAL, IN_CHANNEL
 from store import db as store_db
 
@@ -103,6 +103,44 @@ async def test_team_wrong_count_rejected(tmp_db):
     assert reply.visibility == EPHEMERAL
     assert "drivers" in reply.text.lower()
     assert await store.get_team("U1") is None
+
+
+# ── budget wording (brief 014, issue 5) ───────────────────────────────────────
+@pytest.mark.parametrize("budget", ["100", "30"])
+async def test_team_cap_sized_budget_rejected_with_money_left_hint(tmp_db, budget):
+    await store.init_db()
+    reply = await _call(f"team HAM LEC NOR PIA VER MCL FER budget {budget} transfers 2")
+    assert reply.visibility == EPHEMERAL
+    assert "money left after your team" in reply.text
+    assert await store.get_team("U1") is None
+
+
+@pytest.mark.parametrize("budget", ["29.9", "1.5"])
+async def test_team_realistic_budget_accepted(tmp_db, budget):
+    await store.init_db()
+    reply = await _call(f"team HAM LEC NOR PIA VER MCL FER budget {budget} transfers 2")
+    assert "Saved" in reply.text
+    assert (await store.get_team("U1")).budget_m == pytest.approx(float(budget))
+
+
+# ── dms off/on (brief 014) ─────────────────────────────────────────────────────
+async def test_dms_off_then_on_persists(tmp_db):
+    await store.init_db()
+    off = await _call("dms off")
+    assert off.visibility == EPHEMERAL
+    assert "locks automatically" in off.text
+    assert await store.get_dms_enabled("U1") is False
+
+    on = await _call("dms on")
+    assert await store.get_dms_enabled("U1") is True
+    assert "dms off" in on.text.lower()
+
+
+async def test_dms_bare_shows_current_setting(tmp_db):
+    await store.init_db()
+    await _call("dms off")
+    reply = await _call("dms")
+    assert "off" in reply.text.lower()
 
 
 # ── team: show ────────────────────────────────────────────────────────────────
@@ -250,7 +288,7 @@ async def test_grade_without_lineup_hints_privately(tmp_db):
 
 async def test_lock_is_private_plus_a_channel_line_that_hides_the_lineup(tmp_db, monkeypatch):
     await store.init_db()
-    monkeypatch.setattr(handlers, "project_race", _fake_project_race)
+    monkeypatch.setattr(reminders, "project_race", _fake_project_race)
     replies = await _call(f"lock {_LINEUP}")
     assert isinstance(replies, list) and len(replies) == 2
 
@@ -267,7 +305,7 @@ async def test_lock_is_private_plus_a_channel_line_that_hides_the_lineup(tmp_db,
 
 async def test_lock_twice_replaces(tmp_db, monkeypatch):
     await store.init_db()
-    monkeypatch.setattr(handlers, "project_race", _fake_project_race)
+    monkeypatch.setattr(reminders, "project_race", _fake_project_race)
     await _call(f"lock {_LINEUP}")
     race_key = handlers._next_race_key()
     first = await store.get_locked("U1", race_key)
@@ -293,7 +331,7 @@ async def test_score_with_nothing_locked_hints(tmp_db):
 
 async def test_score_posts_result_with_bot_and_perfect(tmp_db, monkeypatch):
     await store.init_db()
-    monkeypatch.setattr(handlers, "project_race", _fake_project_race)
+    monkeypatch.setattr(reminders, "project_race", _fake_project_race)
     monkeypatch.setattr(handlers, "score_lineup", _fake_score)
     await _call(f"lock {_LINEUP}")
 
@@ -314,7 +352,7 @@ async def test_record_with_zero_races_hints(tmp_db):
 
 async def test_record_tallies_wins_against_the_bot(tmp_db, monkeypatch):
     await store.init_db()
-    monkeypatch.setattr(handlers, "project_race", _fake_project_race)
+    monkeypatch.setattr(reminders, "project_race", _fake_project_race)
     monkeypatch.setattr(handlers, "score_lineup", _fake_score)
     await _call(f"lock {_LINEUP}")
 
@@ -326,7 +364,7 @@ async def test_record_tallies_wins_against_the_bot(tmp_db, monkeypatch):
 async def test_help_lists_league_commands():
     reply = await _call("help")
     assert reply.visibility == EPHEMERAL
-    for cmd in ("grade", "lock", "score", "record"):
+    for cmd in ("grade", "lock", "score", "record", "dms"):
         assert cmd in reply.text
 
 

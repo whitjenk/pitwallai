@@ -11,6 +11,7 @@ from store.db import (
     cache_set,
     count_bot_posts,
     forget_user,
+    get_dms_enabled,
     get_league_config,
     get_locked,
     get_team,
@@ -21,6 +22,7 @@ from store.db import (
     lock_lineup,
     mark_job_run,
     record_bot_post,
+    set_dms_enabled,
     set_league_config,
     upsert_team,
 )
@@ -34,6 +36,7 @@ __all__ = [
     "cache_set",
     "count_bot_posts",
     "forget_user",
+    "get_dms_enabled",
     "get_league_config",
     "get_locked",
     "get_team",
@@ -44,6 +47,7 @@ __all__ = [
     "lock_lineup",
     "mark_job_run",
     "record_bot_post",
+    "set_dms_enabled",
     "set_league_config",
     "upsert_team",
 ]

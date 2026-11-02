@@ -16,8 +16,15 @@ from dataclasses import dataclass
 
 from loguru import logger
 
+from slack_app import reminders
+from slack_app.poster import Poster
+
 IM_IN = "pitwall:im_in"
 PING_OK = "pitwall:ping_ok"
+# The lock-reminder buttons are owned by ``reminders`` (so it stays import-cycle
+# free); re-exported here as the single list of action ids the app routes.
+LOCK_SAME = reminders.LOCK_SAME
+LOCK_EDIT = reminders.LOCK_EDIT
 
 
 @dataclass(frozen=True)
@@ -84,11 +91,30 @@ def _ping_ok(message: dict) -> ActionUpdate:
     )
 
 
-async def handle_action(*, action_id: str, user_id: str, message: dict) -> ActionUpdate | None:
-    """Route a ``pitwall:`` button click. Unknown ids are ignored (logged)."""
+async def handle_action(
+    *,
+    action_id: str,
+    user_id: str,
+    message: dict,
+    team_id: str = "",
+    poster: Poster | None = None,
+) -> ActionUpdate | None:
+    """Route a ``pitwall:`` button click. Unknown ids are ignored (logged).
+
+    ``team_id`` and ``poster`` come from ``app.py`` (the action payload and the
+    shared poster); the ✅ lock button uses them for the channel one-liner.
+    """
     if action_id == IM_IN:
         return _im_in(user_id, message)
     if action_id == PING_OK:
         return _ping_ok(message)
+    if action_id == LOCK_SAME:
+        text, blocks = await reminders.on_lock_same(
+            user_id=user_id, message=message, team_id=team_id, poster=poster
+        )
+        return ActionUpdate(text=text, blocks=blocks)
+    if action_id == LOCK_EDIT:
+        text, blocks = reminders.on_lock_edit(message)
+        return ActionUpdate(text=text, blocks=blocks)
     logger.info("unknown action id {} — acked and ignored", action_id)
     return None

@@ -63,6 +63,20 @@ class CacheRow(Base):
     ttl_seconds: Mapped[int] = mapped_column(Integer)
 
 
+class JobRunRow(Base):
+    """One row per scheduler job that has already run successfully.
+
+    Holds no per-user data — it records *that* a keyed job ran, so a restart
+    doesn't re-run finished jobs. ``create_all`` adds this new table to an
+    existing SQLite file (it never alters existing tables).
+    """
+
+    __tablename__ = "job_runs"
+
+    key: Mapped[str] = mapped_column(String, primary_key=True)
+    ran_at: Mapped[datetime] = mapped_column()
+
+
 def _db_path() -> str:
     return os.environ.get("PITWALL_DB_PATH", DEFAULT_DB_PATH)
 
@@ -206,12 +220,19 @@ async def forget_user(slack_user_id: str) -> None:
         await s.commit()
 
 
-async def cache_get(key: str) -> object | None:
-    """Return a cached payload, or ``None`` if missing or expired."""
+async def cache_get(key: str, *, allow_stale: bool = False) -> object | None:
+    """Return a cached payload, or ``None`` if missing (or expired).
+
+    With ``allow_stale=True`` an expired row is still returned — used during an
+    OpenF1 live-session pause, when a stale row is far better than nothing and no
+    fresh fetch is possible anyway.
+    """
     async with _session()() as s:
         row = await s.get(CacheRow, key)
         if row is None:
             return None
+        if allow_stale:
+            return row.payload
         age = (_now() - _aware(row.fetched_at)).total_seconds()
         if age > row.ttl_seconds:
             return None
@@ -227,6 +248,23 @@ async def cache_set(key: str, payload: object, ttl_seconds: int) -> None:
         row.payload = payload
         row.fetched_at = _now()
         row.ttl_seconds = ttl_seconds
+        await s.commit()
+
+
+async def job_has_run(key: str) -> bool:
+    """True if the scheduler already recorded ``key`` as finished."""
+    async with _session()() as s:
+        return await s.get(JobRunRow, key) is not None
+
+
+async def mark_job_run(key: str) -> None:
+    """Record that scheduler job ``key`` finished, so it never re-runs."""
+    async with _session()() as s:
+        row = await s.get(JobRunRow, key)
+        if row is None:
+            row = JobRunRow(key=key)
+            s.add(row)
+        row.ran_at = _now()
         await s.commit()
 
 

@@ -194,6 +194,40 @@ async def test_expired_cache_returns_none(tmp_db):
     assert await store.cache_get("stale") is None
 
 
+async def test_allow_stale_returns_expired_rows(tmp_db):
+    """brief 012: allow_stale serves an expired row (used during a data pause)."""
+    await store.init_db()
+    past = datetime.now(UTC) - timedelta(hours=1)
+    real_now = store_db._now
+    store_db._now = lambda: past
+    try:
+        await store.cache_set("stale", {"v": 7}, ttl_seconds=1)
+    finally:
+        store_db._now = real_now
+    assert await store.cache_get("stale") is None  # expired by default
+    assert await store.cache_get("stale", allow_stale=True) == {"v": 7}
+
+
+async def test_job_runs_record_and_query(tmp_db):
+    await store.init_db()
+    assert await store.job_has_run("warmup:x") is False
+    await store.mark_job_run("warmup:x")
+    assert await store.job_has_run("warmup:x") is True
+    # Marking again is idempotent (primary key on the job key).
+    await store.mark_job_run("warmup:x")
+    assert await store.job_has_run("warmup:x") is True
+
+
+async def test_forget_user_does_not_touch_job_runs(tmp_db):
+    """job_runs holds no per-user data, so forget_user leaves it alone."""
+    await store.init_db()
+    await store.upsert_team(_team(user="U1"))
+    await store.mark_job_run("warmup:2026_interlagos:FP1:5")
+    await store.forget_user("U1")
+    assert await store.get_team("U1") is None
+    assert await store.job_has_run("warmup:2026_interlagos:FP1:5") is True
+
+
 def test_store_imports_nothing_forbidden():
     """store/ must not import from db/, whatsapp/, core/, intelligence/."""
     forbidden = {"db", "whatsapp", "core", "intelligence"}

@@ -8,6 +8,8 @@ so each test also asserts the reply is ``ephemeral``.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 
 import store
@@ -156,10 +158,15 @@ async def test_picks_degrades_on_error_without_stack_trace(tmp_db, monkeypatch):
     async def boom(team, race_key, client):
         raise RuntimeError("openf1 down")
 
+    # A mid-week instant with no session running, so the failure is classified
+    # as "unreachable" rather than a scheduled pause.
+    monkeypatch.setattr(handlers, "_now", lambda: datetime(2026, 11, 4, 12, 0, tzinfo=UTC))
     monkeypatch.setattr(handlers, "suggest_transfers", boom)
     reply = await _call("picks")
     assert reply.visibility == EPHEMERAL
-    assert "Couldn't" in reply.text
+    # Brief 012: a failed fetch (no scheduled pause) reads as "unreachable",
+    # never the old flat "Couldn't pull the picks", and never a stack trace.
+    assert "couldn't be reached" in reply.text.lower()
     assert "Traceback" not in reply.text and "RuntimeError" not in reply.text
 
 

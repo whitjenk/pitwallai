@@ -13,9 +13,11 @@ from store.db import (
     get_locked,
     get_team,
     init_db,
+    job_has_run,
     list_locked_for_race,
     list_teams,
     lock_lineup,
+    mark_job_run,
     upsert_team,
 )
 from store.models import LockedLineup, Team
@@ -29,8 +31,10 @@ __all__ = [
     "get_locked",
     "get_team",
     "init_db",
+    "job_has_run",
     "list_locked_for_race",
     "list_teams",
     "lock_lineup",
+    "mark_job_run",
     "upsert_team",
 ]
